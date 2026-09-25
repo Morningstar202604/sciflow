@@ -74,6 +74,14 @@ export interface PipelineStep {
   retryCount: number;
 }
 
+export interface ReactTraceStep {
+  round: number;
+  thought: string;
+  action: string;
+  query: string;
+  found: number;
+}
+
 export interface PipelineTask {
   id: string;
   projectId: string;
@@ -83,6 +91,7 @@ export interface PipelineTask {
   status: 'running' | 'awaiting_confirmation' | 'completed' | 'failed';
   steps: PipelineStep[];
   retryCount: number;
+  trace: string; // JSON: ReactTraceStep[]
   lastError: string;
   createdAt: number;
   updatedAt: number;
@@ -142,7 +151,7 @@ export interface EvidenceResult {
 }
 
 export interface AppSettings {
-  ai: { baseUrl: string; model: string; configured: boolean; models: string[] };
+  ai: { baseUrl: string; model: string; fastModel: string; strongModel: string; configured: boolean; models: string[] };
   env: { node: string; database: string; port: number };
   sources: { literature: string[] };
 }
@@ -151,4 +160,19 @@ export interface SelfCheck {
   database: { ok: boolean; path: string };
   ai: { configured: boolean; ok: boolean; model: string; latencyMs: number; detail: string };
   timestamp: number;
+}
+
+export interface MemoryItem {
+  id: string;
+  type: 'episodic' | 'procedural';
+  projectId: string | null;
+  content: string;
+  keywords: string[];
+  createdAt: number;
+}
+
+export interface McpToolInfo {
+  name: string;
+  description: string;
+  inputSchema: Record<string, any>;
 }

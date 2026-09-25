@@ -73,6 +73,7 @@ export const pipelineTasks = sqliteTable('pipeline_task', {
   status: text('status').default('running'), // running | awaiting_confirmation | completed | failed
   steps: text('steps').default('[]'), // JSON: [{key,label,status,output,retryCount}]
   retryCount: integer('retry_count').default(0),
+  trace: text('trace').default('[]'), // JSON: ReAct 轨迹 [{round,thought,action,observation}]
   lastError: text('last_error').default(''),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
@@ -115,4 +116,26 @@ export type QualityReport = typeof qualityReports.$inferSelect;
 export type PipelineTask = typeof pipelineTasks.$inferSelect;
 export type PolishRecord = typeof polishRecords.$inferSelect;
 export type KnowledgeDoc = typeof knowledgeDocs.$inferSelect;
+/** Reflexion 反思日志（质量门回炉的语义梯度，注入下一轮起草） */
+export const reflexionLogs = sqliteTable('reflexion_log', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull(),
+  round: integer('round').default(1),
+  note: text('note').notNull(),
+  instructions: text('instructions').default('[]'), // JSON: string[]
+  createdAt: integer('created_at').notNull(),
+});
+
+/** 记忆库（Phase 2：情景记忆 episodic / 程序记忆 procedural） */
+export const memoryLogs = sqliteTable('memory_log', {
+  id: text('id').primaryKey(),
+  type: text('type').notNull(), // episodic | procedural
+  projectId: text('project_id'),
+  content: text('content').notNull(),
+  keywords: text('keywords').default('[]'), // JSON: string[]
+  createdAt: integer('created_at').notNull(),
+});
+
 export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
+export type ReflexionLog = typeof reflexionLogs.$inferSelect;
+export type MemoryLog = typeof memoryLogs.$inferSelect;

@@ -1,6 +1,7 @@
 import type {
   Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, AppSettings, SelfCheck,
+  MemoryItem, McpToolInfo,
 } from '../types';
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -100,6 +101,23 @@ export const api = {
       request<{ ok: boolean; reply: string; model: string; latencyMs: number }>(`/api/settings/test`, {
         method: 'POST',
         body: JSON.stringify({ model }),
+      }),
+  },
+
+  memory: {
+    list: (type?: string, q = '') => request<MemoryItem[]>(`/api/memory?type=${type || ''}&q=${encodeURIComponent(q)}`),
+    add: (type: 'episodic' | 'procedural', content: string, projectId?: string, keywords: string[] = []) =>
+      request<MemoryItem>('/api/memory', { method: 'POST', body: JSON.stringify({ type, content, projectId, keywords }) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/api/memory/${id}`, { method: 'DELETE' }),
+  },
+
+  mcp: {
+    info: () => request<{ protocol: string; version: string; name: string; tools: number }>('/api/mcp/info'),
+    tools: () => request<{ tools: McpToolInfo[] }>('/api/mcp/tools'),
+    call: (name: string, args: Record<string, any>) =>
+      request<{ name: string; content?: { type: string; text: string }[]; isError?: boolean }>('/api/mcp/call', {
+        method: 'POST',
+        body: JSON.stringify({ name, arguments: args }),
       }),
   },
 

@@ -1,0 +1,224 @@
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { AiService } from '../ai/ai.service';
+import { ReferencesService } from '../references/references.service';
+import { KnowledgeService } from '../knowledge/knowledge.service';
+
+/** MCP 工具定义（符合 Model Context Protocol 2026 的 Tool 结构：name/description/inputSchema） */
+export interface McpTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, any>;
+  handler: (args: Record<string, any>) => Promise<any>;
+}
+
+const noProjectHint = (args: Record<string, any>, required: string[]) => {
+  const missing = required.filter((k) => args[k] === undefined || args[k] === null || args[k] === '');
+  return missing.length ? `缺少必填参数：${missing.join(', ')}` : null;
+};
+
+/**
+ * MCP 服务：把 SciFlow 全部 AI 能力暴露为标准 MCP 工具，
+ * 可被任意 MCP 兼容客户端动态发现与调用（MCP 2026-07 规范风格）。
+ */
+@Injectable()
+export class McpService {
+  private readonly tools: McpTool[];
+
+  constructor(
+    private readonly ai: AiService,
+    private readonly references: ReferencesService,
+    private readonly knowledge: KnowledgeService,
+  ) {
+    this.tools = [
+      {
+        name: 'literature.search',
+        description: '检索学术文献（多源：Semantic Scholar / arXiv / OpenAlex），返回论文列表含标题、摘要、年份、DOI',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: '检索关键词，如 "graph neural network drug discovery"' },
+            limit: { type: 'number', default: 8 },
+          },
+          required: ['query'],
+        },
+        handler: async (args) => {
+          const missing = noProjectHint(args, ['query']);
+          if (missing) return { error: missing };
+          return this.references.search(String(args.query), Number(args.limit) || 8);
+        },
+      },
+      {
+        name: 'literature.summarize',
+        description: '对给定研究主题生成结构化文献综述（概述+关键主题+研究空白+未来方向）',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            topic: { type: 'string' },
+            papers: { type: 'string', description: '已检索到的文献摘要文本' },
+          },
+          required: ['topic'],
+        },
+        handler: async (args) => ({
+          summary: await this.ai.summarizeLiterature(String(args.topic), String(args.papers || '')),
+        }),
+      },
+      {
+        name: 'knowledge.query',
+        description: '知识库检索增强问答（RAG）：基于已上传资料回答，标注来源',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            projectId: { type: 'string' },
+            question: { type: 'string' },
+          },
+          required: ['projectId', 'question'],
+        },
+        handler: async (args) => {
+          const missing = noProjectHint(args, ['projectId', 'question']);
+          if (missing) return { error: missing };
+          return this.knowledge.query(String(args.projectId), String(args.question));
+        },
+      },
+      {
+        name: 'outline.generate',
+        description: '生成论文大纲（标题+章节+小节），用于研究计划阶段',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            topic: { type: 'string' },
+            literatureSummary: { type: 'string' },
+          },
+          required: ['topic'],
+        },
+        handler: async (args) => this.ai.writeOutline(String(args.topic), String(args.literatureSummary || '')),
+      },
+      {
+        name: 'writing.draft',
+        description: '起草论文单个章节（基于大纲与参考文献）',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sectionTitle: { type: 'string' },
+            outline: { type: 'string', description: '大纲 JSON 字符串' },
+            references: { type: 'string', description: '参考文献上下文' },
+          },
+          required: ['sectionTitle'],
+        },
+        handler: async (args) => ({
+          text: await this.ai.draftSection(String(args.sectionTitle), String(args.outline || '[]'), String(args.references || '')),
+        }),
+      },
+      {
+        name: 'writing.polish',
+        description: '学术润色/降重：返回原文、润色文、修改理由（三段式）',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+            mode: { type: 'string', enum: ['polish', 'reduce'], default: 'polish' },
+          },
+          required: ['text'],
+        },
+        handler: async (args) => this.ai.polish(String(args.text), args.mode === 'reduce' ? 'reduce' : 'polish'),
+      },
+      {
+        name: 'writing.translate',
+        description: '学术翻译（中英互译）',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+            targetLang: { type: 'string', enum: ['zh', 'en'], default: 'en' },
+          },
+          required: ['text'],
+        },
+        handler: async (args) => ({
+          translated: await this.ai.translate(String(args.text), args.targetLang === 'zh' ? 'zh' : 'en'),
+        }),
+      },
+      {
+        name: 'writing.review',
+        description: '7 维质量评审（0-100）：文献/逻辑/引用/语言/新颖/图表/格式，返回各维分数与改进反馈',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            content: { type: 'string' },
+          },
+          required: ['title', 'content'],
+        },
+        handler: async (args) => {
+          const missing = noProjectHint(args, ['title', 'content']);
+          if (missing) return { error: missing };
+          return this.ai.reviewPaper(String(args.title), String(args.content));
+        },
+      },
+      {
+        name: 'references.extract',
+        description: '文献结构化提取（Elicit 式）：方法/结果/贡献/局限对比表',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            papers: { type: 'string', description: '文献摘要文本' },
+          },
+          required: ['papers'],
+        },
+        handler: async (args) => ({
+          papers: await this.ai.extractPaperTable(String(args.papers || '')),
+        }),
+      },
+      {
+        name: 'references.evidence',
+        description: '证据综合（Consensus 式）：对研究问题给出立场分类（支持/部分支持/矛盾/证据不足）与证据计数',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+            papers: { type: 'string' },
+          },
+          required: ['question'],
+        },
+        handler: async (args) =>
+          this.ai.evidenceSynthesis(String(args.question), String(args.papers || '')),
+      },
+      {
+        name: 'chat.answer',
+        description: '科研问答：回答研究方法、概念、写作等问题',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+            history: { type: 'array', items: { type: 'object' } },
+          },
+          required: ['question'],
+        },
+        handler: async (args) => ({
+          answer: await this.ai.chat(String(args.question), Array.isArray(args.history) ? args.history : []),
+        }),
+      },
+    ];
+  }
+
+  /** 工具清单（MCP tools/list 语义） */
+  list() {
+    return this.tools.map(({ handler: _h, ...t }) => t);
+  }
+
+  /** 调用工具（MCP tools/call 语义） */
+  async call(name: string, args: Record<string, any> = {}) {
+    const tool = this.tools.find((t) => t.name === name);
+    if (!tool) {
+      throw new HttpException(`MCP 工具不存在: ${name}`, HttpStatus.NOT_FOUND);
+    }
+    try {
+      const result = await tool.handler(args || {});
+      return { name, content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (e: any) {
+      return {
+        name,
+        isError: true,
+        content: [{ type: 'text', text: `工具执行失败: ${e?.message || String(e)}` }],
+      };
+    }
+  }
+}

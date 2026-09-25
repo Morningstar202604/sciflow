@@ -3,7 +3,7 @@ import { AiService } from '../ai/ai.service';
 import { DB_PATH, sqlite } from '../db/database';
 
 export interface AppSettings {
-  ai: { baseUrl: string; model: string; configured: boolean; models: string[] };
+  ai: { baseUrl: string; model: string; fastModel: string; strongModel: string; configured: boolean; models: string[] };
   env: { node: string; database: string; port: number };
   sources: { literature: string[] };
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, CircleDashed, Loader2, RotateCcw, Workflow, Zap } from 'lucide-react';
+import { Brain, Check, ChevronRight, CircleDashed, Eye, Loader2, RotateCcw, Workflow, Zap } from 'lucide-react';
 import { api } from '../api/client';
-import type { Outline, PipelineStep, PipelineTask, Project } from '../types';
+import type { Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Modal, Spinner, Textarea, jsonText } from '../components/ui';
 
 const STEP_LABELS: Record<string, string> = {
@@ -35,9 +35,35 @@ export function PipelinePage({ project }: { project: Project }) {
   const [error, setError] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [editableOutline, setEditableOutline] = useState<Outline | null>(null);
+  const [showPlan, setShowPlan] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const active = tasks.find((t) => t.id === activeId) ?? null;
+
+  /** 研究计划（Planner 输出，存在 topic-verify 步骤的 output JSON 中） */
+  const activePlan = (() => {
+    if (!active) return null;
+    const step = active.steps.find((s) => s.key === 'topic-verify');
+    if (!step?.output) return null;
+    try {
+      const p = JSON.parse(step.output);
+      return p?.researchQuestions && p?.objective ? p : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  /** ReAct 轨迹（think → act → observe） */
+  const activeTrace = (() => {
+    if (!active) return [];
+    try {
+      const t = JSON.parse(active.trace || '[]');
+      return Array.isArray(t) ? (t as ReactTraceStep[]) : [];
+    } catch {
+      return [];
+    }
+  })();
 
   const refresh = useCallback(async () => {
     try {
@@ -193,6 +219,74 @@ export function PipelinePage({ project }: { project: Project }) {
                 </div>
 
                 {active.lastError && <div className="text-xs text-rose-600 bg-rose-50 rounded p-2 mb-3">{active.lastError}</div>}
+
+                {/* 研究计划（Phase 1a：Planner）+ ReAct 轨迹（Phase 1b） */}
+                {activePlan && (
+                  <Card className="p-3 mb-3 bg-slate-50 border-slate-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                        <Brain size={13} className="text-indigo-500" /> Planner 研究计划
+                      </span>
+                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowPlan((v) => !v)}>
+                        <Eye size={12} /> {showPlan ? '收起' : '查看'}
+                      </Button>
+                    </div>
+                    {showPlan && (
+                      <div className="text-xs text-slate-600 space-y-1.5">
+                        <div><span className="text-slate-400">目标：</span>{activePlan.objective}</div>
+                        <div>
+                          <span className="text-slate-400">子问题：</span>
+                          {(activePlan.researchQuestions as string[]).map((q, i) => (
+                            <span key={i} className="inline-block bg-white border border-slate-200 rounded px-1.5 py-0.5 mr-1 mb-1">{q}</span>
+                          ))}
+                        </div>
+                        {activePlan.draftingPlan?.sections && (
+                          <div>
+                            <span className="text-slate-400">章节规划：</span>
+                            {(activePlan.draftingPlan.sections as string[]).join(' → ')}
+                          </div>
+                        )}
+                        {activePlan.risks?.length > 0 && (
+                          <div><span className="text-slate-400">风险：</span>{activePlan.risks.join('；')}</div>
+                        )}
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {activeTrace.length > 0 && (
+                  <Card className="p-3 mb-3 bg-blue-50/50 border-blue-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-blue-700">
+                        <Zap size={13} className="text-blue-500" /> ReAct 自主检索轨迹（think → act → observe）
+                      </span>
+                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowTrace((v) => !v)}>
+                        <Eye size={12} /> {showTrace ? '收起' : `${activeTrace.length} 步`}
+                      </Button>
+                    </div>
+                    {showTrace && (
+                      <div className="space-y-1.5">
+                        {activeTrace.map((t, i) => (
+                          <div key={i} className="flex items-start gap-2 text-xs">
+                            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 text-[10px]">
+                              {t.round}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-blue-800 font-medium">
+                                {t.action === 'done' ? '✅ 收尾：' : '🔍 检索：'}
+                                {t.action === 'done' ? t.thought : `「${t.query}」`}
+                                {t.action === 'search' && <span className="text-slate-400">（获得 {t.found} 篇）</span>}
+                              </div>
+                              {t.thought && t.action === 'search' && (
+                                <div className="text-slate-500 mt-0.5 break-all">{t.thought}</div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                )}
 
                 {/* 步骤时间线 */}
                 <div className="space-y-1.5 mb-4">

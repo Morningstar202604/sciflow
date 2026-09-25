@@ -9,6 +9,8 @@ import { ChatModule } from './chat/chat.module';
 import { SubmissionModule } from './submission/submission.module';
 import { SettingsModule } from './settings/settings.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { McpModule } from './mcp/mcp.module';
+import { MemoryModule } from './memory/memory.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -23,6 +25,8 @@ import { HealthController } from './health.controller';
     SubmissionModule,
     SettingsModule,
     KnowledgeModule,
+    McpModule,
+    MemoryModule,
   ],
   controllers: [HealthController],
 })

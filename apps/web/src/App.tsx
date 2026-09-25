@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  BookOpen, FlaskConical, LayoutDashboard, MessageSquare, Plus, Send, Settings, Sparkles, Trash2, Workflow, BookMarked,
+  BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, Send, Settings, Sparkles, Trash2, Workflow, BookMarked,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
@@ -14,6 +14,7 @@ import { ChatPage } from './pages/ChatPage';
 import { SubmissionPage } from './pages/SubmissionPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { SettingsPage } from './pages/SettingsPage';
+import { MemoryPage } from './pages/MemoryPage';
 
 export type View =
   | 'dashboard'
@@ -24,6 +25,7 @@ export type View =
   | 'chat'
   | 'submission'
   | 'knowledge'
+  | 'memory'
   | 'settings';
 
 const NAV: { key: View; label: string; icon: typeof LayoutDashboard }[] = [
@@ -31,6 +33,7 @@ const NAV: { key: View; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'writing', label: '论文写作', icon: BookOpen },
   { key: 'literature', label: '文献调研', icon: FlaskConical },
   { key: 'knowledge', label: '知识库', icon: BookMarked },
+  { key: 'memory', label: '记忆中心', icon: Brain },
   { key: 'pipeline', label: '全自动流水线', icon: Workflow },
   { key: 'quality', label: '质量评分', icon: Sparkles },
   { key: 'chat', label: '科研问答', icon: MessageSquare },
@@ -203,6 +206,7 @@ export default function App() {
               {view === 'writing' && currentProject && <WritingPage project={currentProject} initialDocId={selectedDocId} />}
               {view === 'literature' && currentProject && <LiteraturePage project={currentProject} />}
               {view === 'knowledge' && currentProject && <KnowledgePage project={currentProject} />}
+              {view === 'memory' && currentProject && <MemoryPage />}
               {view === 'pipeline' && currentProject && <PipelinePage project={currentProject} />}
               {view === 'quality' && currentProject && <QualityPage project={currentProject} />}
               {view === 'chat' && currentProject && <ChatPage project={currentProject} />}

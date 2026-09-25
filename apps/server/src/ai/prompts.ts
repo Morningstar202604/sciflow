@@ -204,3 +204,61 @@ export const EVIDENCE_SYNTHESIS = (question: string, papers: string) => `
 
 文献列表：
 ${papers}`;
+
+/** Phase 1：研究计划生成（Planner，对标 GPT Researcher 的 planner） */
+export const PLAN_RESEARCH = (topic: string) => `
+你是一位科研规划专家（Planner）。请把研究主题拆解为可执行的研究计划，输出严格的 JSON（不要任何其他文字）：
+{
+  "objective": "研究目标（1-2 句，中文）",
+  "researchQuestions": ["3-5 个可检索的子问题，英文，覆盖主题的各个维度"],
+  "searchStrategy": { "keywords": ["检索关键词（中英混合）"], "minPapers": 8, "depth": "overview | deep" },
+  "draftingPlan": { "sections": ["论文章节名，如 引言/相关工作/方法/实验/讨论/结论"], "wordCount": 6000 },
+  "risks": ["可能的研究风险，如数据不足、时效性"]
+}
+要求：子问题之间要有逻辑递进；检索关键词要具体；全部可执行。
+
+研究主题：${topic}`;
+
+/** Phase 1：ReAct 思考步（决定下一步行动） */
+export const REACT_THINK = (topic: string, questions: string[], past: string) => `
+你是一个自主研究执行器（ReAct 循环的思考步）。当前研究主题：${topic}，待回答的子问题：${JSON.stringify(questions)}。
+
+你已经检索到的信息如下（每条含轮次、检索词、结果摘要）：
+${past || '（尚无检索记录）'}
+
+请判断下一步行动，只输出严格的 JSON（不要任何其他文字）：
+{
+  "thought": "分析当前信息覆盖情况（中文，1-2 句）",
+  "action": "search | done",
+  "query": "若 action=search，给出下一个最需要补充的检索词（英文）；否则留空",
+  "coverage": "当前信息对子问题的覆盖度百分比（0-100 的整数）"
+}
+规则：优先选择信息缺口最大的子问题；已覆盖所有问题或检索轮次将耗尽时输出 done；不得编造检索结果。`;
+
+/** Phase 1：反思笔记（Reflexion 语义梯度，供回炉注入） */
+export const REFLEXION_PROMPT = (topic: string, feedback: string, pastReflections: string) => `
+上一轮论文质量评审给出的问题如下：
+${feedback}
+
+历史反思笔记（按时间倒序，最多 3 条）：
+${pastReflections || '（无）'}
+
+请输出严格 JSON（不要任何其他文字），把评审意见提炼成可执行的修改指令：
+{
+  "note": "本轮最核心的 1 个修改要点（中文，30 字内）",
+  "instructions": ["3-5 条具体可执行的修改指令，中文，直接指导重写"]
+}
+要求：指令要具体（如"在方法节补充数据来源与超参数设置"），不要泛泛而谈。`;
+
+/** Phase 2：情景记忆检索（从历史任务中提取与当前主题相关的先验） */
+export const EPISODIC_EXTRACT = (projectName: string, docTitle: string, outline: string, score: number) => `
+请把一次完成的科研写作任务压缩为一条情景记忆，输出严格 JSON（不要任何其他文字）：
+{
+  "content": "本次任务要点（60 字内，中文）：主题、采用的结构、质量评分",
+  "keywords": ["主题词", "方法词", "结构词"]
+}
+
+项目名：${projectName}
+论文标题：${docTitle}
+大纲：${outline.slice(0, 400)}
+质量评分：${score}/100`;

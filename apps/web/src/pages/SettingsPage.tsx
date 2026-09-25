@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Database, FlaskConical, Loader2, Plug, RefreshCw, Server, XCircle } from 'lucide-react';
+import { CheckCircle2, Database, FlaskConical, Loader2, Plug, RefreshCw, Server, Wrench, XCircle } from 'lucide-react';
 import { api } from '../api/client';
-import type { AppSettings, SelfCheck } from '../types';
-import { Button, Card, ErrorBox, SectionTitle, Select, Spinner } from '../components/ui';
+import type { AppSettings, McpToolInfo, SelfCheck } from '../types';
+import { Badge, Button, Card, ErrorBox, SectionTitle, Select, Spinner, Textarea } from '../components/ui';
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -12,10 +12,17 @@ export function SettingsPage() {
   const [testResult, setTestResult] = useState<{ ok: boolean; reply: string; model: string; latencyMs: number } | null>(null);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState('');
+  const [mcpInfo, setMcpInfo] = useState<{ protocol: string; version: string; name: string; tools: number } | null>(null);
+  const [mcpTools, setMcpTools] = useState<McpToolInfo[]>([]);
+  const [toolArgs, setToolArgs] = useState<Record<string, string>>({});
+  const [toolResult, setToolResult] = useState<string>('');
+  const [toolLoading, setToolLoading] = useState(false);
 
   const load = async () => {
     try {
       setSettings(await api.settings.get());
+      setMcpInfo(await api.mcp.info());
+      setMcpTools((await api.mcp.tools()).tools);
     } catch (e: any) {
       setError(e.message);
     }
@@ -105,6 +112,32 @@ export function SettingsPage() {
         )}
       </Card>
 
+      {/* 模型路由（Phase 0b） */}
+      {settings && (
+        <Card className="p-5 mb-4">
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <FlaskConical size={16} className="text-indigo-600" /> 模型路由（fast / strong 双档）
+            </span>
+          </SectionTitle>
+          <div className="text-xs text-slate-400 mb-3">
+            简单任务（问答/综述/润色/翻译）走 fast 档；高难任务（规划/长文起草/质量评审）自动路由到 strong 档，可在 apps/server/.env 配置 AI_MODEL_FAST / AI_MODEL_STRONG
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="rounded-lg bg-slate-50 p-4">
+              <div className="text-xs text-slate-400 mb-1">Fast 档（轻量快速）</div>
+              <div className="text-sm font-mono text-slate-700">{settings.ai.fastModel}</div>
+              <div className="text-[11px] text-slate-400 mt-1">科研问答 · 综述 · 润色 · 翻译 · 提取 · 证据综合</div>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-4">
+              <div className="text-xs text-slate-400 mb-1">Strong 档（高难任务）</div>
+              <div className="text-sm font-mono text-slate-700">{settings.ai.strongModel}</div>
+              <div className="text-[11px] text-slate-400 mt-1">研究规划 · 大纲 · 长文起草 · 质量评审</div>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* 环境自检 */}
       <Card className="p-5 mb-4">
         <SectionTitle
@@ -171,6 +204,70 @@ export function SettingsPage() {
             </div>
             <div className="mt-1 text-slate-600">{testResult.reply}</div>
           </div>
+        )}
+      </Card>
+
+      {/* MCP 工具台（Phase 0a：工具协议化） */}
+      <Card className="p-5 mt-4">
+        <SectionTitle
+          extra={
+            <Badge tone="indigo">
+              {mcpInfo ? `${mcpInfo.protocol} v${mcpInfo.version} · ${mcpInfo.tools} 工具` : '…'}
+            </Badge>
+          }
+        >
+          <span className="flex items-center gap-2">
+            <Wrench size={16} className="text-indigo-600" /> MCP 工具台
+          </span>
+        </SectionTitle>
+        <div className="text-xs text-slate-400 mb-3">
+          SciFlow 的全部 AI 能力已协议化为标准 MCP 工具（Model Context Protocol 2026-07 规范），可被任意 MCP 兼容客户端动态发现与调用
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          {mcpTools.map((t) => (
+            <div key={t.name} className="rounded-lg border border-slate-200 p-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-mono text-xs font-semibold text-indigo-700">{t.name}</span>
+              </div>
+              <div className="text-xs text-slate-500 line-clamp-2 mb-2">{t.description}</div>
+              <div className="flex gap-1.5">
+                <input
+                  className="flex-1 min-w-0 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                  placeholder={Object.keys(t.inputSchema?.properties || {}).join(', ')}
+                  value={toolArgs[t.name] || ''}
+                  onChange={(e) => setToolArgs((s) => ({ ...s, [t.name]: e.target.value }))}
+                />
+                <Button
+                  variant="outline"
+                  className="px-2 py-1 text-xs"
+                  disabled={toolLoading}
+                  onClick={async () => {
+                    setToolLoading(true);
+                    setToolResult('');
+                    try {
+                      const args: Record<string, any> = {};
+                      const keys = Object.keys(t.inputSchema?.properties || {});
+                      keys.forEach((k, i) => {
+                        const raw = (toolArgs[t.name] || '').split(/[,，]/)[i];
+                        if (raw !== undefined && raw !== '') args[k] = raw;
+                      });
+                      const res = await api.mcp.call(t.name, args);
+                      setToolResult(JSON.stringify(res.content?.[0]?.text ?? res, null, 2).slice(0, 1200));
+                    } catch (e: any) {
+                      setToolResult('调用失败: ' + e.message);
+                    } finally {
+                      setToolLoading(false);
+                    }
+                  }}
+                >
+                  <FlaskConical size={11} /> 调用
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {toolResult && (
+          <Textarea className="mt-3 font-mono text-xs" rows={5} readOnly value={toolResult} />
         )}
       </Card>
     </div>

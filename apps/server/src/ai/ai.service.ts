@@ -9,6 +9,8 @@ export interface ChatMessage {
 interface CompleteOptions {
   temperature?: number;
   maxTokens?: number;
+  /** 模型档位：fast=轻量快速（默认），strong=强模型（长文/评审/规划等高难任务） */
+  model?: 'fast' | 'strong';
 }
 
 /**
@@ -19,15 +21,22 @@ interface CompleteOptions {
 export class AiService {
   private baseUrl = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
   private apiKey = process.env.AI_API_KEY || '';
-  private model = process.env.AI_MODEL || 'gpt-4o-mini';
+  /** fast 档：轻量快速模型（默认） */
+  private fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
+  /** strong 档：强模型（高难任务；未配置则回落 fast） */
+  private strongModel = process.env.AI_MODEL_STRONG || this.fastModel;
 
   /** 是否已配置真实 AI 密钥 */
   get configured(): boolean {
     return !!this.apiKey;
   }
 
-  get config(): { baseUrl: string; model: string; configured: boolean } {
-    return { baseUrl: this.baseUrl, model: this.model, configured: this.configured };
+  get config(): { baseUrl: string; model: string; fastModel: string; strongModel: string; configured: boolean } {
+    return { baseUrl: this.baseUrl, model: this.fastModel, fastModel: this.fastModel, strongModel: this.strongModel, configured: this.configured };
+  }
+
+  private resolveModel(opts: CompleteOptions): string {
+    return opts.model === 'strong' ? this.strongModel : this.fastModel;
   }
 
   private assertConfigured() {
@@ -52,7 +61,7 @@ export class AiService {
             Authorization: `Bearer ${this.apiKey}`,
           },
           body: JSON.stringify({
-            model: this.model,
+            model: this.resolveModel(opts),
             messages,
             temperature: opts.temperature ?? 0.7,
             max_tokens: opts.maxTokens ?? 4096,
@@ -94,7 +103,7 @@ export class AiService {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: this.model,
+        model: this.resolveModel(opts),
         messages,
         temperature: opts.temperature ?? 0.7,
         max_tokens: opts.maxTokens ?? 4096,
@@ -156,7 +165,7 @@ export class AiService {
 
   /** 大纲生成（outline-first）；解析失败时按纯文本标题兜底 */
   async writeOutline(topic: string, literatureSummary: string): Promise<{ title: string; sections: { title: string; subsections: string[] }[] }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.WRITE_OUTLINE(topic, literatureSummary) }], { temperature: 0.5 });
+    const raw = await this.complete([{ role: 'user', content: prompts.WRITE_OUTLINE(topic, literatureSummary) }], { temperature: 0.5, model: 'strong' });
     try {
       const parsed = this.jsonOf<{ title: string; sections: { title: string; subsections: string[] }[] }>(raw);
       return { title: parsed.title || topic, sections: Array.isArray(parsed.sections) ? parsed.sections : [] };
@@ -167,7 +176,7 @@ export class AiService {
 
   /** 章节起草 */
   async draftSection(sectionTitle: string, outline: string, references: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.DRAFT_SECTION(sectionTitle, outline, references) }], { temperature: 0.6 });
+    return this.complete([{ role: 'user', content: prompts.DRAFT_SECTION(sectionTitle, outline, references) }], { temperature: 0.6, model: 'strong' });
   }
 
   /** 三段式润色/降重：原文 + 润色文 + 理由（AI 输出缺字段或嵌套时递归回退，防止落库异常） */
@@ -207,7 +216,7 @@ export class AiService {
     feedback: string;
     totalScore: number;
   }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }], { temperature: 0.3 });
+    const raw = await this.complete([{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }], { temperature: 0.3, model: 'strong' });
     let parsed: { scores?: Record<string, number>; feedback?: string } = {};
     try {
       parsed = this.jsonOf<{ scores: Record<string, number>; feedback: string }>(raw);
@@ -261,7 +270,7 @@ export class AiService {
   /** 连接测试：发一条最小消息验证 Key/端点/模型 */
   async testConnection(model?: string): Promise<{ ok: boolean; reply: string; model: string; latencyMs: number }> {
     this.assertConfigured();
-    const target = model || this.model;
+    const target = model || this.fastModel;
     const t0 = Date.now();
     try {
       const res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -331,6 +340,103 @@ export class AiService {
   /** NotebookLM 式：知识库检索增强问答 */
   async knowledgeQa(question: string, chunks: string): Promise<string> {
     return this.complete([{ role: 'user', content: prompts.KNOWLEDGE_QA(question, chunks) }], { temperature: 0.3, maxTokens: 2048 });
+  }
+
+  // ---------- Phase 1：Planner / ReAct / Reflexion ----------
+
+  /** 研究计划生成（对标 GPT Researcher planner）：解析失败时回退标准计划 */
+  async generatePlan(topic: string): Promise<{
+    objective: string;
+    researchQuestions: string[];
+    searchStrategy: { keywords: string[]; minPapers: number; depth: string };
+    draftingPlan: { sections: string[]; wordCount: number };
+    risks: string[];
+  }> {
+    const raw = await this.complete([{ role: 'user', content: prompts.PLAN_RESEARCH(topic) }], { temperature: 0.4, model: 'strong' });
+    try {
+      const p = this.jsonOf<any>(raw);
+      return {
+        objective: String(p.objective || `围绕「${topic}」完成一篇系统性综述`),
+        researchQuestions: (Array.isArray(p.researchQuestions) ? p.researchQuestions : [topic]).slice(0, 5).map(String),
+        searchStrategy: {
+          keywords: (Array.isArray(p.searchStrategy?.keywords) ? p.searchStrategy.keywords : [topic]).slice(0, 8).map(String),
+          minPapers: Number(p.searchStrategy?.minPapers) || 8,
+          depth: String(p.searchStrategy?.depth || 'overview'),
+        },
+        draftingPlan: {
+          sections: (Array.isArray(p.draftingPlan?.sections) ? p.draftingPlan.sections : ['引言', '相关工作', '方法', '实验与结果', '讨论', '结论']).map(String),
+          wordCount: Number(p.draftingPlan?.wordCount) || 6000,
+        },
+        risks: (Array.isArray(p.risks) ? p.risks : []).map(String),
+      };
+    } catch {
+      return {
+        objective: `围绕「${topic}」完成一篇系统性综述`,
+        researchQuestions: [topic],
+        searchStrategy: { keywords: [topic], minPapers: 8, depth: 'overview' },
+        draftingPlan: { sections: ['引言', '相关工作', '方法', '实验与结果', '讨论', '结论'], wordCount: 6000 },
+        risks: [],
+      };
+    }
+  }
+
+  /** ReAct 思考步：决定检索或收尾（对标 ReAct think-act-observe） */
+  async reactThink(
+    topic: string,
+    questions: string[],
+    past: { round: number; query: string; found: number }[],
+  ): Promise<{ thought: string; action: 'search' | 'done'; query: string; coverage: number }> {
+    const pastText = past
+      .map((p) => `第${p.round}轮：检索词「${p.query}」→ 获得 ${p.found} 条文献`)
+      .join('\n');
+    const raw = await this.complete([{ role: 'user', content: prompts.REACT_THINK(topic, questions, pastText) }], { temperature: 0.3 });
+    try {
+      const r = this.jsonOf<any>(raw);
+      return {
+        thought: String(r.thought || ''),
+        action: r.action === 'done' ? 'done' : 'search',
+        query: String(r.query || ''),
+        coverage: Math.max(0, Math.min(100, Number(r.coverage) || 0)),
+      };
+    } catch {
+      return { thought: '（解析失败，进入下一轮检索）', action: 'search', query: '', coverage: 0 };
+    }
+  }
+
+  /** Reflexion：把评审反馈提炼为可执行修改指令（对标 Reflexion 语义梯度） */
+  async reflect(topic: string, feedback: string, pastReflections: string): Promise<{ note: string; instructions: string[] }> {
+    const raw = await this.complete(
+      [{ role: 'user', content: prompts.REFLEXION_PROMPT(topic, feedback, pastReflections) }],
+      { temperature: 0.3 },
+    );
+    try {
+      const r = this.jsonOf<any>(raw);
+      return {
+        note: String(r.note || '改进论文质量'),
+        instructions: (Array.isArray(r.instructions) ? r.instructions : []).map(String).slice(0, 5),
+      };
+    } catch {
+      return { note: '改进论文质量', instructions: [] };
+    }
+  }
+
+  // ---------- Phase 2：记忆 ----------
+
+  /** 情景记忆压缩（从完成的任务中提炼可复用要点） */
+  async extractEpisodic(projectName: string, docTitle: string, outline: string, score: number): Promise<{ content: string; keywords: string[] }> {
+    const raw = await this.complete(
+      [{ role: 'user', content: prompts.EPISODIC_EXTRACT(projectName, docTitle, outline, score) }],
+      { temperature: 0.2 },
+    );
+    try {
+      const r = this.jsonOf<any>(raw);
+      return {
+        content: String(r.content || ''),
+        keywords: (Array.isArray(r.keywords) ? r.keywords : []).map(String).slice(0, 6),
+      };
+    } catch {
+      return { content: '', keywords: [] };
+    }
   }
 }
 

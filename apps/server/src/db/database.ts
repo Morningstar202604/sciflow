@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS pipeline_task (
   status TEXT DEFAULT 'running',
   steps TEXT DEFAULT '[]',
   retry_count INTEGER DEFAULT 0,
+  trace TEXT DEFAULT '[]',
   last_error TEXT DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -113,6 +114,24 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
   seq INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS reflexion_log (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  round INTEGER DEFAULT 1,
+  note TEXT NOT NULL,
+  instructions TEXT DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS memory_log (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  project_id TEXT,
+  content TEXT NOT NULL,
+  keywords TEXT DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_document_project ON document(project_id);
 CREATE INDEX IF NOT EXISTS idx_reference_project ON reference(project_id);
 CREATE INDEX IF NOT EXISTS idx_citation_document ON citation(document_id);
@@ -121,7 +140,19 @@ CREATE INDEX IF NOT EXISTS idx_pipeline_project ON pipeline_task(project_id);
 CREATE INDEX IF NOT EXISTS idx_polish_document ON polish_record(document_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge_doc(project_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_doc ON knowledge_chunk(doc_id);
+CREATE INDEX IF NOT EXISTS idx_reflexion_task ON reflexion_log(task_id);
+CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_log(type);
 `);
+
+/** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */
+function ensureColumn(table: string, column: string, ddl: string) {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+    console.log(`[DB] 迁移：${table} 新增列 ${column}`);
+  }
+}
+ensureColumn('pipeline_task', 'trace', "TEXT DEFAULT '[]'");
 
 export const db: BetterSQLite3Database<typeof schema> = drizzle(sqlite, { schema });
 export { sqlite, DB_PATH };

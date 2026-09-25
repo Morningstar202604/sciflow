@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { pipelineTasks, documents, references, polishRecords, qualityReports } from '../db/schema';
+import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs } from '../db/schema';
 import { AiService } from '../ai/ai.service';
-import { LiteratureService } from '../literature/literature.service';
+import { LiteratureService, PaperHit } from '../literature/literature.service';
 import { ReferencesService } from '../references/references.service';
 import { QualityService } from '../quality/quality.service';
 
@@ -126,18 +126,30 @@ export class PipelineService {
   private async execute(taskId: string) {
     const task = this.get(taskId);
     const steps = task.steps;
-    let retryCount = task.retryCount;
 
-    // ① 主题验证
+    // ① 主题验证 + 研究计划生成（Phase 1a：Planner，对标 GPT Researcher）
     await this.advance(taskId, 'topic-verify', 'running');
     const verifiedTopic = await this.ai.chat(
       `请把以下研究主题提炼为一句可执行的研究题目（直接输出题目本身，不要解释）：\n${task.topic}`,
     );
-    await this.advance(taskId, 'topic-verify', 'done', verifiedTopic);
+    const plan = await this.ai.generatePlan(task.topic);
+    await this.advance(
+      taskId,
+      'topic-verify',
+      'done',
+      JSON.stringify({
+        topic: verifiedTopic,
+        objective: plan.objective,
+        researchQuestions: plan.researchQuestions,
+        searchStrategy: plan.searchStrategy,
+        draftingPlan: plan.draftingPlan,
+        risks: plan.risks,
+      }),
+    );
 
-    // ② 文献调研：真实多源检索 + 入库 + AI 综述
+    // ② 文献调研（Phase 1b：ReAct 自主检索循环，think → act → observe）
     await this.advance(taskId, 'literature', 'running');
-    const hits = await this.literature.search(task.topic, 8);
+    const { hits, trace } = await this.reactResearch(taskId, task.topic, plan);
     if (hits.length > 0) {
       this.references.import(task.projectId, hits);
     }
@@ -145,6 +157,7 @@ export class PipelineService {
     const summary = refs.length
       ? await this.ai.summarizeLiterature(task.topic, refs.slice(0, 10).map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}）`).join('\n'))
       : '（未检索到文献，将按通用学术结构起草）';
+    this.saveTrace(taskId, trace);
     await this.advance(taskId, 'literature', 'done', `检索到 ${hits.length} 篇文献\n${summary.slice(0, 500)}`);
 
     // ③ 大纲生成 → 等待人工确认（Human-in-the-loop）
@@ -211,18 +224,21 @@ export class PipelineService {
 
     let retry = 0;
     const maxRetry = MAX_RETRY;
+    let report: { totalScore: number; feedback: string } | undefined;
 
     while (true) {
-      // ④ 分章起草（回炉时注入上次评分反馈）
-      await this.advance(taskId, 'drafting', 'running', retry > 0 ? `第 ${retry} 次回炉起草（依据上次评分反馈重写）` : undefined);
-      const feedback = this.lastQualityFeedback(taskId);
+      // ④ 分章起草（回炉时注入 Reflexion 反思指令 + 程序记忆写作风格）
+      await this.advance(taskId, 'drafting', 'running', retry > 0 ? `第 ${retry} 次回炉起草（依据反思指令重写）` : undefined);
+      const reflexion = this.reflexionNote(taskId);
+      const procedural = this.proceduralMemory(task.projectId);
+      const styleHint = procedural ? `\n写作风格参考（来自记忆库）：${procedural}` : '';
       let content = '';
       for (const section of outline.sections) {
         const refsPrompt = this.referencesForPrompt(task.projectId);
         const sectionText = await this.ai.draftSection(
           section.title,
           JSON.stringify(outline),
-          `${refsPrompt}\n质量评审反馈（如为回炉重写则需针对性改进）：${feedback || '无'}`,
+          `${refsPrompt}${styleHint}\n${reflexion ? `质量评审反馈（回炉改进指令）：${reflexion}` : ''}`,
         );
         content += `## ${section.title}\n\n${sectionText}\n\n`;
       }
@@ -231,11 +247,28 @@ export class PipelineService {
 
       // ⑤ 质量门评分
       await this.advance(taskId, 'quality-gate', 'running');
-      const report = await this.quality.review(documentId, doc.title, content);
+      report = await this.quality.review(documentId, doc.title, content);
       await this.advance(taskId, 'quality-gate', 'done', `总分 ${report.totalScore}/100`);
 
       if (report.totalScore < QUALITY_THRESHOLD && retry < maxRetry) {
         retry += 1;
+        // Phase 1c：Reflexion —— 把评审意见提炼为可执行指令并落库（语义梯度，最多保留 3 轮）
+        try {
+          const past = this.reflexionLogs(taskId);
+          const ref = await this.ai.reflect(task.topic, report.feedback, past.join('\n'));
+          db.insert(reflexionLogs)
+            .values({
+              id: randomUUID(),
+              taskId,
+              round: retry,
+              note: ref.note,
+              instructions: JSON.stringify(ref.instructions),
+              createdAt: Date.now(),
+            })
+            .run();
+        } catch (e: any) {
+          this.logger.warn(`Reflexion 失败: ${e.message}`);
+        }
         const q = this.loadSteps(taskId);
         q.find((s) => s.key === 'drafting')!.status = 'retry';
         q.find((s) => s.key === 'drafting')!.retryCount = retry;
@@ -286,9 +319,32 @@ export class PipelineService {
       `已就绪 ${citationRows.length} 条文献（可到论文编辑页按 APA/IEEE/Vancouver 导出）`,
     );
 
-    // ⑧ 完成
+    // ⑧ 完成 + Phase 2a：先沉淀情景记忆，再置 completed（保证完成即记忆可查）
     await this.advance(taskId, 'complete', 'done');
     db.update(documents).set({ status: 'final', updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
+    try {
+      const finalMem = db.select().from(documents).where(eq(documents.id, documentId)).get();
+      const mem = await this.ai.extractEpisodic(
+        task.topic,
+        finalMem?.title || task.topic,
+        finalMem?.outline || '[]',
+        report?.totalScore ?? 80,
+      );
+      if (mem.content) {
+        db.insert(memoryLogs)
+          .values({
+            id: randomUUID(),
+            type: 'episodic',
+            projectId: task.projectId,
+            content: mem.content,
+            keywords: JSON.stringify(mem.keywords),
+            createdAt: Date.now(),
+          })
+          .run();
+      }
+    } catch (e: any) {
+      this.logger.warn(`情景记忆沉淀失败: ${e.message}`);
+    }
     this.setStatus(taskId, 'completed', 'complete');
   }
 
@@ -300,23 +356,109 @@ export class PipelineService {
       .join('\n');
   }
 
-  private lastQualityFeedback(taskId: string): string {
-    const task = this.get(taskId);
-    const q = task.steps.find((s) => s.key === 'quality-gate');
-    if (q && q.output) {
-      const id = db
-        .select({ id: qualityReports.id })
-        .from(qualityReports)
-        .where(eq(qualityReports.documentId, task.documentId || ''))
-        .orderBy(qualityReports.createdAt)
-        .all()
-        .pop();
-      if (id) {
-        const report = db.select().from(qualityReports).where(eq(qualityReports.id, id.id)).get();
-        if (report) return report.feedback ?? '';
+  /** Phase 1b：ReAct 自主检索循环（think → act → observe，最多 3 轮） */
+  private async reactResearch(
+    taskId: string,
+    topic: string,
+    plan: { researchQuestions: string[]; searchStrategy: { keywords: string[] } },
+  ): Promise<{ hits: PaperHit[]; trace: { round: number; thought: string; action: string; query: string; found: number }[] }> {
+    const trace: { round: number; thought: string; action: string; query: string; found: number }[] = [];
+    const seen = new Set<string>();
+    const hits: PaperHit[] = [];
+
+    // 先按计划的关键词 + 子问题做初始检索（覆盖各维度）
+    const seeds = [...new Set([...plan.searchStrategy.keywords, ...plan.researchQuestions])].slice(0, 4);
+    for (const q of seeds) {
+      try {
+        const res = await this.literature.search(q, 5);
+        for (const h of res) {
+          if (!seen.has(h.title)) {
+            seen.add(h.title);
+            hits.push(h);
+          }
+        }
+        trace.push({ round: trace.length + 1, thought: '按研究计划覆盖信息缺口', action: 'search', query: q, found: res.length });
+      } catch (e: any) {
+        this.logger.warn(`初始检索失败 [${q}]: ${e.message}`);
       }
     }
-    return '';
+
+    // ReAct 循环：AI 评估信息覆盖度，决定补充检索或收尾
+    const maxRounds = 3;
+    for (let r = 0; r < maxRounds && hits.length < 24; r++) {
+      const past = trace.map((t) => ({ round: t.round, query: t.query, found: t.found }));
+      const decision = await this.ai.reactThink(topic, plan.researchQuestions, past);
+      if (decision.action === 'done' || decision.coverage >= 85 || !decision.query) {
+        trace.push({
+          round: trace.length + 1,
+          thought: decision.thought || '信息已覆盖充分',
+          action: 'done',
+          query: '',
+          found: hits.length,
+        });
+        break;
+      }
+      try {
+        const res = await this.literature.search(decision.query, 6);
+        const added = res.filter((h) => !seen.has(h.title));
+        for (const h of added) {
+          seen.add(h.title);
+          hits.push(h);
+        }
+        trace.push({ round: trace.length + 1, thought: decision.thought, action: 'search', query: decision.query, found: added.length });
+      } catch (e: any) {
+        this.logger.warn(`ReAct 补充检索失败 [${decision.query}]: ${e.message}`);
+      }
+    }
+    if (trace[trace.length - 1]?.action !== 'done') {
+      trace.push({ round: trace.length + 1, thought: '达到检索轮次上限，进入综合', action: 'done', query: '', found: hits.length });
+    }
+    return { hits, trace };
+  }
+
+  private saveTrace(taskId: string, trace: unknown[]) {
+    db.update(pipelineTasks).set({ trace: JSON.stringify(trace), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
+  }
+
+  /** Reflexion 指令（最新一条）：回炉起草时注入 */
+  private reflexionNote(taskId: string): string {
+    const rows = db
+      .select()
+      .from(reflexionLogs)
+      .where(eq(reflexionLogs.taskId, taskId))
+      .orderBy(reflexionLogs.createdAt)
+      .all();
+    if (rows.length === 0) return '';
+    const last = rows[rows.length - 1];
+    let instructions: string[] = [];
+    try {
+      instructions = JSON.parse(last.instructions || '[]');
+    } catch {
+      /* ignore */
+    }
+    return `${last.note}${instructions.length ? '\n具体指令：' + instructions.join('；') : ''}`;
+  }
+
+  /** 全部反思日志文本（供下一轮 Reflexion 去重参考） */
+  private reflexionLogs(taskId: string): string[] {
+    return db
+      .select()
+      .from(reflexionLogs)
+      .where(eq(reflexionLogs.taskId, taskId))
+      .orderBy(reflexionLogs.createdAt)
+      .all()
+      .map((r) => `第${r.round}轮：${r.note}`);
+  }
+
+  /** Phase 2b：程序记忆（写作风格指令，供起草注入） */
+  private proceduralMemory(projectId: string): string {
+    const rows = db
+      .select()
+      .from(memoryLogs)
+      .where(and(eq(memoryLogs.type, 'procedural'), eq(memoryLogs.projectId, projectId)))
+      .orderBy(memoryLogs.createdAt)
+      .all();
+    return rows.slice(-1).map((r) => r.content).join('');
   }
 
   private advance(taskId: string, key: string, status: PipelineStepState['status'], output?: string) {
