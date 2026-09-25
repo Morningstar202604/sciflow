@@ -1,0 +1,156 @@
+import type {
+  Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
+} from '../types';
+
+async function request<T>(url: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    let msg = `请求失败 (${res.status})`;
+    try {
+      const data = await res.json();
+      msg = data.message || msg;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  health: () => request<{ status: string; ai: { configured: boolean; model: string } }>('/api/health'),
+
+  projects: {
+    list: () => request<Project[]>('/api/projects'),
+    create: (name: string, description = '') =>
+      request<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ name, description }) }),
+    update: (id: string, patch: Partial<Project>) =>
+      request<Project>(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/api/projects/${id}`, { method: 'DELETE' }),
+  },
+
+  documents: {
+    list: (projectId: string) => request<Doc[]>(`/api/documents?projectId=${projectId}`),
+    get: (id: string) => request<Doc>(`/api/documents/${id}`),
+    create: (projectId: string, title: string) =>
+      request<Doc>('/api/documents', { method: 'POST', body: JSON.stringify({ projectId, title }) }),
+    update: (id: string, patch: Partial<Doc>) =>
+      request<Doc>(`/api/documents/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/api/documents/${id}`, { method: 'DELETE' }),
+    outline: (id: string, topic?: string, summary = '') =>
+      request<Outline>(`/api/documents/${id}/outline`, { method: 'POST', body: JSON.stringify({ topic, summary }) }),
+    section: (id: string, sectionTitle: string) =>
+      request<{ text: string }>(`/api/documents/${id}/section`, { method: 'POST', body: JSON.stringify({ sectionTitle }) }),
+    polish: (id: string, text: string, mode: 'polish' | 'reduce') =>
+      request<{ original: string; polished: string; reason: string }>(`/api/documents/${id}/polish`, {
+        method: 'POST',
+        body: JSON.stringify({ text, mode }),
+      }),
+    translate: (id: string, text: string, targetLang: 'zh' | 'en') =>
+      request<{ translated: string }>(`/api/documents/${id}/translate`, {
+        method: 'POST',
+        body: JSON.stringify({ text, targetLang }),
+      }),
+    polishRecords: (id: string) => request<PolishRecord[]>(`/api/documents/${id}/polish-records`),
+    citations: (id: string) => request<CitationRow[]>(`/api/documents/${id}/citations`),
+    addCitation: (id: string, body: { referenceId: string; location?: string; context?: string }) =>
+      request<CitationRow>(`/api/documents/${id}/citations`, { method: 'POST', body: JSON.stringify(body) }),
+    removeCitation: (id: string, citationId: string) =>
+      request<{ ok: boolean }>(`/api/documents/${id}/citations/${citationId}`, { method: 'DELETE' }),
+    exportCitations: (id: string, format: string) =>
+      request<string[]>(`/api/documents/${id}/export-citations?format=${format}`),
+  },
+
+  references: {
+    search: (query: string, limit = 8) =>
+      request<Reference[]>(`/api/references/search`, { method: 'POST', body: JSON.stringify({ query, limit }) }),
+    list: (projectId: string) => request<Reference[]>(`/api/references?projectId=${projectId}`),
+    create: (projectId: string, hit: Partial<Reference> & { title: string }) =>
+      request<Reference>('/api/references', { method: 'POST', body: JSON.stringify({ projectId, hit }) }),
+    importMany: (projectId: string, hits: (Partial<Reference> & { title: string })[]) =>
+      request<Reference[]>('/api/references/import', { method: 'POST', body: JSON.stringify({ projectId, hits }) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/api/references/${id}`, { method: 'DELETE' }),
+    summarize: (projectId: string, topic: string) =>
+      request<string>(`/api/references/summarize`, { method: 'POST', body: JSON.stringify({ projectId, topic }) }),
+  },
+
+  quality: {
+    review: (documentId: string, title: string, content: string) =>
+      request<QualityReport>('/api/quality', { method: 'POST', body: JSON.stringify({ documentId, title, content }) }),
+    history: (documentId: string) => request<QualityReport[]>(`/api/quality?documentId=${documentId}`),
+  },
+
+  pipeline: {
+    create: (projectId: string, topic: string) =>
+      request<PipelineTask>('/api/pipeline', { method: 'POST', body: JSON.stringify({ projectId, topic }) }),
+    get: (id: string) => request<PipelineTask>(`/api/pipeline/${id}`),
+    list: (projectId: string) => request<PipelineTask[]>(`/api/pipeline?projectId=${projectId}`),
+    confirmOutline: (id: string, outline?: Outline) =>
+      request<PipelineTask>(`/api/pipeline/${id}/confirm-outline`, { method: 'POST', body: JSON.stringify({ outline }) }),
+  },
+
+  chat: {
+    answer: (message: string, history: { role: string; content: string }[] = []) =>
+      request<{ answer: string }>('/api/chat', { method: 'POST', body: JSON.stringify({ message, history }) }),
+  },
+
+  submission: {
+    journals: (title: string, abstract: string, field: string) =>
+      request<string>('/api/submission/journals', { method: 'POST', body: JSON.stringify({ title, abstract, field }) }),
+    coverLetter: (title: string, abstract: string, journal: string) =>
+      request<string>('/api/submission/cover-letter', { method: 'POST', body: JSON.stringify({ title, abstract, journal }) }),
+    replyReview: (reviewComments: string, response: string) =>
+      request<string>('/api/submission/reply-review', { method: 'POST', body: JSON.stringify({ reviewComments, response }) }),
+  },
+};
+
+/** SSE 流式问答 */
+export function streamChat(
+  message: string,
+  history: { role: string; content: string }[],
+  onDelta: (text: string) => void,
+  onDone: (full: string) => void,
+  onError: (msg: string) => void,
+) {
+  fetch('/api/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, history }),
+  })
+    .then(async (res) => {
+      if (!res.ok || !res.body) throw new Error(`请求失败 (${res.status})`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let full = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t.startsWith('data:')) continue;
+          const payload = t.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const json = JSON.parse(payload) as any;
+            if (json.error) throw new Error(json.error);
+            const delta = json.delta;
+            if (delta) {
+              full += delta;
+              onDelta(full);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      onDone(full);
+    })
+    .catch((e) => onError(e.message || String(e)));
+}

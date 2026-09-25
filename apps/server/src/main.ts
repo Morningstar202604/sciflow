@@ -1,0 +1,18 @@
+import 'dotenv/config';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  app.enableCors({
+    origin: true, // 本地开发放开跨域
+    credentials: true,
+  });
+  app.setGlobalPrefix('api');
+  const port = Number(process.env.PORT || 3000);
+  await app.listen(port);
+  // eslint-disable-next-line no-console
+  console.log(`[SciFlow] API 已启动: http://localhost:${port}/api/health`);
+}
+
+bootstrap();
