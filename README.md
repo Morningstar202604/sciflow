@@ -1,6 +1,6 @@
 # SciFlow · 全自动 AI 科研助手
 
-> 多 Agent 编排流水线架构的科研工作台：输入一个研究主题，自动完成 **文献调研 → 大纲生成 → 分章起草 → 质量门评分（不达标自动回炉）→ 润色定稿 → 引用格式化** 的全流程。
+> 对标 2026 主流 Agent 方案（Claude Agent SDK / AutoGen / Deep Research）的科研工作台：输入一个研究主题，由 **Supervisor 编排器** 调度 5 类专业子 Agent（Planner / 并行 Research×3 / Writer / Reviewer / Polisher），完成 **研究规划 → 并行文献调研（ReAct）→ 大纲生成 → 分章起草（Agentic RAG 边写边查）→ 质量门评分（不达标 Reflexion 自动回炉）→ 润色定稿 → 引用格式化** 的全流程，并自动沉淀情景/程序记忆。
 
 ## ✨ 功能
 
@@ -8,7 +8,11 @@
 | --- | --- |
 | **论文写作** | 大纲生成（outline-first）、章节起草、三段式学术润色（原文+润色文+理由）、中英互译、降重改写、自动保存与多版本历史 |
 | **文献调研** | OpenAlex / arXiv / Semantic Scholar 三源真实检索、文献库管理、AI 结构化综述（每处观点绑定真实文献，防幻觉） |
-| **全自动流水线** | 8 步状态机：主题验证 → 文献调研 → 大纲生成（**人工确认点**）→ 分章起草 → **质量门评分（<80 自动回炉重写）** → 润色定稿 → 引用格式化 → 完成 |
+| **全自动流水线** | Supervisor 多 Agent 编排：**Planner** 研究计划（目标/子问题/检索策略/章节/风险）→ **Research×3 并行 ReAct**（think→act→observe 自主补检）→ 大纲生成（**人工确认点**）→ **Writer 分章起草**（Agentic RAG 每章补检）→ **Reviewer 7 维质量门（<80 触发 Reflexion 反思并回炉重写）** → **Polisher 润色** → 引用格式化 → 完成（自动沉淀情景记忆） |
+| **Agent 编排视图** | 流水线页可视化每个子 Agent 的执行状态/耗时/摘要（`/api/pipeline/:id/agents`） |
+| **MCP 工具台** | 13 个 AI 能力协议化为 11 个标准 MCP 工具（2026-07 规范），设置页可逐个可视化调用 |
+| **模型路由** | fast / strong 双档：问答润色走快模型，规划/长文/评审自动切强模型 |
+| **记忆中心** | 情景记忆（项目自动沉淀）+ 程序记忆（写作风格指令，起草自动注入） |
 | **质量评分** | 7 维评分（文献/逻辑/引用/语言/创新/图表/格式，0-100）+ ECharts 雷达图 + 历史评分对比 |
 | **科研问答** | SSE 流式多轮对话 |
 | **投稿辅助** | 期刊推荐、Cover Letter、审稿意见回复 |
@@ -18,12 +22,16 @@
 ```
 apps/
 ├── server/  NestJS 11 · TypeScript · Drizzle ORM · SQLite（better-sqlite3）
-│            · 原生 fetch 对接 OpenAI 兼容协议（OpenAI/DeepSeek/通义/豆包）
-│            · 7 张表：Project / Document / Reference / Citation / QualityReport / PipelineTask / PolishRecord
+│            · 原生 fetch 对接 OpenAI 兼容协议（OpenAI/DeepSeek/通义/豆包/Agnes）
+│            · 11 表：Project / Document / Reference / Citation / QualityReport / PipelineTask / PolishRecord
+│                     / KnowledgeDoc / KnowledgeChunk / ReflexionLog / MemoryLog / AgentRun
+│            · orchestrator/  Supervisor 编排器（五类子 Agent + 并行调度 + 轨迹记录）
+│            · mcp/           MCP 工具协议化（11 个工具，list/call/info 端点）
+│            · 全局令牌桶限流（AI_RPM_CAP 可配，稳定适配免费版 429）
 └── web/     React 19 · Vite · TypeScript · Tailwind CSS v4 · ECharts · lucide-react
 ```
 
-数据链条：`Project → Document（多版本）→ Citation → Reference（真实可追溯）`，`QualityReport` 关联文档可历史对比，`PipelineTask` 记录每步状态/回炉次数。
+数据链条：`Project → Document（多版本）→ Citation → Reference（真实可追溯）`；`PipelineTask` 记录步骤状态/回炉次数/ReAct 轨迹，`AgentRun` 记录每个子 Agent 的执行单元，`ReflexionLog` 保存质量回炉的反思指令，`MemoryLog` 沉淀情景/程序记忆。
 
 ## 🚀 快速开始
 
@@ -55,6 +63,9 @@ pnpm dev
 | `AI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.openai.com/v1` / `https://api.deepseek.com/v1` |
 | `AI_API_KEY` | API 密钥 | `sk-...` |
 | `AI_MODEL` | 模型名 | `gpt-4o-mini` / `deepseek-chat` |
+| `AI_MODEL_FAST` | fast 档模型（问答/润色/翻译） | `agnes-3.0-flash` |
+| `AI_MODEL_STRONG` | strong 档模型（规划/长文/评审） | 未配置则回落 fast |
+| `AI_RPM_CAP` | 每分钟最大 AI 调用数（令牌桶防 429） | `8` |
 
 未配置 Key 时应用可正常使用（项目管理/文献检索），AI 功能会给出明确配置提示，不会返回假数据。
 
@@ -93,6 +104,9 @@ sciflow/
 - **STORM**：outline-first 大纲先行写作
 - **Agent Laboratory**：分阶段流水线 + 人工确认点（Human-in-the-loop）
 - **GPT Researcher**：多源检索汇总
+- **Claude Agent SDK / AutoGen**：Supervisor 多 Agent 编排、并行子任务、可观测轨迹
+- **OpenAI Deep Research**：Agentic RAG 迭代式自定向检索（边写边查）
+- **Reflexion（Shinn et al.）**：评审失败提炼语义反思指令，回炉注入重写
 
 ## 📜 License
 
