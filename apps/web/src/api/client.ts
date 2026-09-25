@@ -1,7 +1,7 @@
 import type {
   Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, AppSettings, SelfCheck,
-  MemoryItem, McpToolInfo,
+  AgentRun, MemoryItem, McpToolInfo,
 } from '../types';
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -134,6 +134,7 @@ export const api = {
     list: (projectId: string) => request<PipelineTask[]>(`/api/pipeline?projectId=${projectId}`),
     confirmOutline: (id: string, outline?: Outline) =>
       request<PipelineTask>(`/api/pipeline/${id}/confirm-outline`, { method: 'POST', body: JSON.stringify({ outline }) }),
+    agents: (id: string) => request<AgentRun[]>(`/api/pipeline/${id}/agents`),
   },
 
   chat: {

@@ -48,11 +48,35 @@ export class AiService {
     }
   }
 
-  /** 非流式补全（429 限流自动退避重试，最多 3 次） */
+  // ---------- 全局令牌桶（适配免费版 RPM 限流：稳定排队，避免 429 风暴） ----------
+  private static tokens = Number(process.env.AI_RPM_CAP || 5); // 桶容量（每分钟额度）
+  private static lastRefill = Date.now();
+
+  private async acquireToken() {
+    const refillMs = 60_000;
+    while (true) {
+      const now = Date.now();
+      const elapsed = now - AiService.lastRefill;
+      if (elapsed >= refillMs) {
+        const refills = Math.floor(elapsed / refillMs);
+        AiService.tokens = Math.min(Number(process.env.AI_RPM_CAP || 5), AiService.tokens + refills);
+        AiService.lastRefill = now;
+      }
+      if (AiService.tokens >= 1) {
+        AiService.tokens -= 1;
+        return;
+      }
+      // 等待下一次补充（最长等 30s，避免静默死锁）
+      await new Promise((r) => setTimeout(r, Math.min(refillMs - elapsed + 200, 30_000)));
+    }
+  }
+
+  /** 非流式补全（全局令牌桶排队 + 429 退避重试） */
   async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
     this.assertConfigured();
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await this.acquireToken();
       try {
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
           method: 'POST',
@@ -70,7 +94,7 @@ export class AiService {
           signal: AbortSignal.timeout(180_000),
         });
         if (res.status === 429 && attempt < maxAttempts) {
-          const backoff = attempt * 5000;
+          const backoff = attempt * 10000;
           console.warn(`[AiService] 429 限流，${backoff / 1000}s 后重试 (${attempt}/${maxAttempts - 1})`);
           await new Promise((r) => setTimeout(r, backoff));
           continue;

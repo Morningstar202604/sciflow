@@ -74,6 +74,20 @@ export interface PipelineStep {
   retryCount: number;
 }
 
+export interface AgentRun {
+  id: string;
+  taskId: string;
+  agentType: string; // planner | research | writer | reviewer | polisher
+  agentName: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  input: string;
+  output: string;
+  detail: Record<string, any> | null;
+  error: string;
+  durationMs: number;
+  createdAt: number;
+}
+
 export interface ReactTraceStep {
   round: number;
   thought: string;

@@ -4,9 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs } from '../db/schema';
 import { AiService } from '../ai/ai.service';
-import { LiteratureService, PaperHit } from '../literature/literature.service';
+import { LiteratureService } from '../literature/literature.service';
 import { ReferencesService } from '../references/references.service';
 import { QualityService } from '../quality/quality.service';
+import { AgentOrchestratorService } from '../orchestrator/orchestrator.service';
 
 export interface PipelineStepState {
   key: string;
@@ -40,6 +41,7 @@ export class PipelineService {
     private readonly literature: LiteratureService,
     private readonly references: ReferencesService,
     private readonly quality: QualityService,
+    private readonly orchestrator: AgentOrchestratorService,
   ) {}
 
   /** 创建流水线任务并立即后台执行（借鉴 Agent Laboratory 三阶段流水线） */
@@ -85,6 +87,12 @@ export class PipelineService {
     return { ok: true };
   }
 
+  /** Phase 3：该流水线的子 Agent 执行轨迹 */
+  agentRuns(id: string) {
+    this.get(id);
+    return this.orchestrator.listRuns(id);
+  }
+
   // ---------- 状态机 ----------
 
   private loadSteps(id: string): PipelineStepState[] {
@@ -127,12 +135,9 @@ export class PipelineService {
     const task = this.get(taskId);
     const steps = task.steps;
 
-    // ① 主题验证 + 研究计划生成（Phase 1a：Planner，对标 GPT Researcher）
+    // ① Supervisor：Planner Agent 生成研究计划（Phase 1a + Phase 3 编排）
     await this.advance(taskId, 'topic-verify', 'running');
-    const verifiedTopic = await this.ai.chat(
-      `请把以下研究主题提炼为一句可执行的研究题目（直接输出题目本身，不要解释）：\n${task.topic}`,
-    );
-    const plan = await this.ai.generatePlan(task.topic);
+    const { verifiedTopic, plan } = await this.orchestrator.plannerAgent(taskId, task.topic);
     await this.advance(
       taskId,
       'topic-verify',
@@ -147,9 +152,10 @@ export class PipelineService {
       }),
     );
 
-    // ② 文献调研（Phase 1b：ReAct 自主检索循环，think → act → observe）
+    // ② Supervisor：3 路 ResearchAgent 并行 ReAct（Phase 1b + Phase 3 编排）
     await this.advance(taskId, 'literature', 'running');
-    const { hits, trace } = await this.reactResearch(taskId, task.topic, plan);
+    const { hits, trace } = await this.orchestrator.researchAgents(taskId, task.topic, plan);
+    db.update(pipelineTasks).set({ trace: JSON.stringify(trace), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
     if (hits.length > 0) {
       this.references.import(task.projectId, hits);
     }
@@ -157,7 +163,6 @@ export class PipelineService {
     const summary = refs.length
       ? await this.ai.summarizeLiterature(task.topic, refs.slice(0, 10).map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}）`).join('\n'))
       : '（未检索到文献，将按通用学术结构起草）';
-    this.saveTrace(taskId, trace);
     await this.advance(taskId, 'literature', 'done', `检索到 ${hits.length} 篇文献\n${summary.slice(0, 500)}`);
 
     // ③ 大纲生成 → 等待人工确认（Human-in-the-loop）
@@ -227,47 +232,53 @@ export class PipelineService {
     let report: { totalScore: number; feedback: string } | undefined;
 
     while (true) {
-      // ④ 分章起草（回炉时注入 Reflexion 反思指令 + 程序记忆写作风格）
+      // ④ Supervisor：Writer Agent 分章起草（注入 Reflexion + 程序记忆）
       await this.advance(taskId, 'drafting', 'running', retry > 0 ? `第 ${retry} 次回炉起草（依据反思指令重写）` : undefined);
       const reflexion = this.reflexionNote(taskId);
       const procedural = this.proceduralMemory(task.projectId);
       const styleHint = procedural ? `\n写作风格参考（来自记忆库）：${procedural}` : '';
-      let content = '';
-      for (const section of outline.sections) {
-        const refsPrompt = this.referencesForPrompt(task.projectId);
-        const sectionText = await this.ai.draftSection(
-          section.title,
-          JSON.stringify(outline),
-          `${refsPrompt}${styleHint}\n${reflexion ? `质量评审反馈（回炉改进指令）：${reflexion}` : ''}`,
+      const writerRes = await this.orchestrator.writerAgent(
+        taskId,
+        documentId,
+        doc.title,
+        outline,
+        { refsPrompt: this.referencesForPrompt(task.projectId), styleHint, reflexion },
+        { skipAgenticSearch: retry > 0 },
+      );
+      db.update(documents).set({ content: writerRes.content, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
+      // Phase 4：Writer Agent 补充检索到的文献回填文献库（Agentic RAG 闭环）
+      const agenticTitles = this.orchestrator.extractWriterHits(taskId);
+      if (agenticTitles.length > 0) {
+        this.references.import(
+          task.projectId,
+          agenticTitles.map((t) => ({ title: t, authors: [] })),
         );
-        content += `## ${section.title}\n\n${sectionText}\n\n`;
       }
-      db.update(documents).set({ content, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
-      await this.advance(taskId, 'drafting', 'done', `已起草 ${outline.sections.length} 个章节`);
+      const finalDoc0 = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
+      void finalDoc0;
+      await this.advance(taskId, 'drafting', 'done', writerRes.output);
 
-      // ⑤ 质量门评分
+      // ⑤ Supervisor：Reviewer Agent 质量门评分 + Reflexion 提炼
       await this.advance(taskId, 'quality-gate', 'running');
-      report = await this.quality.review(documentId, doc.title, content);
+      const latestDoc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
+      const review = await this.orchestrator.reviewerAgent(taskId, documentId, doc.title, latestDoc.content ?? '', task.topic, this.reflexionLogs(taskId));
+      report = review.report;
       await this.advance(taskId, 'quality-gate', 'done', `总分 ${report.totalScore}/100`);
 
       if (report.totalScore < QUALITY_THRESHOLD && retry < maxRetry) {
         retry += 1;
-        // Phase 1c：Reflexion —— 把评审意见提炼为可执行指令并落库（语义梯度，最多保留 3 轮）
-        try {
-          const past = this.reflexionLogs(taskId);
-          const ref = await this.ai.reflect(task.topic, report.feedback, past.join('\n'));
+        // Reflexion 落库（语义梯度，最多保留 3 轮）
+        if (review.reflexion) {
           db.insert(reflexionLogs)
             .values({
               id: randomUUID(),
               taskId,
               round: retry,
-              note: ref.note,
-              instructions: JSON.stringify(ref.instructions),
+              note: review.reflexion.note,
+              instructions: JSON.stringify(review.reflexion.instructions),
               createdAt: Date.now(),
             })
             .run();
-        } catch (e: any) {
-          this.logger.warn(`Reflexion 失败: ${e.message}`);
         }
         const q = this.loadSteps(taskId);
         q.find((s) => s.key === 'drafting')!.status = 'retry';
@@ -281,10 +292,10 @@ export class PipelineService {
       break;
     }
 
-    // ⑥ 润色定稿（三段式，借鉴 GPT-Academic）
+    // ⑥ Supervisor：Polisher Agent 润色定稿（三段式，借鉴 GPT-Academic）
     await this.advance(taskId, 'polish', 'running');
     const finalDoc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
-    const polished = await this.ai.polish(finalDoc.content ?? '', 'polish');
+    const polished = await this.orchestrator.polisherAgent(taskId, finalDoc.content ?? '');
     db.insert(polishRecords)
       .values({
         id: randomUUID(),
@@ -354,70 +365,6 @@ export class PipelineService {
       .slice(0, 12)
       .map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}${r.doi ? `，DOI:${r.doi}` : ''}）`)
       .join('\n');
-  }
-
-  /** Phase 1b：ReAct 自主检索循环（think → act → observe，最多 3 轮） */
-  private async reactResearch(
-    taskId: string,
-    topic: string,
-    plan: { researchQuestions: string[]; searchStrategy: { keywords: string[] } },
-  ): Promise<{ hits: PaperHit[]; trace: { round: number; thought: string; action: string; query: string; found: number }[] }> {
-    const trace: { round: number; thought: string; action: string; query: string; found: number }[] = [];
-    const seen = new Set<string>();
-    const hits: PaperHit[] = [];
-
-    // 先按计划的关键词 + 子问题做初始检索（覆盖各维度）
-    const seeds = [...new Set([...plan.searchStrategy.keywords, ...plan.researchQuestions])].slice(0, 4);
-    for (const q of seeds) {
-      try {
-        const res = await this.literature.search(q, 5);
-        for (const h of res) {
-          if (!seen.has(h.title)) {
-            seen.add(h.title);
-            hits.push(h);
-          }
-        }
-        trace.push({ round: trace.length + 1, thought: '按研究计划覆盖信息缺口', action: 'search', query: q, found: res.length });
-      } catch (e: any) {
-        this.logger.warn(`初始检索失败 [${q}]: ${e.message}`);
-      }
-    }
-
-    // ReAct 循环：AI 评估信息覆盖度，决定补充检索或收尾
-    const maxRounds = 3;
-    for (let r = 0; r < maxRounds && hits.length < 24; r++) {
-      const past = trace.map((t) => ({ round: t.round, query: t.query, found: t.found }));
-      const decision = await this.ai.reactThink(topic, plan.researchQuestions, past);
-      if (decision.action === 'done' || decision.coverage >= 85 || !decision.query) {
-        trace.push({
-          round: trace.length + 1,
-          thought: decision.thought || '信息已覆盖充分',
-          action: 'done',
-          query: '',
-          found: hits.length,
-        });
-        break;
-      }
-      try {
-        const res = await this.literature.search(decision.query, 6);
-        const added = res.filter((h) => !seen.has(h.title));
-        for (const h of added) {
-          seen.add(h.title);
-          hits.push(h);
-        }
-        trace.push({ round: trace.length + 1, thought: decision.thought, action: 'search', query: decision.query, found: added.length });
-      } catch (e: any) {
-        this.logger.warn(`ReAct 补充检索失败 [${decision.query}]: ${e.message}`);
-      }
-    }
-    if (trace[trace.length - 1]?.action !== 'done') {
-      trace.push({ round: trace.length + 1, thought: '达到检索轮次上限，进入综合', action: 'done', query: '', found: hits.length });
-    }
-    return { hits, trace };
-  }
-
-  private saveTrace(taskId: string, trace: unknown[]) {
-    db.update(pipelineTasks).set({ trace: JSON.stringify(trace), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
   }
 
   /** Reflexion 指令（最新一条）：回炉起草时注入 */

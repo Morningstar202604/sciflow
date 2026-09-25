@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { projects, documents, references, pipelineTasks } from '../db/schema';
+import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs } from '../db/schema';
 
 @Injectable()
 export class ProjectsService {
@@ -39,7 +39,12 @@ export class ProjectsService {
 
   remove(id: string) {
     this.get(id);
-    // 级联清理：文档、文献、流水线任务
+    // 级联清理：文档、文献、流水线任务及其子 Agent 轨迹、反思日志
+    const tasks = db.select().from(pipelineTasks).where(eq(pipelineTasks.projectId, id)).all();
+    for (const t of tasks) {
+      db.delete(agentRuns).where(eq(agentRuns.taskId, t.id)).run();
+      db.delete(reflexionLogs).where(eq(reflexionLogs.taskId, t.id)).run();
+    }
     db.delete(documents).where(eq(documents.projectId, id)).run();
     db.delete(references).where(eq(references.projectId, id)).run();
     db.delete(pipelineTasks).where(eq(pipelineTasks.projectId, id)).run();

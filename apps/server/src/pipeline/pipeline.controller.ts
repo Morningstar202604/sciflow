@@ -30,4 +30,10 @@ export class PipelineController {
   remove(@Param('id') id: string) {
     return this.pipeline.remove(id);
   }
+
+  /** Phase 3：查看该流水线的子 Agent 执行轨迹（Supervisor 编排视图） */
+  @Get(':id/agents')
+  agents(@Param('id') id: string) {
+    return this.pipeline.agentRuns(id);
+  }
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Brain, Check, ChevronRight, CircleDashed, Eye, Loader2, RotateCcw, Workflow, Zap } from 'lucide-react';
+import { Activity, Bot, Brain, Check, ChevronRight, CircleDashed, Eye, Loader2, RotateCcw, Workflow, Zap } from 'lucide-react';
 import { api } from '../api/client';
-import type { Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
+import type { AgentRun, Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Modal, Spinner, Textarea, jsonText } from '../components/ui';
 
 const STEP_LABELS: Record<string, string> = {
@@ -37,6 +37,8 @@ export function PipelinePage({ project }: { project: Project }) {
   const [editableOutline, setEditableOutline] = useState<Outline | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
+  const [showAgents, setShowAgents] = useState(false);
+  const [agents, setAgents] = useState<AgentRun[]>([]);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const active = tasks.find((t) => t.id === activeId) ?? null;
@@ -94,7 +96,9 @@ export function PipelinePage({ project }: { project: Project }) {
           .get(active.id)
           .then((t) => setTasks((s) => s.map((x) => (x.id === t.id ? t : x))))
           .catch(() => undefined);
+        api.pipeline.agents(active.id).then(setAgents).catch(() => undefined);
       }, 3000);
+      api.pipeline.agents(active.id).then(setAgents).catch(() => undefined);
     }
     return () => {
       if (pollTimer.current) clearInterval(pollTimer.current);
@@ -283,6 +287,41 @@ export function PipelinePage({ project }: { project: Project }) {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {/* Supervisor 编排视图（Phase 3：子 Agent 执行轨迹） */}
+                {agents.length > 0 && (
+                  <Card className="p-3 mb-3 bg-violet-50/40 border-violet-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-violet-700">
+                        <Bot size={13} className="text-violet-500" /> Supervisor 多 Agent 编排
+                      </span>
+                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowAgents((v) => !v)}>
+                        <Eye size={12} /> {showAgents ? '收起' : `${agents.length} 个 Agent`}
+                      </Button>
+                    </div>
+                    {showAgents && (
+                      <div className="text-xs">
+                        <div className="flex items-center gap-1.5 mb-2 text-violet-500">
+                          <Activity size={12} /> 规划 → 并行检索 → 写作 → 评审 → 润色（每格一个子 Agent 执行单元）
+                        </div>
+                        <div className="space-y-1">
+                          {agents.map((a) => (
+                            <div key={a.id} className="flex items-center gap-2 bg-white/70 rounded-md border border-slate-200 px-2 py-1.5">
+                              <span
+                                className={`w-2 h-2 rounded-full shrink-0 ${
+                                  a.status === 'done' ? 'bg-emerald-500' : a.status === 'failed' ? 'bg-rose-500' : 'bg-amber-400 animate-pulse'
+                                }`}
+                              />
+                              <span className="font-mono text-[11px] text-violet-700 w-28 shrink-0">{a.agentName}</span>
+                              <span className="text-slate-500 flex-1 min-w-0 truncate">{a.output || a.input}</span>
+                              <span className="text-slate-400 shrink-0">{a.status === 'done' ? `${(a.durationMs / 1000).toFixed(1)}s` : a.status === 'failed' ? `✗ ${(a.error || '').slice(0, 18)}` : '…'}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </Card>

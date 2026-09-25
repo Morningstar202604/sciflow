@@ -142,6 +142,21 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge_doc(project_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_doc ON knowledge_chunk(doc_id);
 CREATE INDEX IF NOT EXISTS idx_reflexion_task ON reflexion_log(task_id);
 CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_log(type);
+CREATE TABLE IF NOT EXISTS agent_run (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  agent_type TEXT NOT NULL,
+  agent_name TEXT NOT NULL,
+  status TEXT DEFAULT 'running',
+  input TEXT DEFAULT '',
+  output TEXT DEFAULT '',
+  detail TEXT DEFAULT '',
+  error TEXT DEFAULT '',
+  duration_ms INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_task ON agent_run(task_id);
 `);
 
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */

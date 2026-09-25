@@ -139,3 +139,21 @@ export const memoryLogs = sqliteTable('memory_log', {
 export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
 export type ReflexionLog = typeof reflexionLogs.$inferSelect;
 export type MemoryLog = typeof memoryLogs.$inferSelect;
+
+/** Phase 3：子 Agent 执行单元（Supervisor 编排的独立任务记录） */
+export const agentRuns = sqliteTable('agent_run', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull(), // 所属流水线任务
+  agentType: text('agent_type').notNull(), // planner | research | writer | reviewer | polisher
+  agentName: text('agent_name').notNull(), // 实例名（如 research#1、writer#intro）
+  status: text('status').default('running'), // pending | running | done | failed
+  input: text('input').default(''), // 输入（摘要）
+  output: text('output').default(''), // 输出摘要
+  detail: text('detail').default(''), // JSON：完整输入/输出/思考
+  error: text('error').default(''),
+  durationMs: integer('duration_ms').default(0),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type AgentRun = typeof agentRuns.$inferSelect;
