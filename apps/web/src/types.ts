@@ -97,3 +97,58 @@ export interface PolishRecord {
   reason: string;
   createdAt: number;
 }
+
+export interface KnowledgeDoc {
+  id: string;
+  projectId: string;
+  name: string;
+  type: string;
+  chunkCount: number;
+  createdAt: number;
+}
+
+export interface KnowledgeSource {
+  docName: string;
+  snippet: string;
+  score: number;
+}
+
+export interface KnowledgeQueryResult {
+  answer: string;
+  sources: KnowledgeSource[];
+}
+
+export interface ExtractedPaper {
+  ref: string;
+  title: string;
+  year: number;
+  method: string;
+  results: string;
+  contribution: string;
+  limitations: string;
+}
+
+export interface EvidenceStance {
+  claim: string;
+  stance: string;
+  count: number;
+  refs: string[];
+  note: string;
+}
+
+export interface EvidenceResult {
+  summary: string;
+  stances: EvidenceStance[];
+}
+
+export interface AppSettings {
+  ai: { baseUrl: string; model: string; configured: boolean; models: string[] };
+  env: { node: string; database: string; port: number };
+  sources: { literature: string[] };
+}
+
+export interface SelfCheck {
+  database: { ok: boolean; path: string };
+  ai: { configured: boolean; ok: boolean; model: string; latencyMs: number; detail: string };
+  timestamp: number;
+}

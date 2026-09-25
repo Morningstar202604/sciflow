@@ -89,6 +89,24 @@ export const polishRecords = sqliteTable('polish_record', {
   createdAt: integer('created_at').notNull(),
 });
 
+/** 知识库文档（NotebookLM 式 RAG：上传的资料原文） */
+export const knowledgeDocs = sqliteTable('knowledge_doc', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  name: text('name').notNull(),
+  type: text('type').default('text'), // text | pdf | markdown
+  chunkCount: integer('chunk_count').default(0),
+  createdAt: integer('created_at').notNull(),
+});
+
+/** 知识库分块（检索单元） */
+export const knowledgeChunks = sqliteTable('knowledge_chunk', {
+  id: text('id').primaryKey(),
+  docId: text('doc_id').notNull(),
+  content: text('content').notNull(),
+  seq: integer('seq').default(0),
+});
+
 export type Project = typeof projects.$inferSelect;
 export type Document = typeof documents.$inferSelect;
 export type Reference = typeof references.$inferSelect;
@@ -96,3 +114,5 @@ export type Citation = typeof citations.$inferSelect;
 export type QualityReport = typeof qualityReports.$inferSelect;
 export type PipelineTask = typeof pipelineTasks.$inferSelect;
 export type PolishRecord = typeof polishRecords.$inferSelect;
+export type KnowledgeDoc = typeof knowledgeDocs.$inferSelect;
+export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;

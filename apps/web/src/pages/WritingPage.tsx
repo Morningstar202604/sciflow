@@ -158,6 +158,19 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       setExportFormat(format);
     });
 
+  /** 导出全文 Markdown（标题+大纲+正文+引用） */
+  const exportFullDoc = () =>
+    run(async () => {
+      const { markdown, filename } = await api.documents.exportMarkdown(docId!);
+      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setError('');
+    });
+
   if (!doc) {
     return (
       <div className="max-w-2xl mx-auto">
@@ -412,6 +425,11 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
                 ))}
               </div>
             )}
+            <div className="flex gap-1.5 mt-2 border-t border-slate-100 pt-2">
+              <Button variant="outline" className="text-xs flex-1" onClick={exportFullDoc} disabled={!doc}>
+                导出全文 Markdown
+              </Button>
+            </div>
           </div>
 
           {/* 历史记录 */}

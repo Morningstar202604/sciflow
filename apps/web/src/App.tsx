@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  BookOpen, FlaskConical, LayoutDashboard, MessageSquare, Plus, Send, Sparkles, Trash2, Workflow,
+  BookOpen, FlaskConical, LayoutDashboard, MessageSquare, Plus, Send, Settings, Sparkles, Trash2, Workflow, BookMarked,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
@@ -12,17 +12,30 @@ import { PipelinePage } from './pages/PipelinePage';
 import { QualityPage } from './pages/QualityPage';
 import { ChatPage } from './pages/ChatPage';
 import { SubmissionPage } from './pages/SubmissionPage';
+import { KnowledgePage } from './pages/KnowledgePage';
+import { SettingsPage } from './pages/SettingsPage';
 
-export type View = 'dashboard' | 'writing' | 'literature' | 'pipeline' | 'quality' | 'chat' | 'submission';
+export type View =
+  | 'dashboard'
+  | 'writing'
+  | 'literature'
+  | 'pipeline'
+  | 'quality'
+  | 'chat'
+  | 'submission'
+  | 'knowledge'
+  | 'settings';
 
 const NAV: { key: View; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'dashboard', label: '工作台', icon: LayoutDashboard },
   { key: 'writing', label: '论文写作', icon: BookOpen },
   { key: 'literature', label: '文献调研', icon: FlaskConical },
+  { key: 'knowledge', label: '知识库', icon: BookMarked },
   { key: 'pipeline', label: '全自动流水线', icon: Workflow },
   { key: 'quality', label: '质量评分', icon: Sparkles },
   { key: 'chat', label: '科研问答', icon: MessageSquare },
   { key: 'submission', label: '投稿辅助', icon: Send },
+  { key: 'settings', label: '设置', icon: Settings },
 ];
 
 export default function App() {
@@ -175,7 +188,7 @@ export default function App() {
               <ErrorBox message={error} />
             </div>
           )}
-          {!currentProject ? (
+          {!currentProject && view !== 'settings' ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
               <div className="text-5xl">🔬</div>
               <div className="text-lg">请先创建一个研究项目</div>
@@ -185,13 +198,15 @@ export default function App() {
             </div>
           ) : (
             <>
-              {view === 'dashboard' && <DashboardPage project={currentProject} onNavigate={setView} openDoc={(id) => { setSelectedDocId(id); setView('writing'); }} />}
-              {view === 'writing' && <WritingPage project={currentProject} initialDocId={selectedDocId} />}
-              {view === 'literature' && <LiteraturePage project={currentProject} />}
-              {view === 'pipeline' && <PipelinePage project={currentProject} />}
-              {view === 'quality' && <QualityPage project={currentProject} />}
-              {view === 'chat' && <ChatPage project={currentProject} />}
-              {view === 'submission' && <SubmissionPage project={currentProject} />}
+              {view === 'settings' && <SettingsPage />}
+              {view === 'dashboard' && currentProject && <DashboardPage project={currentProject} onNavigate={setView} openDoc={(id) => { setSelectedDocId(id); setView('writing'); }} />}
+              {view === 'writing' && currentProject && <WritingPage project={currentProject} initialDocId={selectedDocId} />}
+              {view === 'literature' && currentProject && <LiteraturePage project={currentProject} />}
+              {view === 'knowledge' && currentProject && <KnowledgePage project={currentProject} />}
+              {view === 'pipeline' && currentProject && <PipelinePage project={currentProject} />}
+              {view === 'quality' && currentProject && <QualityPage project={currentProject} />}
+              {view === 'chat' && currentProject && <ChatPage project={currentProject} />}
+              {view === 'submission' && currentProject && <SubmissionPage project={currentProject} />}
             </>
           )}
         </main>

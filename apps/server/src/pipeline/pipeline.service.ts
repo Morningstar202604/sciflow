@@ -263,7 +263,13 @@ export class PipelineService {
         createdAt: Date.now(),
       })
       .run();
-    db.update(documents).set({ content: polished.polished, status: 'polished', updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
+    // 写库保险：若润色结果仍像未解析的 JSON，保留原文，避免污染正文
+    const polishedText = String(polished.polished ?? '');
+    const jsonLike = polishedText.trim().startsWith('{') && polishedText.includes('"original"');
+    db.update(documents)
+      .set({ content: jsonLike ? finalDoc.content : polishedText, status: 'polished', updatedAt: Date.now() })
+      .where(eq(documents.id, documentId))
+      .run();
     await this.advance(taskId, 'polish', 'done', '润色完成（原文+润色文+理由已存档）');
 
     // ⑦ 引用格式化

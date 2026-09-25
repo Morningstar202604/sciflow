@@ -72,12 +72,37 @@ export class ReferencesService {
   async summarize(projectId: string, topic: string) {
     const refs = this.list(projectId);
     if (refs.length === 0) throw new BadRequestException('文献库为空，请先检索并导入文献');
-    const papers = refs
+    const papers = this.paperListText(refs);
+    return this.ai.summarizeLiterature(topic, papers);
+  }
+
+  private paperListText(refs: (typeof references.$inferSelect)[]) {
+    return refs
       .map(
         (r, i) =>
           `[Ref:${i + 1}] ${r.title}（作者:${r.authors}，${r.year || 'n.d.'}，${r.venue}${r.doi ? `，DOI:${r.doi}` : ''}）\n摘要:${(r.abstract || '').slice(0, 300)}`,
       )
       .join('\n\n');
-    return this.ai.summarizeLiterature(topic, papers);
+  }
+
+  /** Elicit 式：文献结构化提取（方法/结果/贡献/局限） */
+  async extract(projectId: string) {
+    const refs = this.list(projectId);
+    if (refs.length === 0) throw new BadRequestException('文献库为空，请先检索并导入文献');
+    const papers = refs
+      .map((r, i) => `[Ref:${i + 1}] ${r.title}（年份:${r.year || 'n.d.'}）\n摘要:${(r.abstract || '').slice(0, 400)}`)
+      .join('\n\n');
+    const rows = await this.ai.extractPaperTable(papers);
+    return rows.map((row, i) => ({ ...row, ref: row.ref || String(i + 1) }));
+  }
+
+  /** Consensus 式：证据综合（论断 + 支持/矛盾 + 证据强度） */
+  async evidence(projectId: string, question: string) {
+    const refs = this.list(projectId);
+    if (refs.length === 0) throw new BadRequestException('文献库为空，请先检索并导入文献');
+    const papers = refs
+      .map((r, i) => `[Ref:${i + 1}] ${r.title}（年份:${r.year || 'n.d.'}）\n摘要:${(r.abstract || '').slice(0, 350)}`)
+      .join('\n\n');
+    return this.ai.evidenceSynthesis(question, papers);
   }
 }

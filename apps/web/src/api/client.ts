@@ -1,5 +1,6 @@
 import type {
   Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
+  KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, AppSettings, SelfCheck,
 } from '../types';
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -62,6 +63,8 @@ export const api = {
       request<{ ok: boolean }>(`/api/documents/${id}/citations/${citationId}`, { method: 'DELETE' }),
     exportCitations: (id: string, format: string) =>
       request<string[]>(`/api/documents/${id}/export-citations?format=${format}`),
+    exportMarkdown: (id: string) =>
+      request<{ markdown: string; filename: string }>(`/api/documents/${id}/export`),
   },
 
   references: {
@@ -75,6 +78,29 @@ export const api = {
     remove: (id: string) => request<{ ok: boolean }>(`/api/references/${id}`, { method: 'DELETE' }),
     summarize: (projectId: string, topic: string) =>
       request<string>(`/api/references/summarize`, { method: 'POST', body: JSON.stringify({ projectId, topic }) }),
+    extract: (projectId: string) =>
+      request<ExtractedPaper[]>(`/api/references/extract`, { method: 'POST', body: JSON.stringify({ projectId }) }),
+    evidence: (projectId: string, question: string) =>
+      request<EvidenceResult>(`/api/references/evidence`, { method: 'POST', body: JSON.stringify({ projectId, question }) }),
+  },
+
+  knowledge: {
+    list: (projectId: string) => request<KnowledgeDoc[]>(`/api/knowledge?projectId=${projectId}`),
+    upload: (projectId: string, name: string, type: string, content: string) =>
+      request<KnowledgeDoc>(`/api/knowledge/upload`, { method: 'POST', body: JSON.stringify({ projectId, name, type, content }) }),
+    query: (projectId: string, question: string) =>
+      request<KnowledgeQueryResult>(`/api/knowledge/query`, { method: 'POST', body: JSON.stringify({ projectId, question }) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/api/knowledge/${id}`, { method: 'DELETE' }),
+  },
+
+  settings: {
+    get: () => request<AppSettings>(`/api/settings`),
+    check: () => request<SelfCheck>(`/api/settings/check`),
+    testModel: (model: string) =>
+      request<{ ok: boolean; reply: string; model: string; latencyMs: number }>(`/api/settings/test`, {
+        method: 'POST',
+        body: JSON.stringify({ model }),
+      }),
   },
 
   quality: {

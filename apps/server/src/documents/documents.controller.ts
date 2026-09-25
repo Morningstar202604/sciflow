@@ -76,4 +76,10 @@ export class DocumentsController {
   exportCitations(@Param('id') id: string, @Query('format') format: string) {
     return this.documents.exportCitations(id, format || 'apa');
   }
+
+  /** 导出 Markdown 全文 */
+  @Get(':id/export')
+  exportMarkdown(@Param('id') id: string) {
+    return this.documents.exportMarkdown(id);
+  }
 }

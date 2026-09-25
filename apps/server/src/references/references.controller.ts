@@ -44,4 +44,16 @@ export class ReferencesController {
   summarize(@Body() body: { projectId: string; topic: string }) {
     return this.references.summarize(body.projectId, body.topic);
   }
+
+  /** Elicit 式：结构化提取（方法/结果/贡献/局限对比表） */
+  @Post('extract')
+  extract(@Body() body: { projectId: string }) {
+    return this.references.extract(body.projectId);
+  }
+
+  /** Consensus 式：证据综合（论断 + 支持/矛盾 + 证据强度） */
+  @Post('evidence')
+  evidence(@Body() body: { projectId: string; question: string }) {
+    return this.references.evidence(body.projectId, body.question);
+  }
 }

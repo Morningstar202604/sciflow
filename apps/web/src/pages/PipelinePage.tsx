@@ -15,6 +15,18 @@ const STEP_LABELS: Record<string, string> = {
   complete: '⑧ 完成',
 };
 
+/** 多 Agent 协作映射：每个流水线步骤由哪个 Agent 角色负责（对标 Deep Research / Agent Laboratory 分工） */
+const AGENT_MAP: Record<string, { role: string; tone: 'blue' | 'green' | 'indigo' | 'amber' | 'slate' }> = {
+  'topic-verify': { role: 'Planner', tone: 'slate' },
+  literature: { role: 'Researcher', tone: 'blue' },
+  outline: { role: 'Planner', tone: 'slate' },
+  drafting: { role: 'Writer', tone: 'green' },
+  'quality-gate': { role: 'Reviewer', tone: 'amber' },
+  polish: { role: 'Editor', tone: 'indigo' },
+  'citation-format': { role: 'Editor', tone: 'indigo' },
+  complete: { role: 'Manager', tone: 'slate' },
+};
+
 export function PipelinePage({ project }: { project: Project }) {
   const [tasks, setTasks] = useState<PipelineTask[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -192,6 +204,7 @@ export function PipelinePage({ project }: { project: Project }) {
                         <div className="flex-1 min-w-0 pt-0.5">
                           <div className="flex items-center gap-2">
                             <span className={`text-sm ${s.status === 'pending' ? 'text-slate-400' : 'text-slate-700'}`}>{STEP_LABELS[s.key] || s.label}</span>
+                            {AGENT_MAP[s.key] && <Badge tone={AGENT_MAP[s.key].tone}>{AGENT_MAP[s.key].role}</Badge>}
                             {s.retryCount > 0 && <Badge tone="red">回炉 {s.retryCount} 次</Badge>}
                           </div>
                           {s.output && (

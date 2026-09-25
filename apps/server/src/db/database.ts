@@ -97,12 +97,30 @@ CREATE TABLE IF NOT EXISTS polish_record (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS knowledge_doc (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT DEFAULT 'text',
+  chunk_count INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_chunk (
+  id TEXT PRIMARY KEY,
+  doc_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  seq INTEGER DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_document_project ON document(project_id);
 CREATE INDEX IF NOT EXISTS idx_reference_project ON reference(project_id);
 CREATE INDEX IF NOT EXISTS idx_citation_document ON citation(document_id);
 CREATE INDEX IF NOT EXISTS idx_quality_document ON quality_report(document_id);
 CREATE INDEX IF NOT EXISTS idx_pipeline_project ON pipeline_task(project_id);
 CREATE INDEX IF NOT EXISTS idx_polish_document ON polish_record(document_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge_doc(project_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_doc ON knowledge_chunk(doc_id);
 `);
 
 export const db: BetterSQLite3Database<typeof schema> = drizzle(sqlite, { schema });

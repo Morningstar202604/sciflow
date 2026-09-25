@@ -184,6 +184,41 @@ export class DocumentsService {
     );
   }
 
+  /** 导出 Markdown 全文（标题 + 大纲 + 正文 + 引用列表） */
+  exportMarkdown(id: string) {
+    const doc = this.get(id);
+    const outline = this.parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline || '[]');
+    const citeRows = db.select().from(citations).where(eq(citations.documentId, id)).all();
+    const refList = citeRows
+      .map((c) => db.select().from(references).where(eq(references.id, c.referenceId)).get())
+      .filter(Boolean) as any[];
+    const lines: string[] = [];
+    lines.push(`# ${doc.title}`);
+    lines.push('');
+    lines.push(`> 导出时间：${new Date().toLocaleString('zh-CN')} · SciFlow 全自动 AI 科研助手`);
+    lines.push('');
+    if (outline.sections?.length) {
+      lines.push('## 大纲');
+      outline.sections.forEach((s) => {
+        lines.push(`- ${s.title}`);
+        (s.subsections || []).forEach((sub) => lines.push(`  - ${sub}`));
+      });
+      lines.push('');
+    }
+    lines.push('## 正文');
+    lines.push('');
+    lines.push(doc.content || '（正文为空）');
+    lines.push('');
+    if (refList.length) {
+      lines.push('## 参考文献');
+      lines.push('');
+      refList.forEach((r, i) => {
+        lines.push(`${i + 1}. ${r.title}${r.authors && r.authors !== '[]' ? ` — ${r.authors}` : ''}${r.year ? ` (${r.year})` : ''}${r.venue ? `, ${r.venue}` : ''}${r.doi ? `, DOI: ${r.doi}` : ''}`);
+      });
+    }
+    return { markdown: lines.join('\n'), filename: `${doc.title.replace(/[\\/:*?"<>|]/g, '_')}.md` };
+  }
+
   private getRefsForPrompt(documentId: string): string {
     const rows = this.listCitations(documentId);
     return rows

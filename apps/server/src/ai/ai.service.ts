@@ -39,30 +39,49 @@ export class AiService {
     }
   }
 
-  /** 非流式补全 */
+  /** 非流式补全（429 限流自动退避重试，最多 3 次） */
   async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
     this.assertConfigured();
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages,
-        temperature: opts.temperature ?? 0.7,
-        max_tokens: opts.maxTokens ?? 4096,
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      throw new HttpException(`AI 服务调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: this.model,
+            messages,
+            temperature: opts.temperature ?? 0.7,
+            max_tokens: opts.maxTokens ?? 4096,
+            stream: false,
+          }),
+          signal: AbortSignal.timeout(180_000),
+        });
+        if (res.status === 429 && attempt < maxAttempts) {
+          const backoff = attempt * 5000;
+          console.warn(`[AiService] 429 限流，${backoff / 1000}s 后重试 (${attempt}/${maxAttempts - 1})`);
+          await new Promise((r) => setTimeout(r, backoff));
+          continue;
+        }
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          throw new HttpException(`AI 服务调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
+        }
+        const data = (await res.json()) as any;
+        return data.choices?.[0]?.message?.content ?? '';
+      } catch (e) {
+        if (e instanceof HttpException) throw e;
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, attempt * 3000));
+          continue;
+        }
+        throw e;
+      }
     }
-    const data = (await res.json()) as any;
-    return data.choices?.[0]?.message?.content ?? '';
+    throw new HttpException('AI 服务调用失败（多次重试后仍失败）', HttpStatus.BAD_GATEWAY);
   }
 
   /** 流式补全，返回上游响应体（Web ReadableStream），用于 SSE 转发 */
@@ -91,7 +110,27 @@ export class AiService {
   }
 
   private jsonOf<T>(text: string): T {
-    const cleaned = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+    let cleaned = String(text ?? '').replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+    // 若 AI 在 JSON 前加了叙述文字，取第一个平衡 JSON 对象
+    if (!cleaned.startsWith('{')) {
+      const start = cleaned.indexOf('{');
+      if (start >= 0) {
+        let depth = 0, inStr = false, esc = false;
+        for (let i = start; i < cleaned.length; i++) {
+          const c = cleaned[i];
+          if (inStr) {
+            if (esc) esc = false;
+            else if (c === '\\') esc = true;
+            else if (c === '"') inStr = false;
+          } else if (c === '"') inStr = true;
+          else if (c === '{') depth++;
+          else if (c === '}') {
+            depth--;
+            if (depth === 0) { cleaned = cleaned.slice(start, i + 1); break; }
+          }
+        }
+      }
+    }
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
     if (start < 0 || end < 0) throw new Error('AI 输出不是有效 JSON');
@@ -115,10 +154,15 @@ export class AiService {
     return this.complete([{ role: 'user', content: prompts.SUGGEST_TOPICS(field, context) }], { temperature: 0.8 });
   }
 
-  /** 大纲生成（outline-first） */
+  /** 大纲生成（outline-first）；解析失败时按纯文本标题兜底 */
   async writeOutline(topic: string, literatureSummary: string): Promise<{ title: string; sections: { title: string; subsections: string[] }[] }> {
     const raw = await this.complete([{ role: 'user', content: prompts.WRITE_OUTLINE(topic, literatureSummary) }], { temperature: 0.5 });
-    return this.jsonOf<{ title: string; sections: { title: string; subsections: string[] }[] }>(raw);
+    try {
+      const parsed = this.jsonOf<{ title: string; sections: { title: string; subsections: string[] }[] }>(raw);
+      return { title: parsed.title || topic, sections: Array.isArray(parsed.sections) ? parsed.sections : [] };
+    } catch {
+      return { title: topic, sections: [{ title: '引言', subsections: [] }, { title: '相关工作', subsections: [] }, { title: '方法', subsections: [] }, { title: '实验与结果', subsections: [] }, { title: '讨论', subsections: [] }, { title: '结论', subsections: [] }] };
+    }
   }
 
   /** 章节起草 */
@@ -126,10 +170,30 @@ export class AiService {
     return this.complete([{ role: 'user', content: prompts.DRAFT_SECTION(sectionTitle, outline, references) }], { temperature: 0.6 });
   }
 
-  /** 三段式润色/降重：原文 + 润色文 + 理由 */
+  /** 三段式润色/降重：原文 + 润色文 + 理由（AI 输出缺字段或嵌套时递归回退，防止落库异常） */
   async polish(text: string, mode: 'polish' | 'reduce' = 'polish'): Promise<{ original: string; polished: string; reason: string }> {
     const raw = await this.complete([{ role: 'user', content: prompts.POLISH(text, mode) }], { temperature: 0.4 });
-    return this.jsonOf<{ original: string; polished: string; reason: string }>(raw);
+    let parsed: Partial<{ original: string; polished: string; reason: string }> = {};
+    try {
+      parsed = this.jsonOf<{ original: string; polished: string; reason: string }>(raw);
+    } catch {
+      parsed = { polished: raw };
+    }
+    let polishedText = String(parsed.polished || text || '').trim();
+    // 处理 AI 嵌套输出：polished 字段本身又是 JSON 对象文本（含 original/reason 键）
+    if (polishedText.startsWith('{') && (polishedText.includes('"original"') || polishedText.includes('"reason"'))) {
+      try {
+        const nested = this.jsonOf<{ original?: string; polished?: string; reason?: string }>(polishedText);
+        polishedText = String(nested.polished || nested.original || polishedText).trim();
+      } catch {
+        /* 保持原样 */
+      }
+    }
+    return {
+      original: String(parsed.original || text || '').trim(),
+      polished: polishedText,
+      reason: String(parsed.reason || '').trim(),
+    };
   }
 
   /** 学术翻译 */
@@ -137,19 +201,24 @@ export class AiService {
     return this.complete([{ role: 'user', content: prompts.TRANSLATE(text, targetLang) }], { temperature: 0.3 });
   }
 
-  /** 7 维质量评审 */
+  /** 7 维质量评审（AI 输出缺维度时按 0 分兜底，防止总分异常） */
   async reviewPaper(title: string, content: string): Promise<{
     scores: { literature: number; logic: number; citation: number; language: number; novelty: number; figures: number; format: number };
     feedback: string;
     totalScore: number;
   }> {
     const raw = await this.complete([{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }], { temperature: 0.3 });
-    const parsed = this.jsonOf<{ scores: Record<string, number>; feedback: string }>(raw);
-    const scores = parsed.scores;
-    const total = Math.round(
-      (scores.literature + scores.logic + scores.citation + scores.language + scores.novelty + scores.figures + scores.format) / 7,
-    );
-    return { scores: scores as any, feedback: parsed.feedback, totalScore: total };
+    let parsed: { scores?: Record<string, number>; feedback?: string } = {};
+    try {
+      parsed = this.jsonOf<{ scores: Record<string, number>; feedback: string }>(raw);
+    } catch {
+      /* 保留空对象兜底 */
+    }
+    const dims = ['literature', 'logic', 'citation', 'language', 'novelty', 'figures', 'format'] as const;
+    const scores = {} as Record<string, number>;
+    for (const d of dims) scores[d] = Math.max(0, Math.min(100, Number(parsed.scores?.[d]) || 0));
+    const total = Math.round(dims.reduce((sum, d) => sum + scores[d], 0) / dims.length);
+    return { scores: scores as any, feedback: String(parsed.feedback || '').trim(), totalScore: total };
   }
 
   /** 文献综述 */
@@ -170,6 +239,98 @@ export class AiService {
   /** 审稿回复 */
   async replyReview(reviewComments: string, response: string): Promise<string> {
     return this.complete([{ role: 'user', content: prompts.REPLY_REVIEW(reviewComments, response) }], { temperature: 0.5 });
+  }
+
+  /** 查询可用模型列表（OpenAI 兼容 /v1/models） */
+  async listModels(): Promise<string[]> {
+    this.assertConfigured();
+    try {
+      const res = await fetch(`${this.baseUrl}/models`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return [];
+      const data = (await res.json()) as any;
+      const ids: string[] = (data.data || []).map((m: any) => m.id).filter((id: string) => !id.includes('image') && !id.includes('video'));
+      return ids.slice(0, 20);
+    } catch {
+      return [];
+    }
+  }
+
+  /** 连接测试：发一条最小消息验证 Key/端点/模型 */
+  async testConnection(model?: string): Promise<{ ok: boolean; reply: string; model: string; latencyMs: number }> {
+    this.assertConfigured();
+    const target = model || this.model;
+    const t0 = Date.now();
+    try {
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+        body: JSON.stringify({
+          model: target,
+          messages: [{ role: 'user', content: '请只回复两个字：正常' }],
+          max_tokens: 16,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!res.ok) {
+        const err = await res.text().catch(() => '');
+        return { ok: false, reply: `HTTP ${res.status}: ${err.slice(0, 200)}`, model: target, latencyMs: Date.now() - t0 };
+      }
+      const data = (await res.json()) as any;
+      return { ok: true, reply: data.choices?.[0]?.message?.content ?? '（空回复）', model: target, latencyMs: Date.now() - t0 };
+    } catch (e: any) {
+      return { ok: false, reply: e.message || String(e), model: target, latencyMs: Date.now() - t0 };
+    }
+  }
+
+  /** Elicit 式：文献结构化提取（字段统一字符串化） */
+  async extractPaperTable(papers: string): Promise<{ ref: string; title: string; year: number; method: string; results: string; contribution: string; limitations: string }[]> {
+    const raw = await this.complete([{ role: 'user', content: prompts.EXTRACT_PAPER_TABLE(papers) }], { temperature: 0.2 });
+    try {
+      const parsed = this.jsonOf<{ papers: any[] }>(raw);
+      return (parsed.papers || []).slice(0, 12).map((p: any) => ({
+        ref: String(p?.ref ?? ''),
+        title: String(p?.title ?? ''),
+        year: Number(p?.year) || 0,
+        method: String(p?.method ?? ''),
+        results: String(p?.results ?? ''),
+        contribution: String(p?.contribution ?? ''),
+        limitations: String(p?.limitations ?? ''),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Consensus 式：证据综合（字段统一字符串化） */
+  async evidenceSynthesis(
+    question: string,
+    papers: string,
+  ): Promise<{ summary: string; stances: { claim: string; stance: string; count: number; refs: string[]; note: string }[] }> {
+    const raw = await this.complete([{ role: 'user', content: prompts.EVIDENCE_SYNTHESIS(question, papers) }], { temperature: 0.3 });
+    try {
+      const parsed = this.jsonOf<{ summary: string; stances: any[] }>(raw);
+      return {
+        summary: String(parsed.summary || ''),
+        stances: (parsed.stances || []).map((s: any) => ({
+          claim: String(s?.claim ?? ''),
+          stance: String(s?.stance ?? '证据不足'),
+          count: Number(s?.count) || 0,
+          refs: Array.isArray(s?.refs) ? s.refs.map(String) : [],
+          note: String(s?.note ?? ''),
+        })),
+      };
+    } catch {
+      return { summary: '证据综合失败：模型输出无法解析，请重试。', stances: [] };
+    }
+  }
+
+  /** NotebookLM 式：知识库检索增强问答 */
+  async knowledgeQa(question: string, chunks: string): Promise<string> {
+    return this.complete([{ role: 'user', content: prompts.KNOWLEDGE_QA(question, chunks) }], { temperature: 0.3, maxTokens: 2048 });
   }
 }
 
