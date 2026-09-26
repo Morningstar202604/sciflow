@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { BookOpenCheck, Download, FlaskConical, GitCompareArrows, Lightbulb, ListChecks, Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { BookOpenCheck, Download, FlaskConical, GitCompareArrows, Lightbulb, ListChecks, Loader2, Plus, Search, Table2, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { DeepDiveResult, EvidenceResult, ExtractedPaper, GapResult, Project, Reference } from '../types';
+import type { DeepDiveResult, EvidenceResult, ExtractedPaper, GapResult, PaperComparisonResult, Project, Reference } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, jsonText } from '../components/ui';
 
-type Tool = 'summary' | 'extract' | 'evidence' | 'deepdive' | 'gap';
+type Tool = 'summary' | 'extract' | 'evidence' | 'deepdive' | 'gap' | 'compare';
 
 const TOOLS: { key: Tool; label: string; icon: typeof ListChecks; hint: string }[] = [
   { key: 'summary', label: '文献综述', icon: Download, hint: 'STORM 式结构化综述' },
@@ -14,6 +14,7 @@ const TOOLS: { key: Tool; label: string; icon: typeof ListChecks; hint: string }
   { key: 'evidence', label: '证据综合', icon: GitCompareArrows, hint: 'Consensus 式共识度' },
   { key: 'deepdive', label: '单篇精读', icon: BookOpenCheck, hint: 'Lateral 式论文解剖' },
   { key: 'gap', label: '研究缺口', icon: Lightbulb, hint: '科研选题定位' },
+  { key: 'compare', label: '文献对比', icon: Table2, hint: '多篇横向对比表' },
 ];
 
 export function LiteraturePage({ project }: { project: Project }) {
@@ -33,6 +34,8 @@ export function LiteraturePage({ project }: { project: Project }) {
   const [deepDiveRef, setDeepDiveRef] = useState('');
   const [gapResult, setGapResult] = useState<GapResult | null>(null);
   const [gapTopic, setGapTopic] = useState('');
+  const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
+  const [comparison, setComparison] = useState<PaperComparisonResult | null>(null);
   const toast = useContext(ToastContext);
 
   useEffect(() => {
@@ -149,6 +152,24 @@ export function LiteraturePage({ project }: { project: Project }) {
     }
   };
 
+  const runCompare = async () => {
+    const chosen = refs.filter((r) => selectedRefs.has(r.id));
+    if (chosen.length < 2) {
+      setError('请至少选择两篇文献进行对比');
+      return;
+    }
+    setBusy('compare');
+    setError('');
+    try {
+      setComparison(await api.research.comparison(chosen.map((r) => ({ title: r.title, year: r.year, venue: r.venue, abstract: r.abstract || '' }))));
+      toast('success', '文献对比完成');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
   const authors = (a: string) => jsonText<string[]>(a, []).join(', ') || '佚名';
   const stanceTone = (s: string) => (s.includes('支持') && !s.includes('部分') ? 'green' : s.includes('矛盾') ? 'red' : s.includes('部分') ? 'amber' : 'slate');
 
@@ -228,6 +249,9 @@ export function LiteraturePage({ project }: { project: Project }) {
             <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
               <FlaskConical size={14} /> 文献库（{refs.length} 条）
             </span>
+            {selectedRefs.size > 0 && (
+              <Badge tone="teal">已选 {selectedRefs.size} 篇（可用于对比）</Badge>
+            )}
           </div>
           {refs.length === 0 ? (
             <Empty text="文献库为空：检索后导入，或到全自动流水线自动收集" />
@@ -235,6 +259,13 @@ export function LiteraturePage({ project }: { project: Project }) {
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
               {refs.map((r) => (
                 <div key={r.id} className="border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1.5 accent-teal-600"
+                    checked={selectedRefs.has(r.id)}
+                    onChange={() => setSelectedRefs((s0) => { const n = new Set(s0); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })}
+                    title="勾选后可用于文献对比"
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm text-slate-800 dark:text-slate-100">{r.title}</div>
                     <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
@@ -416,6 +447,48 @@ export function LiteraturePage({ project }: { project: Project }) {
                 </div>
               ) : (
                 <Empty text="基于文献库定位未被充分研究的子问题（Research Gap），并给出可行选题建议与可行性评估" />
+              )}
+            </>
+          )}
+
+          {tool === 'compare' && (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">多文献横向对比（研究问题/方法/结论/局限）</span>
+                <Button variant="outline" className="text-xs" onClick={runCompare} disabled={busy === 'compare' || selectedRefs.size < 2}>
+                  {busy === 'compare' ? <Loader2 size={13} className="animate-spin" /> : <Table2 size={13} />} 生成对比表
+                </Button>
+              </div>
+              {busy === 'compare' ? (
+                <Spinner label="AI 横向对比文献…" />
+              ) : comparison ? (
+                <div className="max-h-[460px] overflow-auto rounded-lg border border-slate-100 dark:border-slate-800">
+                  <div className="bg-slate-50 dark:bg-slate-900/50 p-3 text-xs text-slate-600 dark:text-slate-300 border-b border-slate-100 dark:border-slate-800">{comparison.summary}</div>
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 sticky top-0">
+                      <tr>
+                        <th className="px-2 py-2 text-left">文献</th>
+                        <th className="px-2 py-2 text-left">研究问题</th>
+                        <th className="px-2 py-2 text-left">方法</th>
+                        <th className="px-2 py-2 text-left">主要结论</th>
+                        <th className="px-2 py-2 text-left">局限</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparison.rows.map((r, i) => (
+                        <tr key={i} className="border-t border-slate-100 dark:border-slate-800 align-top">
+                          <td className="px-2 py-2 max-w-[150px] font-medium text-slate-700 dark:text-slate-200">{r.paper}</td>
+                          <td className="px-2 py-2 text-slate-600 dark:text-slate-300">{r.研究问题}</td>
+                          <td className="px-2 py-2 text-slate-600 dark:text-slate-300">{r.方法}</td>
+                          <td className="px-2 py-2 text-slate-600 dark:text-slate-300">{r.主要结论}</td>
+                          <td className="px-2 py-2 text-slate-500 dark:text-slate-400">{r.局限}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <Empty text="勾选左侧文献库 2 篇以上文献（复选框），AI 生成研究问题 / 方法 / 结论 / 局限的横向对比表" />
               )}
             </>
           )}

@@ -177,6 +177,28 @@ export interface EvidenceStance {
   note: string;
 }
 
+export interface ResearchDesignResult {
+  noveltyScore: number;
+  noveltyFeedback: string;
+  feasibilityScore: number;
+  feasibilityFeedback: string;
+  methods: string[];
+  risks: string[];
+  nextSteps: string[];
+  paperCount: number;
+}
+
+export interface PaperComparisonResult {
+  summary: string;
+  rows: { paper: string; 研究问题: string; 方法: string; 主要结论: string; 局限: string }[];
+}
+
+export interface SimulatedReviewResult {
+  reviewers: { role: string; score: number; strengths: string[]; concerns: string[]; suggestion: string }[];
+  verdict: string;
+  overall: string;
+}
+
 export interface DeepDiveResult {
   title: string;
   oneLine: string;

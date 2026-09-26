@@ -1,7 +1,7 @@
 import type {
   Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
-  AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo,
+  AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult,
 } from '../types';
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -79,6 +79,15 @@ export const api = {
     exportMarkdown: (id: string) =>
       request<{ markdown: string; filename: string }>(`/api/documents/${id}/export`),
     abstract: (id: string) => request<{ abstract: string; keywords: string[] }>(`/api/documents/${id}/abstract`, { method: 'POST' }),
+  },
+
+  research: {
+    designReview: (idea: string, papers: { title: string; year?: number | null; venue?: string; abstract?: string }[]) =>
+      request<ResearchDesignResult>(`/api/research/design-review`, { method: 'POST', body: JSON.stringify({ idea, papers }) }),
+    comparison: (papers: { title: string; year?: number | null; venue?: string; abstract?: string }[]) =>
+      request<PaperComparisonResult>(`/api/research/comparison`, { method: 'POST', body: JSON.stringify({ papers }) }),
+    review: (title: string, content: string) =>
+      request<SimulatedReviewResult>(`/api/research/review`, { method: 'POST', body: JSON.stringify({ title, content }) }),
   },
 
   references: {

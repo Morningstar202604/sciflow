@@ -3,11 +3,11 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { BookOpen, Check, ChevronRight, Eye, FileText, Languages, ListTree, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { BookOpen, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Languages, ListTree, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { CitationRow, Doc, Outline, Project, Reference } from '../types';
+import type { CitationRow, Doc, Outline, Project, Reference, ResearchDesignResult, SimulatedReviewResult } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, Textarea, jsonText } from '../components/ui';
 
 export function WritingPage({ project, initialDocId }: { project: Project; initialDocId: string | null }) {
@@ -33,6 +33,9 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [exportFormat, setExportFormat] = useState('apa');
   const [exported, setExported] = useState<string[]>([]);
   const [abstractResult, setAbstractResult] = useState<{ abstract: string; keywords: string[] } | null>(null);
+  const [designResult, setDesignResult] = useState<ResearchDesignResult | null>(null);
+  const [designIdea, setDesignIdea] = useState('');
+  const [reviewResult, setReviewResult] = useState<SimulatedReviewResult | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadDocs = useCallback(async () => {
@@ -188,6 +191,24 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       const r = await api.documents.abstract(docId!);
       setAbstractResult(r);
       toast('success', '摘要与关键词已生成');
+    });
+
+  /** 科研加强：研究设计诊断（选题阶段：新颖性/可行性/风险/下一步） */
+  const runDesignReview = () =>
+    run(async () => {
+      if (!designIdea.trim()) throw new Error('请先描述你的研究想法');
+      const r = await api.research.designReview(designIdea.trim(), refs.map((x) => ({ title: x.title, year: x.year, venue: x.venue, abstract: x.abstract || '' })));
+      setDesignResult(r);
+      toast('success', '研究设计诊断完成');
+    });
+
+  /** 科研加强：模拟同行评审（3 位审稿人 + 主编综合决定） */
+  const runSimulatedReview = () =>
+    run(async () => {
+      if (!content.trim()) throw new Error('请先撰写论文正文');
+      const r = await api.research.review(doc?.title || '未命名论文', content);
+      setReviewResult(r);
+      toast('success', '模拟同行评审完成');
     });
 
   /** 科研加强：导出 LaTeX 全文（标题 + 摘要占位 + 正文 + GB/T 7714 参考文献） */
@@ -434,6 +455,47 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             )}
           </div>
 
+          {/* 科研加强：研究设计诊断 */}
+          <div className="mb-4">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">研究设计诊断（选题阶段：新颖性 / 可行性 / 风险）</div>
+            <Textarea
+              rows={2}
+              placeholder="描述你的研究想法，如：用图神经网络预测蛋白质-药物相互作用…"
+              value={designIdea}
+              onChange={(e) => setDesignIdea(e.target.value)}
+              className="mb-2"
+            />
+            <Button variant="outline" className="text-xs w-full" onClick={runDesignReview} disabled={aiBusy || !designIdea.trim()}>
+              <FlaskConical size={12} className="text-teal-600" /> 诊断研究想法
+            </Button>
+            {designResult && !('error' in designResult) && (
+              <div className="mt-2 text-xs space-y-2">
+                <div className="flex gap-2">
+                  <div className="flex-1 rounded-lg border border-teal-200 dark:border-teal-800 p-2">
+                    <div className="text-teal-700 dark:text-teal-300 font-medium mb-0.5">新颖性 {designResult.noveltyScore}/100</div>
+                    <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{designResult.noveltyFeedback}</div>
+                  </div>
+                  <div className="flex-1 rounded-lg border border-sky-200 dark:border-sky-800 p-2">
+                    <div className="text-sky-700 dark:text-sky-300 font-medium mb-0.5">可行性 {designResult.feasibilityScore}/100</div>
+                    <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{designResult.feasibilityFeedback}</div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                  <div className="text-slate-500 dark:text-slate-400 mb-0.5">建议方法</div>
+                  <div className="flex flex-wrap gap-1">{designResult.methods.map((m, i) => <span key={i} className="bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5 text-slate-600 dark:text-slate-300">{m}</span>)}</div>
+                </div>
+                <div className="rounded-lg border border-amber-100 dark:border-amber-900 bg-amber-50/30 dark:bg-amber-900/10 p-2">
+                  <div className="text-amber-600 dark:text-amber-400 mb-0.5">风险</div>
+                  <ul className="list-disc pl-4 text-slate-600 dark:text-slate-300">{designResult.risks.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                </div>
+                <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                  <div className="text-teal-600 dark:text-teal-400 mb-0.5">下一步</div>
+                  <ol className="list-decimal pl-4 text-slate-600 dark:text-slate-300">{designResult.nextSteps.map((n, i) => <li key={i}>{n}</li>)}</ol>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 章节起草 */}
           <div className="mb-4">
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">章节起草（点击大纲章节或选择）</div>
@@ -475,6 +537,33 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                 <Languages size={14} /> 翻译
               </Button>
             </div>
+          </div>
+
+          {/* 科研加强：模拟同行评审 */}
+          <div className="mb-4">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">模拟同行评审（投稿前：3 审稿人 + 主编决定）</div>
+            <Button variant="outline" className="text-xs w-full" onClick={runSimulatedReview} disabled={aiBusy || !content.trim()}>
+              <ClipboardCheck size={12} className="text-teal-600" /> 模拟评审全文
+            </Button>
+            {reviewResult && !('error' in reviewResult) && (
+              <div className="mt-2 text-xs space-y-2">
+                <div className="rounded-lg bg-teal-50/60 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 p-2">
+                  <div className="text-teal-700 dark:text-teal-300 font-medium mb-0.5">主编决定：{reviewResult.verdict}</div>
+                  <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{reviewResult.overall}</div>
+                </div>
+                {reviewResult.reviewers.map((rv, i) => (
+                  <div key={i} className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-slate-700 dark:text-slate-200">{rv.role}</span>
+                      <Badge tone={rv.score >= 80 ? 'green' : rv.score >= 60 ? 'amber' : 'red'}>{rv.score} 分</Badge>
+                    </div>
+                    <div className="text-slate-600 dark:text-slate-300 mb-1">👍 {rv.strengths.join('；')}</div>
+                    <div className="text-slate-500 dark:text-slate-400 mb-1">⚠ {rv.concerns.join('；')}</div>
+                    <div className="text-teal-600 dark:text-teal-400">建议：{rv.suggestion}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 润色结果对比 */}
