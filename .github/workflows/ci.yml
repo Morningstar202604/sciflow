@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-typecheck:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck server
+        run: pnpm --filter server typecheck
+
+      - name: Typecheck web
+        run: pnpm --filter web typecheck
+
+      - name: Build server
+        run: pnpm --filter server build
+
+      - name: Build web
+        run: pnpm --filter web build
+        env:
+          CI: false
+
+      - name: Verify no .env tracked
+        run: |
+          if git ls-files | grep -q '\.env$'; then
+            echo "::error::.env 文件不应被提交（包含密钥）"
+            exit 1
+          fi
+          echo "✓ .env 未被跟踪"

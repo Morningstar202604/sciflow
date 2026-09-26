@@ -157,3 +157,28 @@ export const agentRuns = sqliteTable('agent_run', {
 });
 
 export type AgentRun = typeof agentRuns.$inferSelect;
+
+/** 模型厂商（可插拔多模型：OpenAI/DeepSeek/通义/豆包/Agnes 等，LiteLLM 式） */
+export const modelProviders = sqliteTable('model_provider', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  baseUrl: text('base_url').notNull(),
+  apiKey: text('api_key').default(''),
+  model: text('model').notNull(),
+  isActive: integer('is_active').default(0),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type ModelProvider = typeof modelProviders.$inferSelect;
+
+/** 外部 MCP 服务器（工具生态互通：可接入任意 MCP 兼容服务） */
+export const mcpServers = sqliteTable('mcp_server', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  url: text('url').notNull(),
+  enabled: integer('enabled').default(1),
+  createdAt: integer('created_at').notNull(),
+});
+
+export type McpServer = typeof mcpServers.$inferSelect;

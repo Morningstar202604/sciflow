@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param } from '@nestjs/common';
 import { SettingsService } from './settings.service';
 
 @Controller('settings')
@@ -21,5 +21,42 @@ export class SettingsController {
   @Post('test')
   testModel(@Body() body: { model?: string }) {
     return this.settings.testModel(body.model || '');
+  }
+
+  // ---------- 模型厂商管理（LiteLLM 式多厂商） ----------
+  @Get('providers')
+  listProviders() {
+    return this.settings.listProviders();
+  }
+
+  @Post('providers')
+  saveProvider(@Body() body: { id?: string; name: string; baseUrl: string; apiKey?: string; model: string }) {
+    return this.settings.saveProvider(body);
+  }
+
+  @Post('providers/:id/activate')
+  activateProvider(@Param('id') id: string) {
+    return this.settings.activateProvider(id);
+  }
+
+  @Delete('providers/:id')
+  removeProvider(@Param('id') id: string) {
+    return this.settings.removeProvider(id);
+  }
+
+  // ---------- 外部 MCP 服务器 ----------
+  @Get('mcp-servers')
+  listMcpServers() {
+    return this.settings.listMcpServers();
+  }
+
+  @Post('mcp-servers')
+  saveMcpServer(@Body() body: { id?: string; name: string; url: string; enabled?: number }) {
+    return this.settings.saveMcpServer(body);
+  }
+
+  @Delete('mcp-servers/:id')
+  removeMcpServer(@Param('id') id: string) {
+    return this.settings.removeMcpServer(id);
   }
 }

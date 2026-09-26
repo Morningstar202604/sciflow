@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Database, FlaskConical, Loader2, Plug, RefreshCw, Server, Wrench, XCircle } from 'lucide-react';
 import { api } from '../api/client';
-import type { AppSettings, McpToolInfo, SelfCheck } from '../types';
+import type { AppSettings, McpServerInfo, McpToolInfo, ModelProvider, SelfCheck } from '../types';
 import { Badge, Button, Card, ErrorBox, SectionTitle, Select, Spinner, Textarea } from '../components/ui';
 
 export function SettingsPage() {
@@ -17,12 +17,21 @@ export function SettingsPage() {
   const [toolArgs, setToolArgs] = useState<Record<string, string>>({});
   const [toolResult, setToolResult] = useState<string>('');
   const [toolLoading, setToolLoading] = useState(false);
+  const [providers, setProviders] = useState<ModelProvider[]>([]);
+  const [provForm, setProvForm] = useState({ name: '', baseUrl: '', apiKey: '', model: '' });
+  const [mcpServers, setMcpServers] = useState<McpServerInfo[]>([]);
+  const [mcpServerForm, setMcpServerForm] = useState({ name: '', url: '' });
+  const [externalTools, setExternalTools] = useState<{ name?: string; description?: string }[]>([]);
+  const [externalResult, setExternalResult] = useState<string>('');
+  const [activeServerId, setActiveServerId] = useState('');
 
   const load = async () => {
     try {
       setSettings(await api.settings.get());
       setMcpInfo(await api.mcp.info());
       setMcpTools((await api.mcp.tools()).tools);
+      setProviders(await api.settings.listProviders());
+      setMcpServers(await api.settings.listMcpServers());
     } catch (e: any) {
       setError(e.message);
     }
@@ -137,6 +146,85 @@ export function SettingsPage() {
           </div>
         </Card>
       )}
+
+      {/* 模型厂商管理（LiteLLM 式多厂商切换） */}
+      <Card className="p-5 mb-4">
+        <SectionTitle
+          extra={
+            <Button
+              variant="outline"
+              disabled={!provForm.name || !provForm.baseUrl || !provForm.model}
+              onClick={async () => {
+                try {
+                  await api.settings.saveProvider(provForm);
+                  setProvForm({ name: '', baseUrl: '', apiKey: '', model: '' });
+                  setProviders(await api.settings.listProviders());
+                  setSettings(await api.settings.get());
+                } catch (e: any) {
+                  setError(e.message);
+                }
+              }}
+            >
+              <Plug size={14} /> 添加厂商
+            </Button>
+          }
+        >
+          <span className="flex items-center gap-2">
+            <Server size={16} className="text-indigo-600" /> 模型厂商管理（可插拔多模型）
+          </span>
+        </SectionTitle>
+        <div className="text-xs text-slate-400 mb-3">
+          配置任意 OpenAI 兼容厂商（OpenAI / DeepSeek / 通义 / 豆包 / Agnes…），激活后立即切换所有 AI 调用的模型
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+          <input className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="厂商名（如 DeepSeek）" value={provForm.name} onChange={(e) => setProvForm({ ...provForm, name: e.target.value })} />
+          <input className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="Base URL（…/v1）" value={provForm.baseUrl} onChange={(e) => setProvForm({ ...provForm, baseUrl: e.target.value })} />
+          <input className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="API Key" type="password" value={provForm.apiKey} onChange={(e) => setProvForm({ ...provForm, apiKey: e.target.value })} />
+          <input className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="模型名（如 deepseek-chat）" value={provForm.model} onChange={(e) => setProvForm({ ...provForm, model: e.target.value })} />
+        </div>
+        {providers.length === 0 ? (
+          <div className="text-xs text-slate-400">暂无自定义厂商，当前使用 apps/server/.env 的配置</div>
+        ) : (
+          <div className="space-y-1.5">
+            {providers.map((p) => (
+              <div key={p.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <span className={`w-2 h-2 rounded-full ${p.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                <span className="font-medium text-slate-700 w-28 truncate">{p.name}</span>
+                <span className="font-mono text-xs text-slate-500 flex-1 min-w-0 truncate">{p.model} · {p.baseUrl}</span>
+                {p.isActive ? (
+                  <Badge tone="green">激活中</Badge>
+                ) : (
+                  <Button
+                    variant="outline"
+                    className="text-xs px-2 py-1"
+                    onClick={async () => {
+                      try {
+                        await api.settings.activateProvider(p.id);
+                        setProviders(await api.settings.listProviders());
+                        setSettings(await api.settings.get());
+                      } catch (e: any) {
+                        setError(e.message);
+                      }
+                    }}
+                  >
+                    激活
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  className="text-xs px-2 py-1 text-rose-500"
+                  onClick={async () => {
+                    await api.settings.removeProvider(p.id);
+                    setProviders(await api.settings.listProviders());
+                  }}
+                >
+                  删除
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       {/* 环境自检 */}
       <Card className="p-5 mb-4">
@@ -268,6 +356,106 @@ export function SettingsPage() {
         </div>
         {toolResult && (
           <Textarea className="mt-3 font-mono text-xs" rows={5} readOnly value={toolResult} />
+        )}
+      </Card>
+
+      {/* 外部 MCP 服务器（工具生态互通） */}
+      <Card className="p-5 mt-4">
+        <SectionTitle
+          extra={
+            <Button
+              variant="outline"
+              disabled={!mcpServerForm.name || !mcpServerForm.url}
+              onClick={async () => {
+                try {
+                  await api.settings.saveMcpServer(mcpServerForm);
+                  setMcpServerForm({ name: '', url: '' });
+                  setMcpServers(await api.settings.listMcpServers());
+                } catch (e: any) {
+                  setError(e.message);
+                }
+              }}
+            >
+              <Plug size={14} /> 添加服务器
+            </Button>
+          }
+        >
+          <span className="flex items-center gap-2">
+            <Wrench size={16} className="text-indigo-600" /> 外部 MCP 服务器
+          </span>
+        </SectionTitle>
+        <div className="text-xs text-slate-400 mb-3">
+          接入任意 MCP 兼容服务（本机 SciFlow / 其他 Agent 的 MCP 端点），协议互通：GET /tools 发现工具、POST /call 调用
+        </div>
+        <div className="grid sm:grid-cols-2 gap-2 mb-3">
+          <input className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="名称（如 本地SciFlow）" value={mcpServerForm.name} onChange={(e) => setMcpServerForm({ ...mcpServerForm, name: e.target.value })} />
+          <input className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="URL（如 http://localhost:3000/api/mcp）" value={mcpServerForm.url} onChange={(e) => setMcpServerForm({ ...mcpServerForm, url: e.target.value })} />
+        </div>
+        {mcpServers.map((ms) => (
+          <div key={ms.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm mb-1.5">
+            <span className={`w-2 h-2 rounded-full ${ms.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+            <span className="font-medium text-slate-700 w-28 truncate">{ms.name}</span>
+            <span className="font-mono text-xs text-slate-500 flex-1 min-w-0 truncate">{ms.url}</span>
+            <Button
+              variant="outline"
+              className="text-xs px-2 py-1"
+              onClick={async () => {
+                try {
+                  const d = await api.mcpExternal.discover(ms.url);
+                  setActiveServerId(ms.id);
+                  setExternalTools(d.tools);
+                  setExternalResult(`「${ms.name}」发现 ${d.tools.length} 个工具`);
+                } catch (e: any) {
+                  setExternalResult('探测失败: ' + e.message);
+                }
+              }}
+            >
+              探测工具
+            </Button>
+            <Button
+              variant="ghost"
+              className="text-xs px-2 py-1 text-rose-500"
+              onClick={async () => {
+                await api.settings.removeMcpServer(ms.id);
+                setMcpServers(await api.settings.listMcpServers());
+              }}
+            >
+              删除
+            </Button>
+          </div>
+        ))}
+        {externalTools.length > 0 && (
+          <div className="mt-2 rounded-lg bg-slate-50 p-3">
+            <div className="text-xs text-slate-400 mb-1.5">{externalResult} —— 选择工具调用（参数用逗号分隔）</div>
+            <div className="space-y-1.5">
+              {externalTools.map((t) => (
+                <div key={t.name} className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-indigo-700 w-40 truncate">{t.name}</span>
+                  <input
+                    className="flex-1 min-w-0 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                    placeholder={(t.description || '').slice(0, 40)}
+                  />
+                  <Button
+                    variant="outline"
+                    className="text-xs px-2 py-1"
+                    onClick={async () => {
+                      try {
+                        const res = await api.mcpExternal.call(activeServerId, t.name || '', {});
+                        setExternalResult(JSON.stringify(res, null, 2).slice(0, 600));
+                      } catch (e: any) {
+                        setExternalResult('调用失败: ' + e.message);
+                      }
+                    }}
+                  >
+                    调用
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {externalResult && !externalTools.length && (
+          <div className="mt-2 text-xs text-slate-500 bg-slate-50 rounded p-2">{externalResult}</div>
         )}
       </Card>
     </div>

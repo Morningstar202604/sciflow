@@ -1,7 +1,7 @@
 import type {
   Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, AppSettings, SelfCheck,
-  AgentRun, MemoryItem, McpToolInfo,
+  AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo,
 } from '../types';
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -102,6 +102,26 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ model }),
       }),
+    listProviders: () => request<ModelProvider[]>(`/api/settings/providers`),
+    saveProvider: (p: { id?: string; name: string; baseUrl: string; apiKey?: string; model: string }) =>
+      request<{ ok: boolean; id: string }>(`/api/settings/providers`, { method: 'POST', body: JSON.stringify(p) }),
+    removeProvider: (id: string) => request<{ ok: boolean }>(`/api/settings/providers/${id}`, { method: 'DELETE' }),
+    activateProvider: (id: string) =>
+      request<{ ok: boolean; active: string }>(`/api/settings/providers/${id}/activate`, { method: 'POST' }),
+    listMcpServers: () => request<McpServerInfo[]>(`/api/settings/mcp-servers`),
+    saveMcpServer: (p: { id?: string; name: string; url: string }) =>
+      request<{ ok: boolean; id: string }>(`/api/settings/mcp-servers`, { method: 'POST', body: JSON.stringify(p) }),
+    removeMcpServer: (id: string) => request<{ ok: boolean }>(`/api/settings/mcp-servers/${id}`, { method: 'DELETE' }),
+  },
+
+  mcpExternal: {
+    discover: (url: string) =>
+      request<{ tools: { name?: string; description?: string }[] }>(`/api/mcp/external/discover`, {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+      }),
+    call: (id: string, name: string, args: Record<string, any>) =>
+      request<any>(`/api/mcp/external/${id}/call`, { method: 'POST', body: JSON.stringify({ name, arguments: args }) }),
   },
 
   memory: {

@@ -88,6 +88,24 @@ export interface AgentRun {
   createdAt: number;
 }
 
+export interface ModelProvider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  isActive: number;
+  createdAt: number;
+}
+
+export interface McpServerInfo {
+  id: string;
+  name: string;
+  url: string;
+  enabled: number;
+  createdAt: number;
+}
+
 export interface ReactTraceStep {
   round: number;
   thought: string;

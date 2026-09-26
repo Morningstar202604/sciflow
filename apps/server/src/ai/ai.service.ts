@@ -1,4 +1,5 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { sqlite } from '../db/database';
 import * as prompts from './prompts';
 
 export interface ChatMessage {
@@ -25,6 +26,41 @@ export class AiService {
   private fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
   /** strong 档：强模型（高难任务；未配置则回落 fast） */
   private strongModel = process.env.AI_MODEL_STRONG || this.fastModel;
+
+  constructor() {
+    this.applyActiveProvider();
+  }
+
+  /** 从 model_provider 表读取激活厂商并覆盖连接配置（LiteLLM 式多厂商切换） */
+  private applyActiveProvider() {
+    try {
+      const row = sqlite
+        .prepare('SELECT * FROM model_provider WHERE is_active = 1 LIMIT 1')
+        .get() as { base_url?: string; api_key?: string; model?: string } | undefined;
+      if (row?.base_url && row?.model) {
+        this.baseUrl = String(row.base_url).replace(/\/$/, '');
+        if (row.api_key) this.apiKey = String(row.api_key);
+        this.fastModel = String(row.model);
+        this.strongModel = String(row.model);
+      }
+    } catch {
+      /* 表不存在时回退环境变量 */
+    }
+  }
+
+  /** 切换激活厂商（设置页调用，立即生效） */
+  switchProvider(id: string) {
+    const row = sqlite.prepare('SELECT * FROM model_provider WHERE id = ?').get(id) as
+      | { base_url?: string; api_key?: string; model?: string }
+      | undefined;
+    if (!row) throw new HttpException('模型厂商不存在', HttpStatus.NOT_FOUND);
+    this.baseUrl = String(row.base_url).replace(/\/$/, '');
+    if (row.api_key) this.apiKey = String(row.api_key);
+    this.fastModel = String(row.model);
+    this.strongModel = String(row.model);
+    sqlite.prepare('UPDATE model_provider SET is_active = 0 WHERE is_active = 1').run();
+    sqlite.prepare('UPDATE model_provider SET is_active = 1, updated_at = ? WHERE id = ?').run(Date.now(), id);
+  }
 
   /** 是否已配置真实 AI 密钥 */
   get configured(): boolean {

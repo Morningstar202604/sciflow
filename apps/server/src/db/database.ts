@@ -157,6 +157,23 @@ CREATE TABLE IF NOT EXISTS agent_run (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_agent_task ON agent_run(task_id);
+CREATE TABLE IF NOT EXISTS model_provider (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key TEXT DEFAULT '',
+  model TEXT NOT NULL,
+  is_active INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mcp_server (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  enabled INTEGER DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
 `);
 
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */

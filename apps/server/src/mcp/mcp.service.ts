@@ -1,4 +1,5 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { sqlite } from '../db/database';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService } from '../references/references.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
@@ -220,5 +221,38 @@ export class McpService {
         content: [{ type: 'text', text: `工具执行失败: ${e?.message || String(e)}` }],
       };
     }
+  }
+
+  // ---------- 外部 MCP 服务器（客户端：接入任意 MCP 兼容服务，工具生态互通） ----------
+
+  /** 已配置的外部 MCP 服务器列表 */
+  listExternalServers() {
+    return sqlite.prepare('SELECT id, name, url, enabled, created_at AS createdAt FROM mcp_server ORDER BY created_at').all();
+  }
+
+  /** 探测外部服务器工具清单（协议兼容：GET {url}/tools） */
+  async discoverExternal(url: string) {
+    const base = String(url || '').replace(/\/$/, '');
+    if (!/^https?:\/\//.test(base)) throw new HttpException('URL 需以 http(s):// 开头', HttpStatus.BAD_REQUEST);
+    const res = await fetch(`${base}/tools`, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new HttpException(`外部 MCP 探测失败 (${res.status})`, HttpStatus.BAD_GATEWAY);
+    const data = (await res.json().catch(() => ({}))) as { tools?: { name?: string; description?: string }[] };
+    if (!data?.tools?.length) throw new HttpException('该地址未返回 MCP 工具清单（需实现 GET {url}/tools）', HttpStatus.BAD_GATEWAY);
+    return data;
+  }
+
+  /** 调用外部服务器工具（协议兼容：POST {url}/call {name, arguments}） */
+  async callExternal(serverId: string, name: string, args: Record<string, any>) {
+    const row = sqlite.prepare('SELECT * FROM mcp_server WHERE id = ?').get(serverId) as { url?: string } | undefined;
+    if (!row?.url) throw new HttpException('外部 MCP 服务器不存在', HttpStatus.NOT_FOUND);
+    const base = String(row.url).replace(/\/$/, '');
+    const res = await fetch(`${base}/call`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, arguments: args }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new HttpException(`外部工具调用失败 (${res.status})`, HttpStatus.BAD_GATEWAY);
+    return res.json();
   }
 }
