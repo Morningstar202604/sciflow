@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Download, FlaskConical, GitCompareArrows, ListChecks, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
+import { useContext } from 'react';
+import { ToastContext } from '../App';
 import type { EvidenceResult, ExtractedPaper, Project, Reference } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Spinner, jsonText } from '../components/ui';
 
@@ -25,6 +27,7 @@ export function LiteraturePage({ project }: { project: Project }) {
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const toast = useContext(ToastContext);
 
   useEffect(() => {
     api.references.list(project.id).then(setRefs).catch((e) => setError(e.message));
@@ -47,6 +50,7 @@ export function LiteraturePage({ project }: { project: Project }) {
   const importOne = async (hit: Reference) => {
     try {
       const r = await api.references.create(project.id, hit);
+      toast('success', '文献已加入文献库');
       setRefs((s) => (s.some((x) => x.id === r.id) ? s : [r, ...s]));
       setImported((s) => new Set(s).add(r.title));
     } catch (e: any) {

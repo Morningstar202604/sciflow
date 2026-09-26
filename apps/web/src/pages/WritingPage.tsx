@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { BookOpen, Check, ChevronRight, Eye, FileText, Languages, ListTree, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
+import { useContext } from 'react';
+import { ToastContext } from '../App';
 import type { CitationRow, Doc, Outline, Project, Reference } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, Textarea, jsonText } from '../components/ui';
 
@@ -20,6 +22,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [polishMode, setPolishMode] = useState<'polish' | 'reduce'>('polish');
   const [translateTarget, setTranslateTarget] = useState<'zh' | 'en'>('zh');
   const [editorMode, setEditorMode] = useState<'edit' | 'preview' | 'split'>('split');
+  const toast = useContext(ToastContext);
   const [refs, setRefs] = useState<Reference[]>([]);
   const [citations, setCitations] = useState<CitationRow[]>([]);
   const [history, setHistory] = useState<{ type: string; original: string; polished: string; reason: string }[]>([]);
@@ -107,6 +110,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const generateOutline = () =>
     run(async () => {
       const o = await api.documents.outline(docId!, topicInput || doc?.title || '');
+      toast('success', '大纲已生成');
       setOutline(o);
       setDoc((d) => (d ? { ...d, outline: JSON.stringify(o) } : d));
       setShowOutlinePanel(true);
@@ -196,7 +200,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
           <div
             key={d.id}
             className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm whitespace-nowrap cursor-pointer border ${
-              docId === d.id ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-indigo-300'
+              docId === d.id ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-teal-300'
             }`}
             onClick={() => setDocId(d.id)}
           >
@@ -281,7 +285,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
                 }
               }}
             />
-            {savedAt && <span className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1"><Check size={12} />已保存</span>}
+            {savedAt && <span className="text-xs text-emerald-500 flex items-center gap-1 page-in"><Check size={12} />已保存</span>}
             <Badge tone="blue">v{doc.version}</Badge>
             {/* Markdown 预览切换（编辑 / 预览 / 分栏，科研写作标配） */}
             <div className="flex items-center gap-0.5 ml-auto bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
@@ -374,7 +378,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
           {/* 润色结果对比 */}
           {polishResult && (
-            <Card className="p-3 mb-4 bg-slate-50 dark:bg-slate-900/50 border-indigo-200">
+            <Card className="p-3 mb-4 bg-slate-50 dark:bg-slate-900/50 border-teal-200">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-teal-700">三段式结果</span>
                 <Button variant="success" className="px-2 py-0.5 text-xs" onClick={applyPolished}>

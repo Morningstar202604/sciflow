@@ -62,7 +62,7 @@ export function MemoryPage() {
     refresh();
   };
 
-  const typeTone = (t: string) => (t === 'procedural' ? 'indigo' : 'blue') as 'indigo' | 'blue';
+  const typeTone = (t: string) => (t === 'procedural' ? 'teal' : 'blue') as 'teal' | 'blue';
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -100,8 +100,8 @@ export function MemoryPage() {
       </Card>
 
       {showAdd && (
-        <Card className="p-4 mb-4 border-indigo-200 bg-teal-50/50">
-          <div className="flex items-center gap-1.5 mb-2 text-sm font-medium text-indigo-800">
+        <Card className="p-4 mb-4 border-teal-200 bg-teal-50/50 card-lift">
+          <div className="flex items-center gap-1.5 mb-2 text-sm font-medium text-teal-800">
             <Lightbulb size={15} /> 新增程序记忆（写作风格指令）
           </div>
           <Textarea

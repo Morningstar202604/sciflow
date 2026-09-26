@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, Bot, Brain, Check, ChevronRight, CircleDashed, Eye, Loader2, RotateCcw, Workflow, Zap } from 'lucide-react';
 import { api } from '../api/client';
+import { useContext } from 'react';
+import { ToastContext } from '../App';
 import type { AgentRun, Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Modal, Spinner, Textarea, jsonText } from '../components/ui';
 
@@ -16,14 +18,14 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 /** 多 Agent 协作映射：每个流水线步骤由哪个 Agent 角色负责（对标 Deep Research / Agent Laboratory 分工） */
-const AGENT_MAP: Record<string, { role: string; tone: 'blue' | 'green' | 'indigo' | 'amber' | 'slate' }> = {
+const AGENT_MAP: Record<string, { role: string; tone: 'blue' | 'green' | 'teal' | 'amber' | 'slate' }> = {
   'topic-verify': { role: 'Planner', tone: 'slate' },
   literature: { role: 'Researcher', tone: 'blue' },
   outline: { role: 'Planner', tone: 'slate' },
   drafting: { role: 'Writer', tone: 'green' },
   'quality-gate': { role: 'Reviewer', tone: 'amber' },
-  polish: { role: 'Editor', tone: 'indigo' },
-  'citation-format': { role: 'Editor', tone: 'indigo' },
+  polish: { role: 'Editor', tone: 'teal' },
+  'citation-format': { role: 'Editor', tone: 'teal' },
   complete: { role: 'Manager', tone: 'slate' },
 };
 
@@ -38,6 +40,7 @@ export function PipelinePage({ project }: { project: Project }) {
   const [showPlan, setShowPlan] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
+  const toast = useContext(ToastContext);
   const [agents, setAgents] = useState<AgentRun[]>([]);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -111,6 +114,7 @@ export function PipelinePage({ project }: { project: Project }) {
     setError('');
     try {
       const t = await api.pipeline.create(project.id, topic.trim());
+      toast('success', '流水线已启动，Agent 编排开始执行');
       setTasks((s) => [t, ...s]);
       setActiveId(t.id);
       setTopic('');
@@ -191,7 +195,7 @@ export function PipelinePage({ project }: { project: Project }) {
                   <div
                     key={t.id}
                     className={`rounded-lg px-3 py-2 cursor-pointer border ${
-                      activeId === t.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 dark:border-slate-800 hover:border-indigo-200'
+                      activeId === t.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 dark:border-slate-800 hover:border-teal-300'
                     }`}
                     onClick={() => setActiveId(t.id)}
                   >
@@ -319,7 +323,7 @@ export function PipelinePage({ project }: { project: Project }) {
                               research: 'border-sky-300 bg-sky-50 dark:bg-sky-900/30 dark:border-sky-700',
                               writer: 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-700',
                               reviewer: 'border-amber-300 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700',
-                              polisher: 'border-violet-300 bg-violet-50 dark:bg-violet-900/30 dark:border-violet-700',
+                              polisher: 'border-rose-300 bg-rose-50 dark:bg-rose-900/30 dark:border-rose-700',
                             };
                             const allDone = group.every((a) => a.status === 'done');
                             const anyFail = group.some((a) => a.status === 'failed');

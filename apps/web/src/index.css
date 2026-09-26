@@ -6,9 +6,17 @@
 
 :root {
   color-scheme: light;
+  /* ---- SciFlow 品牌 token ---- */
+  --brand-500: #0d9488;
+  --brand-600: #0f766e;
+  --brand-grad: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
+  --bg-app: #f4f6fb;
+  --ink: #1c2a44;
 }
 .dark {
   color-scheme: dark;
+  --bg-app: #0b1220;
+  --ink: #e2e8f0;
 }
 
 html, body, #root {
@@ -17,22 +25,114 @@ html, body, #root {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  background: #f4f6fb;
-  color: #1c2a44;
+  background: var(--bg-app);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
 .dark body {
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--bg-app);
+  color: var(--ink);
+}
+
+/* 品牌氛围背景：浅色淡网格 + 顶部品牌光晕；深色加深蓝渐变 */
+#root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(800px 400px at 80% -10%, rgba(13, 148, 136, 0.07), transparent 60%),
+    radial-gradient(600px 300px at 0% 0%, rgba(8, 145, 178, 0.05), transparent 55%),
+    linear-gradient(rgba(28, 42, 68, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(28, 42, 68, 0.025) 1px, transparent 1px);
+  background-size: auto, auto, 28px 28px, 28px 28px;
+}
+.dark #root::before {
+  background:
+    radial-gradient(900px 420px at 85% -10%, rgba(13, 148, 136, 0.10), transparent 60%),
+    radial-gradient(700px 320px at 0% 0%, rgba(8, 145, 178, 0.07), transparent 55%),
+    linear-gradient(rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+  background-size: auto, auto, 32px 32px, 32px 32px;
 }
 
 /* 细滚动条 */
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: #c3cede; border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: #9fb0c9; }
 *::-webkit-scrollbar-track { background: transparent; }
 .dark *::-webkit-scrollbar-thumb { background: #334155; }
+.dark *::-webkit-scrollbar-thumb:hover { background: #475569; }
 
+/* ---- 品牌动效 token ---- */
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
 .pulse-dot { animation: pulse-dot 1.2s infinite; }
+
+/* 页面切换淡入上浮 */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-in { animation: page-in 0.22s ease-out both; }
+
+/* 弹层入场：淡入 + 轻微缩放 */
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-in { animation: modal-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.overlay-in { animation: overlay-in 0.15s ease-out both; }
+
+/* Toast 滑入 */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.toast-in { animation: toast-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.1) both; }
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-6px); }
+}
+.toast-out { animation: toast-out 0.2s ease-in both; }
+
+/* 卡片 hover 上浮（仅用于可交互卡） */
+.card-lift {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 118, 110, 0.10);
+}
+
+/* 骨架屏 shimmer */
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.12) 25%, rgba(148, 163, 184, 0.22) 37%, rgba(148, 163, 184, 0.12) 63%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 6px;
+}
+
+/* 品牌渐变文字/图标辅助 */
+.brand-gradient-text {
+  background: var(--brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* 键盘快捷键 kbd 统一 */
+kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

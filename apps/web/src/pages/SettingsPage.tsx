@@ -379,7 +379,7 @@ export function SettingsPage() {
       <Card className="p-5 mt-4">
         <SectionTitle
           extra={
-            <Badge tone="indigo">
+            <Badge tone="teal">
               {mcpInfo ? `${mcpInfo.protocol} v${mcpInfo.version} · ${mcpInfo.tools} 工具` : '…'}
             </Badge>
           }

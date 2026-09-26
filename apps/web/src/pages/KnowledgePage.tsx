@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { BookMarked, FileText, Loader2, MessageSquare, Trash2, Upload } from 'lucide-react';
 import { api } from '../api/client';
+import { useContext } from 'react';
+import { ToastContext } from '../App';
 import type { KnowledgeDoc, Project } from '../types';
 import { Button, Card, Empty, ErrorBox, Input, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
 
@@ -23,6 +25,7 @@ export function KnowledgePage({ project }: { project: Project }) {
   const [answer, setAnswer] = useState<{ answer: string; sources: { docName: string; snippet: string; score: number }[] } | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const toast = useContext(ToastContext);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -46,6 +49,7 @@ export function KnowledgePage({ project }: { project: Project }) {
     try {
       const content = isPdf ? await fileToBase64(file) : await file.text();
       await api.knowledge.upload(project.id, file.name, type, content);
+      toast('success', `「${file.name}」已入库`);
       await load();
     } catch (e: any) {
       setError(e.message);
@@ -179,7 +183,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                 <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">回答依据来源</div>
                 {answer.sources.map((s, i) => (
                   <div key={i} className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">
-                    <Badge tone="indigo">{s.docName}</Badge> <span className="text-slate-400 dark:text-slate-500">匹配 {s.score}%</span>
+                    <Badge tone="teal">{s.docName}</Badge> <span className="text-slate-400 dark:text-slate-500">匹配 {s.score}%</span>
                     <div className="text-slate-400 dark:text-slate-500 mt-0.5 truncate">{s.snippet}</div>
                   </div>
                 ))}

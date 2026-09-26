@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
-import { Button, Input, Modal, Spinner, ErrorBox } from './components/ui';
+import { Button, Input, Modal, Spinner, ErrorBox, ToastViewport, type ToastItem, type ToastKind } from './components/ui';
 import { DashboardPage } from './pages/DashboardPage';
 import { WritingPage } from './pages/WritingPage';
 import { LiteraturePage } from './pages/LiteraturePage';
@@ -76,6 +76,9 @@ export const ThemeContext = createContext<{ theme: 'light' | 'dark'; toggle: () 
   toggle: () => undefined,
 });
 
+/** 全局 Toast 反馈上下文（页面级操作成功/失败提示） */
+export const ToastContext = createContext<(kind: 'success' | 'error' | 'info', text: string) => void>(() => undefined);
+
 function AppInner() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -92,6 +95,14 @@ function AppInner() {
   const [projectQuery, setProjectQuery] = useState('');
   const [commandOpen, setCommandOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('sciflow-theme') as 'light' | 'dark') || 'light');
+
+  // ---- 全局 Toast 反馈 ----
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toast = useCallback((kind: ToastKind, text: string) => {
+    const id = Date.now() + Math.random();
+    setToasts((s) => [...s, { id, kind, text }]);
+    window.setTimeout(() => setToasts((s) => s.filter((t) => t.id !== id)), 2600);
+  }, []);
 
   // 路由化：pathname 决定当前视图（hash 路由，刷新/分享/深链不丢状态）
   const view = (location.pathname.replace(/^\//, '') || 'dashboard') as View;
@@ -149,6 +160,7 @@ function AppInner() {
     setNewName('');
     setShowNewProject(false);
     setCommandOpen(false);
+    toast('success', `项目「${p.name}」已创建`);
   };
 
   const renameProject = async () => {
@@ -156,6 +168,7 @@ function AppInner() {
     const updated = await api.projects.update(renaming.id, { name: renameText.trim() });
     setProjects((s) => s.map((p) => (p.id === updated.id ? updated : p)));
     setRenaming(null);
+    toast('success', '项目已重命名');
   };
 
   const removeProject = async (id: string) => {
@@ -163,6 +176,7 @@ function AppInner() {
     await api.projects.remove(id);
     setProjects((s) => s.filter((p) => p.id !== id));
     if (currentProjectId === id) setCurrentProjectId(null);
+    toast('info', '项目已删除');
   };
 
   const currentProject = useMemo(() => projects.find((p) => p.id === currentProjectId) ?? null, [projects, currentProjectId]);
@@ -181,16 +195,19 @@ function AppInner() {
 
   return (
     <ThemeContext.Provider value={{ theme, toggle: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')) }}>
-      <div className="flex h-full overflow-hidden bg-slate-50 dark:bg-slate-950 dark:text-slate-100">
+      <ToastContext.Provider value={toast}>
+        <div className="flex h-full overflow-hidden bg-slate-50 dark:bg-slate-950 dark:text-slate-100">
         {/* ============ 左侧边栏：Logo + 项目区 + 功能导航分组 + 底部设置 ============ */}
         <aside className="w-56 shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col">
-          {/* Logo */}
+          {/* Logo（品牌渐变标识） */}
           <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-[13px] font-bold tracking-tight">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-teal-500 to-sky-600 text-white flex items-center justify-center text-[13px] font-bold tracking-tight shadow-sm shadow-teal-600/30">
               S
             </div>
             <div className="leading-tight">
-              <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100 tracking-tight">SciFlow</div>
+              <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
+                Sci<span className="brand-gradient-text">Flow</span>
+              </div>
               <div className="text-[10px] text-slate-400 -mt-0.5">全自动 AI 科研助手</div>
             </div>
           </div>
@@ -335,7 +352,7 @@ function AppInner() {
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto p-6">
+          <main key={view} className="flex-1 overflow-y-auto p-6 page-in relative z-[1]">
             {error && (
               <div className="mb-4">
                 <ErrorBox message={error} />
@@ -369,9 +386,12 @@ function AppInner() {
         {/* ============ Cmd+K 命令面板（大厂标配：搜索式快速跳转） ============ */}
         {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} onNavigate={(v) => setView(v)} onNewProject={() => { setCommandOpen(false); setShowNewProject(true); }} />}
 
+        {/* 全局 Toast 反馈 */}
+        <ToastViewport items={toasts} onDone={(id) => setToasts((s) => s.filter((t) => t.id !== id))} />
+
         {/* 新建项目弹窗 */}
         <Modal open={showNewProject} title="新建研究项目" onClose={() => setShowNewProject(false)} width="max-w-md">
-          <Input placeholder="项目名称，如：图神经网络综述" value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus />
+          <Input placeholder="项目名称，如：图神经网络综述" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && createProject()} autoFocus />
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setShowNewProject(false)}>
               取消
@@ -394,7 +414,8 @@ function AppInner() {
             </Button>
           </div>
         </Modal>
-      </div>
+        </div>
+      </ToastContext.Provider>
     </ThemeContext.Provider>
   );
 }

@@ -143,7 +143,7 @@ export function QualityPage({ project }: { project: Project }) {
                     <button
                       key={h.id}
                       className={`w-full text-left text-xs rounded px-2 py-1.5 border ${
-                        selectedHist?.id === h.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 dark:border-slate-800 hover:border-indigo-200'
+                        selectedHist?.id === h.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 dark:border-slate-800 hover:border-teal-300'
                       }`}
                       onClick={() => setSelectedHist({ ...h, scoresObj: jsonText<Record<string, number>>(h.scores, {}) })}
                     >

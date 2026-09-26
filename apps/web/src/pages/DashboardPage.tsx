@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { BookOpen, FileText, FlaskConical, Plus, Workflow, ArrowRight } from 'lucide-react';
+import { BookOpen, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, Reference } from '../types';
-import { Button, Card, Empty, Spinner, Badge, jsonText, SectionTitle } from '../components/ui';
+import { Button, Card, Empty, Spinner, Skeleton, Badge, jsonText, SectionTitle } from '../components/ui';
+import { useContext } from 'react';
+import { ToastContext } from '../App';
 import type { View } from '../App';
 
 export function DashboardPage({ project, onNavigate, openDoc }: {
@@ -14,6 +16,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
   const [refs, setRefs] = useState<Reference[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTitle, setNewTitle] = useState('');
+  const toast = useContext(ToastContext);
 
   useEffect(() => {
     setLoading(true);
@@ -30,6 +33,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
     const doc = await api.documents.create(project.id, newTitle.trim());
     setDocs((s) => [...s, doc]);
     setNewTitle('');
+    toast('success', `草稿「${doc.title}」已创建`);
     openDoc(doc.id);
   };
 
@@ -42,7 +46,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
     { label: '论文写作', desc: '大纲 · 起草 · 润色 · 翻译', icon: BookOpen, view: 'writing' as View },
     { label: '文献调研', desc: '三源检索 · 综述 · 文献库', icon: FlaskConical, view: 'literature' as View },
     { label: '全自动流水线', desc: '主题 → 初稿 → 评分 → 定稿', icon: Workflow, view: 'pipeline' as View },
-    { label: '质量评分', desc: '7 维雷达评分与改进建议', icon: Workflow, view: 'quality' as View },
+    { label: '质量评分', desc: '7 维雷达评分与改进建议', icon: Gauge, view: 'quality' as View },
   ];
 
   return (
@@ -56,7 +60,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
           </div>
           <div className="flex gap-2 shrink-0">
             {stats.map((s) => (
-              <div key={s.label} className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-2">
+              <div key={s.label} className="card-lift flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-2">
                 <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${s.tone}`}>
                   <s.icon size={14} />
                 </span>
@@ -76,13 +80,13 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
           <button
             key={item.label}
             onClick={() => onNavigate(item.view)}
-            className="group text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-slate-300 hover:shadow-sm transition-all"
+            className="group card-lift text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-teal-300 dark:hover:border-teal-700"
           >
             <div className="flex items-start justify-between">
-              <span className="w-9 h-9 rounded-lg bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:bg-teal-50 group-hover:text-teal-600 transition-colors">
+              <span className="w-9 h-9 rounded-lg bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:bg-gradient-to-br group-hover:from-teal-500 group-hover:to-sky-600 group-hover:text-white transition-all duration-200 group-hover:scale-110">
                 <item.icon size={17} />
               </span>
-              <ArrowRight size={14} className="text-slate-200 group-hover:text-slate-400 transition-colors" />
+              <ArrowRight size={14} className="text-slate-200 group-hover:text-teal-500 transition-all duration-200 group-hover:translate-x-0.5" />
             </div>
             <div className="font-medium text-sm text-slate-900 dark:text-slate-100 mt-2.5">{item.label}</div>
             <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{item.desc}</div>
@@ -110,7 +114,10 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
       </SectionTitle>
 
       {loading ? (
-        <Spinner label="加载中…" />
+        <div className="grid md:grid-cols-2 gap-3">
+          <Card className="p-4"><Skeleton lines={3} /></Card>
+          <Card className="p-4"><Skeleton lines={3} /></Card>
+        </div>
       ) : docs.length === 0 ? (
         <Empty text="暂无草稿，新建一篇开始写作，或到「全自动流水线」一键生成" />
       ) : (
@@ -118,7 +125,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
           {docs.map((d) => {
             const outline = jsonText<{ title: string; sections: { title: string }[] }>(d.outline, { title: '', sections: [] });
             return (
-              <Card key={d.id} className="p-4 cursor-pointer hover:border-slate-300 hover:shadow-sm transition-all" onClick={() => openDoc(d.id)}>
+              <Card key={d.id} className="p-4 cursor-pointer card-lift hover:border-teal-300 dark:hover:border-teal-700" onClick={() => openDoc(d.id)}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="font-medium text-slate-900 dark:text-slate-100 truncate">{d.title}</div>
                   <Badge tone={d.status === 'final' ? 'green' : d.status === 'polished' ? 'blue' : 'slate'}>
