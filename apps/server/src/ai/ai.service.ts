@@ -121,7 +121,8 @@ export class AiService {
   }
 
   /** zod 结构化输出校验：schema 校验通过返回解析值，失败返回 null（调用处走兜底，杜绝坏 JSON 反复补工） */
-  private safeParse<T>(text: string, schema: z.ZodType<T>): T | null {
+  /** 结构化输出校验：zod schema 解析 LLM 返回的 JSON */
+  safeParse<T>(text: string, schema: z.ZodType<T>): T | null {
     try {
       const obj = this.jsonOf<unknown>(text);
       const result = schema.safeParse(obj);
@@ -599,6 +600,72 @@ export class AiService {
     } catch {
       return { content: '', keywords: [] };
     }
+  }
+
+  // ---------- Phase 6：科研专门加强 ----------
+
+  /** 论文摘要 + 关键词生成（zod 结构化校验） */
+  async generateAbstract(title: string, content: string): Promise<{ abstract: string; keywords: string[] }> {
+    const schema = z.object({ abstract: z.string().min(10), keywords: z.array(z.string()).min(1).max(8) });
+    const raw = await this.complete([{ role: 'user', content: prompts.GENERATE_ABSTRACT(title, content) }], {
+      temperature: 0.3,
+      context: 'generateAbstract',
+    });
+    const parsed = this.safeParse(raw, schema);
+    if (parsed) return parsed;
+    return { abstract: '摘要生成失败：模型输出无法解析，请重试。', keywords: [] };
+  }
+
+  /** 单篇文献深度精读（zod 结构化校验） */
+  async deepDivePaper(paper: string): Promise<{
+    title: string;
+    oneLine: string;
+    researchQuestion: string;
+    motivation: string;
+    method: string;
+    keyFindings: string[];
+    limitations: string[];
+    futureWork: string;
+    takeaway: string;
+  }> {
+    const schema = z.object({
+      title: z.string(),
+      oneLine: z.string(),
+      researchQuestion: z.string(),
+      motivation: z.string(),
+      method: z.string(),
+      keyFindings: z.array(z.string()).min(1),
+      limitations: z.array(z.string()),
+      futureWork: z.string(),
+      takeaway: z.string(),
+    });
+    const raw = await this.complete([{ role: 'user', content: prompts.DEEP_DIVE_PAPER(paper) }], {
+      temperature: 0.2,
+      context: 'deepDivePaper',
+    });
+    const parsed = this.safeParse(raw, schema);
+    if (parsed) return parsed;
+    return { title: '', oneLine: '', researchQuestion: '', motivation: '', method: '', keyFindings: [], limitations: [], futureWork: '', takeaway: '精读失败：模型输出无法解析，请重试。' };
+  }
+
+  /** 研究缺口定位（zod 结构化校验） */
+  async researchGap(topic: string, papers: string): Promise<{
+    gaps: { gap: string; evidence: string; opportunity: string; feasibility: string }[];
+    recommendedTopic: string;
+  }> {
+    const schema = z.object({
+      gaps: z
+        .array(z.object({ gap: z.string(), evidence: z.string(), opportunity: z.string(), feasibility: z.string() }))
+        .min(1),
+      recommendedTopic: z.string(),
+    });
+    const raw = await this.complete([{ role: 'user', content: prompts.RESEARCH_GAP(topic, papers) }], {
+      temperature: 0.3,
+      context: 'researchGap',
+    });
+    const parsed = this.safeParse(raw, schema);
+    if (parsed) return parsed;
+    return { gaps: [], recommendedTopic: '缺口分析失败：模型输出无法解析，请重试。' };
   }
 }
 

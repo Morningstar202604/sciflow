@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Download, FlaskConical, GitCompareArrows, ListChecks, Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { BookOpenCheck, Download, FlaskConical, GitCompareArrows, Lightbulb, ListChecks, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { EvidenceResult, ExtractedPaper, Project, Reference } from '../types';
-import { Badge, Button, Card, Empty, ErrorBox, Input, Spinner, jsonText } from '../components/ui';
+import type { DeepDiveResult, EvidenceResult, ExtractedPaper, GapResult, Project, Reference } from '../types';
+import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, jsonText } from '../components/ui';
 
-type Tool = 'summary' | 'extract' | 'evidence';
+type Tool = 'summary' | 'extract' | 'evidence' | 'deepdive' | 'gap';
 
 const TOOLS: { key: Tool; label: string; icon: typeof ListChecks; hint: string }[] = [
   { key: 'summary', label: '文献综述', icon: Download, hint: 'STORM 式结构化综述' },
   { key: 'extract', label: '结构化提取', icon: ListChecks, hint: 'Elicit 式对比表' },
   { key: 'evidence', label: '证据综合', icon: GitCompareArrows, hint: 'Consensus 式共识度' },
+  { key: 'deepdive', label: '单篇精读', icon: BookOpenCheck, hint: 'Lateral 式论文解剖' },
+  { key: 'gap', label: '研究缺口', icon: Lightbulb, hint: '科研选题定位' },
 ];
 
 export function LiteraturePage({ project }: { project: Project }) {
@@ -27,6 +29,10 @@ export function LiteraturePage({ project }: { project: Project }) {
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [deepDive, setDeepDive] = useState<DeepDiveResult | null>(null);
+  const [deepDiveRef, setDeepDiveRef] = useState('');
+  const [gapResult, setGapResult] = useState<GapResult | null>(null);
+  const [gapTopic, setGapTopic] = useState('');
   const toast = useContext(ToastContext);
 
   useEffect(() => {
@@ -105,6 +111,37 @@ export function LiteraturePage({ project }: { project: Project }) {
     setError('');
     try {
       setEvidence(await api.references.evidence(project.id, question.trim()));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const runDeepDive = async (refId?: string) => {
+    const id = refId || deepDiveRef;
+    if (!id) {
+      setError('请先选择要精读的文献');
+      return;
+    }
+    setBusy('deepdive');
+    setError('');
+    try {
+      setDeepDive(await api.references.deepDive(project.id, id));
+      toast('success', '文献精读完成');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const runGap = async () => {
+    setBusy('gap');
+    setError('');
+    try {
+      setGapResult(await api.references.gap(project.id, gapTopic.trim() || project.name));
+      toast('success', '研究缺口分析完成');
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -205,6 +242,18 @@ export function LiteraturePage({ project }: { project: Project }) {
                       {r.doi && <span className="text-emerald-600"> · DOI:{r.doi}</span>}
                     </div>
                   </div>
+                  <button
+                    className="text-slate-400 hover:text-teal-600 shrink-0 mt-0.5"
+                    title="AI 深度精读这篇文献"
+                    onClick={() => {
+                      setTool('deepdive');
+                      setDeepDiveRef(r.id);
+                      setDeepDive(null);
+                      runDeepDive(r.id);
+                    }}
+                  >
+                    <BookOpenCheck size={14} />
+                  </button>
                   <button className="text-slate-300 hover:text-rose-500" onClick={() => removeRef(r.id)}>
                     <Trash2 size={14} />
                   </button>
@@ -274,6 +323,99 @@ export function LiteraturePage({ project }: { project: Project }) {
                 </div>
               ) : (
                 <Empty text="对文献库做系统综述式结构化提取：方法、关键结果、核心贡献、局限，生成可对比的表格" />
+              )}
+            </>
+          )}
+
+          {tool === 'deepdive' && (
+            <>
+              <div className="flex gap-2 mb-3">
+                <Select
+                  className="flex-1 text-xs"
+                  options={[{ value: '', label: '选择要精读的文献…' }, ...refs.map((r) => ({ value: r.id, label: r.title }))]}
+                  value={deepDiveRef}
+                  onChange={(v) => {
+                    setDeepDiveRef(v);
+                    setDeepDive(null);
+                    if (v) runDeepDive(v);
+                  }}
+                />
+                <Button variant="outline" className="text-xs shrink-0" onClick={() => runDeepDive()} disabled={busy === 'deepdive' || !deepDiveRef}>
+                  {busy === 'deepdive' ? <Loader2 size={13} className="animate-spin" /> : <BookOpenCheck size={13} />} 精读
+                </Button>
+              </div>
+              {busy === 'deepdive' ? (
+                <Spinner label="AI 深度解读文献…" />
+              ) : deepDive ? (
+                <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                  <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{deepDive.oneLine}</div>
+                  <div className="rounded-lg bg-teal-50/50 dark:bg-teal-900/10 border border-teal-100 dark:border-teal-900 p-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{deepDive.takeaway}</div>
+                  {[
+                    ['研究问题', deepDive.researchQuestion],
+                    ['研究动机', deepDive.motivation],
+                    ['研究方法', deepDive.method],
+                  ].map(([label, val]) => (
+                    <div key={label} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3">
+                      <div className="text-xs font-medium text-teal-600 dark:text-teal-400 mb-1">{label}</div>
+                      <div className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{val}</div>
+                    </div>
+                  ))}
+                  <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-3">
+                    <div className="text-xs font-medium text-teal-600 dark:text-teal-400 mb-1">关键发现</div>
+                    <ul className="list-disc pl-4 space-y-1 text-sm text-slate-600 dark:text-slate-300">
+                      {deepDive.keyFindings.map((f, i) => (
+                        <li key={i}>{f}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="rounded-lg border border-amber-100 dark:border-amber-900 bg-amber-50/30 dark:bg-amber-900/10 p-3">
+                    <div className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">局限</div>
+                    <ul className="list-disc pl-4 space-y-1 text-sm text-slate-600 dark:text-slate-300">
+                      {deepDive.limitations.map((l, i) => (
+                        <li key={i}>{l}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-3">
+                    <div className="text-xs font-medium text-teal-600 dark:text-teal-400 mb-1">未来工作</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{deepDive.futureWork}</div>
+                  </div>
+                </div>
+              ) : (
+                <Empty text="选择一篇文献，AI 深度解剖：研究问题 / 动机 / 方法 / 关键发现 / 局限 / 未来工作" />
+              )}
+            </>
+          )}
+
+          {tool === 'gap' && (
+            <>
+              <div className="flex gap-2 mb-3">
+                <Input placeholder="研究主题（留空则用项目名），如：大语言模型评估" value={gapTopic} onChange={(e) => setGapTopic(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runGap()} />
+                <Button variant="outline" className="text-xs shrink-0" onClick={runGap} disabled={busy === 'gap' || refs.length === 0}>
+                  {busy === 'gap' ? <Loader2 size={13} className="animate-spin" /> : <Lightbulb size={13} />} 定位缺口
+                </Button>
+              </div>
+              {busy === 'gap' ? (
+                <Spinner label="分析研究缺口…" />
+              ) : gapResult ? (
+                <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                  <div className="rounded-lg bg-teal-50/50 dark:bg-teal-900/10 border border-teal-100 dark:border-teal-900 p-3">
+                    <div className="text-xs font-medium text-teal-700 dark:text-teal-300 mb-1">推荐选题</div>
+                    <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{gapResult.recommendedTopic}</div>
+                  </div>
+                  {gapResult.gaps.map((g, i) => (
+                    <div key={i} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-sm font-medium text-slate-700 dark:text-slate-200">缺口 {i + 1}：{g.gap}</div>
+                        <Badge tone={g.feasibility === '高' ? 'green' : g.feasibility === '中' ? 'amber' : 'red'}>{g.feasibility}</Badge>
+                      </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed"><span className="text-teal-600 dark:text-teal-400">依据：</span>{g.evidence}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed"><span className="text-teal-600 dark:text-teal-400">切入点：</span>{g.opportunity}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Empty text="基于文献库定位未被充分研究的子问题（Research Gap），并给出可行选题建议与可行性评估" />
               )}
             </>
           )}

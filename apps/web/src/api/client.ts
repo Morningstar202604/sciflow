@@ -1,25 +1,37 @@
 import type {
   Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
-  KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, AppSettings, SelfCheck,
+  KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
   AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo,
 } from '../types';
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
-  if (!res.ok) {
-    let msg = `请求失败 (${res.status})`;
-    try {
-      const data = await res.json();
-      msg = data.message || msg;
-    } catch {
-      /* ignore */
+  // 默认 60s 超时兜底：AI 网关限流/卡死时前端不无限等待（可被 opts.signal 覆盖）
+  const timeoutMs = opts?.signal ? 0 : 60000;
+  const ctrl = new AbortController();
+  const timer = timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: opts?.signal ?? ctrl.signal,
+      ...opts,
+    });
+    if (!res.ok) {
+      let msg = `请求失败 (${res.status})`;
+      try {
+        const data = await res.json();
+        msg = data.message || msg;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(msg);
     }
-    throw new Error(msg);
+    return res.json() as Promise<T>;
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new Error('请求超时（AI 网关响应慢），请稍后重试');
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 export const api = {
@@ -66,6 +78,7 @@ export const api = {
       request<string[]>(`/api/documents/${id}/export-citations?format=${format}`),
     exportMarkdown: (id: string) =>
       request<{ markdown: string; filename: string }>(`/api/documents/${id}/export`),
+    abstract: (id: string) => request<{ abstract: string; keywords: string[] }>(`/api/documents/${id}/abstract`, { method: 'POST' }),
   },
 
   references: {
@@ -83,6 +96,8 @@ export const api = {
       request<ExtractedPaper[]>(`/api/references/extract`, { method: 'POST', body: JSON.stringify({ projectId }) }),
     evidence: (projectId: string, question: string) =>
       request<EvidenceResult>(`/api/references/evidence`, { method: 'POST', body: JSON.stringify({ projectId, question }) }),
+    deepDive: (projectId: string, refId: string) => request<DeepDiveResult>(`/api/references/deep-dive`, { method: 'POST', body: JSON.stringify({ projectId, refId }) }),
+    gap: (projectId: string, topic: string) => request<GapResult>(`/api/references/gap`, { method: 'POST', body: JSON.stringify({ projectId, topic }) }),
   },
 
   knowledge: {

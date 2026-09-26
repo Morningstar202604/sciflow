@@ -52,6 +52,16 @@ export class ReferencesController {
   }
 
   /** Consensus 式：证据综合（论断 + 支持/矛盾 + 证据强度） */
+  @Post('deep-dive')
+  deepDive(@Body() body: { projectId: string; refId: string }) {
+    return this.references.deepDive(body.projectId, body.refId);
+  }
+
+  @Post('gap')
+  gap(@Body('projectId') projectId: string, @Body('topic') topic: string) {
+    return this.references.gap(projectId, topic || '');
+  }
+
   @Post('evidence')
   evidence(@Body() body: { projectId: string; question: string }) {
     return this.references.evidence(body.projectId, body.question);

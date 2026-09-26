@@ -41,6 +41,11 @@ export class DocumentsController {
     return this.documents.draftSection(id, body.sectionTitle);
   }
 
+  @Post(':id/abstract')
+  generateAbstract(@Param('id') id: string) {
+    return this.documents.generateAbstract(id);
+  }
+
   @Post(':id/polish')
   polish(@Param('id') id: string, @Body() body: { text: string; mode?: 'polish' | 'reduce' }) {
     return this.documents.polish(id, body.text, body.mode || 'polish');

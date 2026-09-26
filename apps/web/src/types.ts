@@ -177,6 +177,23 @@ export interface EvidenceStance {
   note: string;
 }
 
+export interface DeepDiveResult {
+  title: string;
+  oneLine: string;
+  researchQuestion: string;
+  motivation: string;
+  method: string;
+  keyFindings: string[];
+  limitations: string[];
+  futureWork: string;
+  takeaway: string;
+}
+
+export interface GapResult {
+  gaps: { gap: string; evidence: string; opportunity: string; feasibility: string }[];
+  recommendedTopic: string;
+}
+
 export interface EvidenceResult {
   summary: string;
   stances: EvidenceStance[];

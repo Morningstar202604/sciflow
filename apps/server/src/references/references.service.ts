@@ -96,6 +96,23 @@ export class ReferencesService {
     return rows.map((row, i) => ({ ...row, ref: row.ref || String(i + 1) }));
   }
 
+  /** 科研加强：单篇文献深度精读 */
+  async deepDive(projectId: string, refId: string) {
+    const ref = this.get(refId);
+    const paper = `标题:${ref.title}\n作者:${ref.authors}\n年份:${ref.year || 'n.d.'}\n期刊/会议:${ref.venue || '未知'}\nDOI:${ref.doi || '无'}\n摘要:${(ref.abstract || '').slice(0, 800)}`;
+    return this.ai.deepDivePaper(paper);
+  }
+
+  /** 科研加强：研究缺口定位（选题顾问） */
+  async gap(projectId: string, topic: string) {
+    const refs = this.list(projectId);
+    if (refs.length === 0) throw new BadRequestException('文献库为空，请先检索并导入文献');
+    const papers = refs
+      .map((r, i) => `[Ref:${i + 1}] ${r.title}（年份:${r.year || 'n.d.'}，${r.venue}）\n摘要:${(r.abstract || '').slice(0, 300)}`)
+      .join('\n\n');
+    return this.ai.researchGap(topic, papers);
+  }
+
   /** Consensus 式：证据综合（论断 + 支持/矛盾 + 证据强度） */
   async evidence(projectId: string, question: string) {
     const refs = this.list(projectId);

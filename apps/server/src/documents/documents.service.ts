@@ -167,6 +167,12 @@ export class DocumentsService {
   }
 
   /** 按格式导出参考文献（APA / IEEE / Vancouver） */
+  /** 科研加强：论文摘要 + 关键词生成 */
+  async generateAbstract(id: string) {
+    const doc = this.get(id);
+    return this.ai.generateAbstract(doc.title || '', doc.content || '');
+  }
+
   exportCitations(documentId: string, format: string) {
     const rows = this.listCitations(documentId);
     return rows.map((c, i) =>
@@ -280,6 +286,21 @@ export function formatCitation(ref: { title: string; authors: string; year: numb
       return `[${index}] ${authors} "${ref.title},"${venue}${year}.${doi}`;
     case 'vancouver':
       return `${index}. ${authors} ${ref.title}${venue}${year}.${doi}`;
+    case 'gbt': {
+      // GB/T 7714-2015 顺序编码制：[序号] 作者. 题名[文献类型标志]. 出版地: 出版者, 年份: 页码. DOI
+      const namePart = (() => {
+        try {
+          const arr = JSON.parse(ref.authors || '[]') as string[];
+          if (arr.length === 0) return '佚名';
+          if (arr.length === 1) return arr[0];
+          if (arr.length > 3) return `${arr[0]} 等`;
+          return arr.join(', ');
+        } catch {
+          return '佚名';
+        }
+      })();
+      return `[${index}] ${namePart}. ${ref.title}[J].${ref.venue ? ` ${ref.venue},` : ''} ${ref.year ? `${ref.year}.` : 'n.d.'}${ref.doi ? ` https://doi.org/${ref.doi}` : ''}`;
+    }
     default:
       return `${authors} (${year.trim()}). ${ref.title}.${venue}${doi}`;
   }
