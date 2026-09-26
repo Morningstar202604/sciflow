@@ -128,29 +128,29 @@ export function LiteraturePage({ project }: { project: Project }) {
             {searching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} 检索
           </Button>
         </div>
-        <div className="text-xs text-slate-400 mt-2">对接 OpenAlex · arXiv · Semantic Scholar 三源并查（真实文献，含 DOI 可追溯）</div>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">对接 OpenAlex · arXiv · Semantic Scholar 三源并查（真实文献，含 DOI 可追溯）</div>
       </Card>
 
       {/* 检索结果 */}
       {hits.length > 0 && (
         <Card className="p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold text-slate-700">检索结果（{hits.length} 篇）</span>
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">检索结果（{hits.length} 篇）</span>
             <Button variant="success" className="text-xs" onClick={importAll}>
               <Plus size={14} /> 全部导入文献库
             </Button>
           </div>
           <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
             {hits.map((h, i) => (
-              <div key={i} className="flex items-start gap-3 border border-slate-100 rounded-lg p-3 hover:border-teal-200">
+              <div key={i} className="flex items-start gap-3 border border-slate-100 dark:border-slate-800 rounded-lg p-3 hover:border-teal-200">
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-slate-800">{h.title}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">
+                  <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{h.title}</div>
+                  <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                     {authors(h.authors)} · {h.year || 'n.d.'} · {h.venue}
                     {h.doi && <span className="text-emerald-600"> · DOI:{h.doi}</span>}
                     {h.citationCount ? ` · 被引 ${h.citationCount}` : ''}
                   </div>
-                  {h.abstract && <div className="text-xs text-slate-500 mt-1 line-clamp-2">{h.abstract}</div>}
+                  {h.abstract && <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">{h.abstract}</div>}
                   <div className="mt-1.5">
                     <Badge tone="blue">{h.source}</Badge>
                   </div>
@@ -165,17 +165,17 @@ export function LiteraturePage({ project }: { project: Project }) {
       )}
 
       {/* 工具 Tab + 文献库 */}
-      <div className="flex gap-1 mb-4 border-b border-slate-200">
+      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800">
         {TOOLS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTool(t.key)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px ${
-              tool === t.key ? 'border-teal-600 text-teal-700 font-medium' : 'border-transparent text-slate-500 hover:text-slate-800'
+              tool === t.key ? 'border-teal-600 text-teal-700 font-medium' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800'
             }`}
           >
             <t.icon size={14} /> {t.label}
-            <span className="text-[10px] text-slate-400 hidden lg:inline">({t.hint})</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 hidden lg:inline">({t.hint})</span>
           </button>
         ))}
       </div>
@@ -184,7 +184,7 @@ export function LiteraturePage({ project }: { project: Project }) {
         {/* 文献库 */}
         <Card className="p-4">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
               <FlaskConical size={14} /> 文献库（{refs.length} 条）
             </span>
           </div>
@@ -193,10 +193,10 @@ export function LiteraturePage({ project }: { project: Project }) {
           ) : (
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
               {refs.map((r) => (
-                <div key={r.id} className="border border-slate-100 rounded-lg p-2.5 flex items-start gap-2">
+                <div key={r.id} className="border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 flex items-start gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-slate-800">{r.title}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">
+                    <div className="text-sm text-slate-800 dark:text-slate-100">{r.title}</div>
+                    <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                       {authors(r.authors)} · {r.year || 'n.d.'} · {r.venue}
                       {r.doi && <span className="text-emerald-600"> · DOI:{r.doi}</span>}
                     </div>
@@ -215,7 +215,7 @@ export function LiteraturePage({ project }: { project: Project }) {
           {tool === 'summary' && (
             <>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-slate-700">AI 文献综述</span>
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">AI 文献综述</span>
                 <Button variant="outline" className="text-xs" onClick={runSummary} disabled={busy === 'summary' || refs.length === 0}>
                   {busy === 'summary' ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} 生成
                 </Button>
@@ -223,7 +223,7 @@ export function LiteraturePage({ project }: { project: Project }) {
               {busy === 'summary' ? (
                 <Spinner label="生成综述中…" />
               ) : summary ? (
-                <div className="text-sm leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-lg p-3 max-h-[440px] overflow-y-auto">{summary}</div>
+                <div className="text-sm leading-relaxed whitespace-pre-wrap bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 max-h-[440px] overflow-y-auto">{summary}</div>
               ) : (
                 <Empty text="基于文献库自动撰写结构化综述：按主题组织 + 每处观点绑定 [Ref:N] 文献 + 研究空白" />
               )}
@@ -233,7 +233,7 @@ export function LiteraturePage({ project }: { project: Project }) {
           {tool === 'extract' && (
             <>
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-slate-700">结构化提取（方法/结果/贡献/局限）</span>
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">结构化提取（方法/结果/贡献/局限）</span>
                 <Button variant="outline" className="text-xs" onClick={runExtract} disabled={busy === 'extract' || refs.length === 0}>
                   {busy === 'extract' ? <Loader2 size={13} className="animate-spin" /> : <ListChecks size={13} />} 提取
                 </Button>
@@ -241,9 +241,9 @@ export function LiteraturePage({ project }: { project: Project }) {
               {busy === 'extract' ? (
                 <Spinner label="提取文献结构化信息…" />
               ) : extracted.length > 0 ? (
-                <div className="max-h-[460px] overflow-auto rounded-lg border border-slate-100">
+                <div className="max-h-[460px] overflow-auto rounded-lg border border-slate-100 dark:border-slate-800">
                   <table className="w-full text-xs">
-                    <thead className="bg-slate-50 text-slate-500 sticky top-0">
+                    <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 sticky top-0">
                       <tr>
                         <th className="px-2 py-2 text-left">文献</th>
                         <th className="px-2 py-2 text-left">方法</th>
@@ -254,15 +254,15 @@ export function LiteraturePage({ project }: { project: Project }) {
                     </thead>
                     <tbody>
                       {extracted.map((p, i) => (
-                        <tr key={i} className="border-t border-slate-100 align-top">
+                        <tr key={i} className="border-t border-slate-100 dark:border-slate-800 align-top">
                           <td className="px-2 py-2 max-w-[180px]">
-                            <div className="font-medium text-slate-700 leading-snug">{p.title}</div>
-                            <div className="text-slate-400 mt-0.5">{p.year || 'n.d.'}</div>
+                            <div className="font-medium text-slate-700 dark:text-slate-200 leading-snug">{p.title}</div>
+                            <div className="text-slate-400 dark:text-slate-500 mt-0.5">{p.year || 'n.d.'}</div>
                           </td>
-                          <td className="px-2 py-2 text-slate-600">{p.method}</td>
-                          <td className="px-2 py-2 text-slate-600">{p.results}</td>
-                          <td className="px-2 py-2 text-slate-600">{p.contribution}</td>
-                          <td className="px-2 py-2 text-slate-500">{p.limitations}</td>
+                          <td className="px-2 py-2 text-slate-600 dark:text-slate-300">{p.method}</td>
+                          <td className="px-2 py-2 text-slate-600 dark:text-slate-300">{p.results}</td>
+                          <td className="px-2 py-2 text-slate-600 dark:text-slate-300">{p.contribution}</td>
+                          <td className="px-2 py-2 text-slate-500 dark:text-slate-400">{p.limitations}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -286,15 +286,15 @@ export function LiteraturePage({ project }: { project: Project }) {
                 <Spinner label="综合证据中…" />
               ) : evidence ? (
                 <div className="space-y-3 max-h-[440px] overflow-y-auto pr-1">
-                  <div className="rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">{evidence.summary}</div>
+                  <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{evidence.summary}</div>
                   {evidence.stances.map((s, i) => (
-                    <div key={i} className="rounded-lg border border-slate-100 p-3">
+                    <div key={i} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3">
                       <div className="flex items-start justify-between gap-2">
-                        <div className="text-sm font-medium text-slate-700">{s.claim}</div>
+                        <div className="text-sm font-medium text-slate-700 dark:text-slate-200">{s.claim}</div>
                         <Badge tone={stanceTone(s.stance)}>{s.stance} · {s.count} 篇</Badge>
                       </div>
-                      <div className="text-xs text-slate-500 mt-1">{s.note}</div>
-                      {s.refs.length > 0 && <div className="text-[11px] text-slate-400 mt-1">依据：[Ref:{s.refs.join(', ')}]</div>}
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">{s.note}</div>
+                      {s.refs.length > 0 && <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">依据：[Ref:{s.refs.join(', ')}]</div>}
                     </div>
                   ))}
                 </div>

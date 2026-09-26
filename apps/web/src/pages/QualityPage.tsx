@@ -102,7 +102,7 @@ export function QualityPage({ project }: { project: Project }) {
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-2 flex-wrap">
           <Gauge size={16} className="text-teal-600" />
-          <span className="text-sm font-semibold text-slate-700 mr-2">选择文档进行 7 维质量评分</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 mr-2">选择文档进行 7 维质量评分</span>
           <Select
             className="w-64"
             options={[{ value: '', label: '选择文档…' }, ...docs.map((d) => ({ value: d.id, label: d.title }))]}
@@ -113,7 +113,7 @@ export function QualityPage({ project }: { project: Project }) {
             {scoring ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} 开始评分
           </Button>
         </div>
-        <div className="text-xs text-slate-400 mt-2">
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">
           七维：文献充分性 · 逻辑一致性 · 引用规范 · 语言质量 · 创新性 · 图表 · 格式（0-100，总分取均值），结果持久化可历史对比
         </div>
       </Card>
@@ -122,28 +122,28 @@ export function QualityPage({ project }: { project: Project }) {
         <div className="grid lg:grid-cols-2 gap-4">
           <Card className="p-4">
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-sm font-semibold text-slate-700">当前评分</span>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">当前评分</span>
               <Badge tone={current.totalScore >= 80 ? 'green' : current.totalScore >= 60 ? 'amber' : 'red'}>
                 总分 {current.totalScore}/100
               </Badge>
             </div>
             <Radar scores={current.scoresObj} />
-            <div className="text-xs text-slate-400 mt-1">{new Date(current.createdAt).toLocaleString()}</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">{new Date(current.createdAt).toLocaleString()}</div>
           </Card>
           <Card className="p-4">
-            <div className="text-sm font-semibold text-slate-700 mb-2">改进建议</div>
-            <div className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">改进建议</div>
+            <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
               {current.feedback || '暂无反馈'}
             </div>
             {history.length > 1 && (
-              <div className="mt-4 pt-3 border-t border-slate-100">
-                <div className="text-xs font-medium text-slate-500 mb-2">历史评分（可对比）</div>
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">历史评分（可对比）</div>
                 <div className="space-y-1">
                   {history.map((h) => (
                     <button
                       key={h.id}
                       className={`w-full text-left text-xs rounded px-2 py-1.5 border ${
-                        selectedHist?.id === h.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 hover:border-indigo-200'
+                        selectedHist?.id === h.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 dark:border-slate-800 hover:border-indigo-200'
                       }`}
                       onClick={() => setSelectedHist({ ...h, scoresObj: jsonText<Record<string, number>>(h.scores, {}) })}
                     >

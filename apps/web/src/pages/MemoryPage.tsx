@@ -69,20 +69,20 @@ export function MemoryPage() {
       <ErrorBox message={error} />
 
       <Card className="p-4 mb-4">
-        <div className="flex items-center gap-1.5 text-slate-700 font-semibold">
+        <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200 font-semibold">
           <Brain size={16} className="text-teal-600" /> 记忆中心
         </div>
-        <div className="text-xs text-slate-400 mt-1 mb-3">
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1 mb-3">
           Agentic Memory：情景记忆自动沉淀每次完成的研究任务；程序记忆保存写作风格指令，起草时自动注入（对标 NotebookLM / Agentic Memory）
         </div>
         <div className="flex flex-wrap gap-2">
-          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+          <div className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
             {(['', 'episodic', 'procedural'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setType(t)}
                 className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                  type === t ? 'bg-white shadow text-teal-700 font-medium' : 'text-slate-500'
+                  type === t ? 'bg-white dark:bg-slate-900 shadow text-teal-700 font-medium' : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
                 {t === '' ? '全部' : t === 'episodic' ? '情景记忆' : '程序记忆'}
@@ -90,7 +90,7 @@ export function MemoryPage() {
             ))}
           </div>
           <div className="flex-1 min-w-40 flex items-center gap-1">
-            <Search size={14} className="text-slate-400" />
+            <Search size={14} className="text-slate-400 dark:text-slate-500" />
             <Input placeholder="按关键词搜索（如：图神经、综述）" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <Button onClick={() => setShowAdd(true)}>
@@ -138,14 +138,14 @@ export function MemoryPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <Badge tone={typeTone(m.type)}>{m.type === 'procedural' ? '程序记忆' : '情景记忆'}</Badge>
-                  <span className="text-[11px] text-slate-400">{new Date(m.createdAt).toLocaleString()}</span>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500">{new Date(m.createdAt).toLocaleString()}</span>
                   {m.keywords.map((k) => (
-                    <span key={k} className="text-[11px] bg-slate-100 text-slate-500 rounded px-1.5 py-0.5">
+                    <span key={k} className="text-[11px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded px-1.5 py-0.5">
                       {k}
                     </span>
                   ))}
                 </div>
-                <div className="text-sm text-slate-700 whitespace-pre-wrap break-all">{m.content}</div>
+                <div className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap break-all">{m.content}</div>
               </div>
               <button className="text-slate-300 hover:text-rose-500 shrink-0" title="删除" onClick={() => remove(m.id)}>
                 <Trash2 size={15} />

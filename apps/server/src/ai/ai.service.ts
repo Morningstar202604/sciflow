@@ -1,5 +1,9 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { sqlite } from '../db/database';
+import { db } from '../db/database';
+import { llmCallLogs } from '../db/schema';
 import * as prompts from './prompts';
 
 export interface ChatMessage {
@@ -12,6 +16,8 @@ interface CompleteOptions {
   maxTokens?: number;
   /** 模型档位：fast=轻量快速（默认），strong=强模型（长文/评审/规划等高难任务） */
   model?: 'fast' | 'strong';
+  /** 调用方标识（成本追踪落库用） */
+  context?: string;
 }
 
 /**
@@ -92,6 +98,39 @@ export class AiService {
     }
   }
 
+  // ---------- LLM 调用成本追踪（token 用量审计，落 llm_call_log 表） ----------
+  private logLlmCall(opts: { caller: string; model: string; promptTokens: number; completionTokens: number; latencyMs: number; success: boolean; error?: string }) {
+    try {
+      db.insert(llmCallLogs)
+        .values({
+          id: randomUUID(),
+          caller: opts.caller || 'general',
+          model: opts.model,
+          promptTokens: opts.promptTokens,
+          completionTokens: opts.completionTokens,
+          totalTokens: opts.promptTokens + opts.completionTokens,
+          latencyMs: opts.latencyMs,
+          success: opts.success ? 1 : 0,
+          error: opts.error || '',
+          createdAt: Date.now(),
+        })
+        .run();
+    } catch {
+      /* 日志写入失败不影响主流程 */
+    }
+  }
+
+  /** zod 结构化输出校验：schema 校验通过返回解析值，失败返回 null（调用处走兜底，杜绝坏 JSON 反复补工） */
+  private safeParse<T>(text: string, schema: z.ZodType<T>): T | null {
+    try {
+      const obj = this.jsonOf<unknown>(text);
+      const result = schema.safeParse(obj);
+      return result.success ? result.data : null;
+    } catch {
+      return null;
+    }
+  }
+
   // ---------- 全局令牌桶（适配免费版 RPM 限流：稳定排队，避免 429 风暴） ----------
   private static tokens = Number(process.env.AI_RPM_CAP || 5); // 桶容量（每分钟额度）
   private static lastRefill = Date.now();
@@ -115,9 +154,12 @@ export class AiService {
     }
   }
 
-  /** 非流式补全（全局令牌桶排队 + 429 退避重试） */
+  /** 非流式补全（全局令牌桶排队 + 429 退避重试 + token 成本追踪） */
   async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
     this.assertConfigured();
+    const t0 = Date.now();
+    const model = this.resolveModel(opts);
+    const caller = opts.context || 'general';
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       await this.acquireToken();
@@ -129,7 +171,7 @@ export class AiService {
             Authorization: `Bearer ${this.apiKey}`,
           },
           body: JSON.stringify({
-            model: this.resolveModel(opts),
+            model,
             messages,
             temperature: opts.temperature ?? 0.7,
             max_tokens: opts.maxTokens ?? 4096,
@@ -155,22 +197,41 @@ export class AiService {
           await new Promise((r) => setTimeout(r, attempt * 3000));
           continue;
         }
+        const usage = (data.usage || {}) as any;
+        this.logLlmCall({
+          caller,
+          model,
+          promptTokens: Number(usage.prompt_tokens) || 0,
+          completionTokens: Number(usage.completion_tokens) || 0,
+          latencyMs: Date.now() - t0,
+          success: true,
+        });
         return String(content);
       } catch (e) {
-        if (e instanceof HttpException) throw e;
+        if (e instanceof HttpException) {
+          if (attempt >= maxAttempts) {
+            this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: e.message });
+          }
+          throw e;
+        }
         if (attempt < maxAttempts) {
           await new Promise((r) => setTimeout(r, attempt * 3000));
           continue;
         }
+        this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: (e as Error).message });
         throw e;
       }
     }
+    this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: '多次重试后仍失败' });
     throw new HttpException('AI 服务调用失败（多次重试后仍失败）', HttpStatus.BAD_GATEWAY);
   }
 
   /** 流式补全，返回上游响应体（Web ReadableStream），用于 SSE 转发 */
   async completeStream(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<ReadableStream<Uint8Array>> {
     this.assertConfigured();
+    const t0 = Date.now();
+    const model = this.resolveModel(opts);
+    const caller = opts.context || 'general';
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -178,7 +239,7 @@ export class AiService {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: this.resolveModel(opts),
+        model,
         messages,
         temperature: opts.temperature ?? 0.7,
         max_tokens: opts.maxTokens ?? 4096,
@@ -188,8 +249,11 @@ export class AiService {
     });
     if (!res.ok || !res.body) {
       const errText = await res.text().catch(() => '');
+      this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: `HTTP ${res.status}` });
       throw new HttpException(`AI 流式调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
     }
+    // 流式调用无法提前拿到 usage：至少记录调用发生与耗时（token 在非流式链路全覆盖）
+    this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: true });
     return res.body;
   }
 
@@ -235,28 +299,31 @@ export class AiService {
 
   /** 选题建议 */
   async suggestTopics(field: string, context: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.SUGGEST_TOPICS(field, context) }], { temperature: 0.8 });
+    return this.complete([{ role: 'user', content: prompts.SUGGEST_TOPICS(field, context) }], { temperature: 0.8, context: 'suggestTopics' });
   }
 
-  /** 大纲生成（outline-first）；解析失败时按纯文本标题兜底 */
+  /** 大纲生成（outline-first）；zod 校验失败时按纯文本标题兜底 */
   async writeOutline(topic: string, literatureSummary: string): Promise<{ title: string; sections: { title: string; subsections: string[] }[] }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.WRITE_OUTLINE(topic, literatureSummary) }], { temperature: 0.5, model: 'strong' });
-    try {
-      const parsed = this.jsonOf<{ title: string; sections: { title: string; subsections: string[] }[] }>(raw);
-      return { title: parsed.title || topic, sections: Array.isArray(parsed.sections) ? parsed.sections : [] };
-    } catch {
-      return { title: topic, sections: [{ title: '引言', subsections: [] }, { title: '相关工作', subsections: [] }, { title: '方法', subsections: [] }, { title: '实验与结果', subsections: [] }, { title: '讨论', subsections: [] }, { title: '结论', subsections: [] }] };
+    const raw = await this.complete([{ role: 'user', content: prompts.WRITE_OUTLINE(topic, literatureSummary) }], { temperature: 0.5, model: 'strong', context: 'writeOutline' });
+    const schema = z.object({
+      title: z.string().optional(),
+      sections: z.array(z.object({ title: z.string(), subsections: z.array(z.string()).optional().default([]) })).optional(),
+    });
+    const parsed = this.safeParse(raw, schema);
+    if (parsed && (parsed.title || parsed.sections?.length)) {
+      return { title: parsed.title || topic, sections: parsed.sections || [] };
     }
+    return { title: topic, sections: [{ title: '引言', subsections: [] }, { title: '相关工作', subsections: [] }, { title: '方法', subsections: [] }, { title: '实验与结果', subsections: [] }, { title: '讨论', subsections: [] }, { title: '结论', subsections: [] }] };
   }
 
   /** 章节起草 */
   async draftSection(sectionTitle: string, outline: string, references: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.DRAFT_SECTION(sectionTitle, outline, references) }], { temperature: 0.6, model: 'strong' });
+    return this.complete([{ role: 'user', content: prompts.DRAFT_SECTION(sectionTitle, outline, references) }], { temperature: 0.6, model: 'strong', context: 'draftSection' });
   }
 
   /** 三段式润色/降重：原文 + 润色文 + 理由（AI 输出缺字段或嵌套时递归回退，防止落库异常） */
   async polish(text: string, mode: 'polish' | 'reduce' = 'polish'): Promise<{ original: string; polished: string; reason: string }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.POLISH(text, mode) }], { temperature: 0.4 });
+    const raw = await this.complete([{ role: 'user', content: prompts.POLISH(text, mode) }], { temperature: 0.4, context: 'polish' });
     let parsed: Partial<{ original: string; polished: string; reason: string }> = {};
     try {
       parsed = this.jsonOf<{ original: string; polished: string; reason: string }>(raw);
@@ -291,7 +358,7 @@ export class AiService {
     feedback: string;
     totalScore: number;
   }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }], { temperature: 0.3, model: 'strong' });
+    const raw = await this.complete([{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }], { temperature: 0.3, model: 'strong', context: 'reviewPaper' });
     let parsed: { scores?: Record<string, number>; feedback?: string } = {};
     try {
       parsed = this.jsonOf<{ scores: Record<string, number>; feedback: string }>(raw);
@@ -307,22 +374,22 @@ export class AiService {
 
   /** 文献综述 */
   async summarizeLiterature(topic: string, papers: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.SUMMARIZE_LITERATURE(topic, papers) }], { temperature: 0.5 });
+    return this.complete([{ role: 'user', content: prompts.SUMMARIZE_LITERATURE(topic, papers) }], { temperature: 0.5, context: 'summarizeLiterature' });
   }
 
   /** 期刊推荐 */
   async recommendJournal(title: string, abstract: string, field: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.RECOMMEND_JOURNAL(title, abstract, field) }], { temperature: 0.5 });
+    return this.complete([{ role: 'user', content: prompts.RECOMMEND_JOURNAL(title, abstract, field) }], { temperature: 0.5, context: 'recommendJournal' });
   }
 
   /** Cover Letter */
   async coverLetter(title: string, abstract: string, journal: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.COVER_LETTER(title, abstract, journal) }], { temperature: 0.5 });
+    return this.complete([{ role: 'user', content: prompts.COVER_LETTER(title, abstract, journal) }], { temperature: 0.5, context: 'coverLetter' });
   }
 
   /** 审稿回复 */
   async replyReview(reviewComments: string, response: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.REPLY_REVIEW(reviewComments, response) }], { temperature: 0.5 });
+    return this.complete([{ role: 'user', content: prompts.REPLY_REVIEW(reviewComments, response) }], { temperature: 0.5, context: 'replyReview' });
   }
 
   /** 查询可用模型列表（OpenAI 兼容 /v1/models） */
@@ -372,7 +439,7 @@ export class AiService {
 
   /** Elicit 式：文献结构化提取（字段统一字符串化） */
   async extractPaperTable(papers: string): Promise<{ ref: string; title: string; year: number; method: string; results: string; contribution: string; limitations: string }[]> {
-    const raw = await this.complete([{ role: 'user', content: prompts.EXTRACT_PAPER_TABLE(papers) }], { temperature: 0.2 });
+    const raw = await this.complete([{ role: 'user', content: prompts.EXTRACT_PAPER_TABLE(papers) }], { temperature: 0.2, context: 'extractPaperTable' });
     try {
       const parsed = this.jsonOf<{ papers: any[] }>(raw);
       return (parsed.papers || []).slice(0, 12).map((p: any) => ({
@@ -394,7 +461,7 @@ export class AiService {
     question: string,
     papers: string,
   ): Promise<{ summary: string; stances: { claim: string; stance: string; count: number; refs: string[]; note: string }[] }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.EVIDENCE_SYNTHESIS(question, papers) }], { temperature: 0.3 });
+    const raw = await this.complete([{ role: 'user', content: prompts.EVIDENCE_SYNTHESIS(question, papers) }], { temperature: 0.3, context: 'evidenceSynthesis' });
     try {
       const parsed = this.jsonOf<{ summary: string; stances: any[] }>(raw);
       return {
@@ -414,12 +481,12 @@ export class AiService {
 
   /** NotebookLM 式：知识库检索增强问答 */
   async knowledgeQa(question: string, chunks: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.KNOWLEDGE_QA(question, chunks) }], { temperature: 0.3, maxTokens: 2048 });
+    return this.complete([{ role: 'user', content: prompts.KNOWLEDGE_QA(question, chunks) }], { temperature: 0.3, maxTokens: 2048, context: 'knowledgeQa' });
   }
 
   // ---------- Phase 1：Planner / ReAct / Reflexion ----------
 
-  /** 研究计划生成（对标 GPT Researcher planner）：解析失败时回退标准计划 */
+  /** 研究计划生成（对标 GPT Researcher planner）：zod 校验失败时回退标准计划 */
   async generatePlan(topic: string): Promise<{
     objective: string;
     researchQuestions: string[];
@@ -427,35 +494,47 @@ export class AiService {
     draftingPlan: { sections: string[]; wordCount: number };
     risks: string[];
   }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.PLAN_RESEARCH(topic) }], { temperature: 0.4, model: 'strong' });
-    try {
-      const p = this.jsonOf<any>(raw);
-      return {
-        objective: String(p.objective || `围绕「${topic}」完成一篇系统性综述`),
-        researchQuestions: (Array.isArray(p.researchQuestions) ? p.researchQuestions : [topic]).slice(0, 5).map(String),
-        searchStrategy: {
-          keywords: (Array.isArray(p.searchStrategy?.keywords) ? p.searchStrategy.keywords : [topic]).slice(0, 8).map(String),
-          minPapers: Number(p.searchStrategy?.minPapers) || 8,
-          depth: String(p.searchStrategy?.depth || 'overview'),
-        },
-        draftingPlan: {
-          sections: (Array.isArray(p.draftingPlan?.sections) ? p.draftingPlan.sections : ['引言', '相关工作', '方法', '实验与结果', '讨论', '结论']).map(String),
-          wordCount: Number(p.draftingPlan?.wordCount) || 6000,
-        },
-        risks: (Array.isArray(p.risks) ? p.risks : []).map(String),
-      };
-    } catch {
-      return {
-        objective: `围绕「${topic}」完成一篇系统性综述`,
-        researchQuestions: [topic],
-        searchStrategy: { keywords: [topic], minPapers: 8, depth: 'overview' },
-        draftingPlan: { sections: ['引言', '相关工作', '方法', '实验与结果', '讨论', '结论'], wordCount: 6000 },
-        risks: [],
-      };
-    }
+    const raw = await this.complete([{ role: 'user', content: prompts.PLAN_RESEARCH(topic) }], { temperature: 0.4, model: 'strong', context: 'generatePlan' });
+    const fallback = {
+      objective: `围绕「${topic}」完成一篇系统性综述`,
+      researchQuestions: [topic],
+      searchStrategy: { keywords: [topic], minPapers: 8, depth: 'overview' },
+      draftingPlan: { sections: ['引言', '相关工作', '方法', '实验与结果', '讨论', '结论'], wordCount: 6000 },
+      risks: [],
+    };
+    const schema = z.object({
+      objective: z.string().optional(),
+      researchQuestions: z.array(z.string()).optional(),
+      searchStrategy: z.object({
+        keywords: z.array(z.string()).optional(),
+        minPapers: z.number().optional(),
+        depth: z.string().optional(),
+      }).optional(),
+      draftingPlan: z.object({
+        sections: z.array(z.string()).optional(),
+        wordCount: z.number().optional(),
+      }).optional(),
+      risks: z.array(z.string()).optional(),
+    });
+    const p = this.safeParse(raw, schema);
+    if (!p) return fallback;
+    return {
+      objective: String(p.objective || fallback.objective),
+      researchQuestions: (p.researchQuestions?.length ? p.researchQuestions : fallback.researchQuestions).slice(0, 5).map(String),
+      searchStrategy: {
+        keywords: (p.searchStrategy?.keywords?.length ? p.searchStrategy.keywords : [topic]).slice(0, 8).map(String),
+        minPapers: Number(p.searchStrategy?.minPapers) || 8,
+        depth: String(p.searchStrategy?.depth || 'overview'),
+      },
+      draftingPlan: {
+        sections: (p.draftingPlan?.sections?.length ? p.draftingPlan.sections : fallback.draftingPlan.sections).map(String),
+        wordCount: Number(p.draftingPlan?.wordCount) || 6000,
+      },
+      risks: (p.risks || []).map(String),
+    };
   }
 
-  /** ReAct 思考步：决定检索或收尾（对标 ReAct think-act-observe） */
+  /** ReAct 思考步：决定检索或收尾（对标 ReAct think-act-observe）；zod 校验失败兜底继续检索 */
   async reactThink(
     topic: string,
     questions: string[],
@@ -464,35 +543,43 @@ export class AiService {
     const pastText = past
       .map((p) => `第${p.round}轮：检索词「${p.query}」→ 获得 ${p.found} 条文献`)
       .join('\n');
-    const raw = await this.complete([{ role: 'user', content: prompts.REACT_THINK(topic, questions, pastText) }], { temperature: 0.3 });
-    try {
-      const r = this.jsonOf<any>(raw);
+    const raw = await this.complete([{ role: 'user', content: prompts.REACT_THINK(topic, questions, pastText) }], { temperature: 0.3, context: 'reactThink' });
+    const schema = z.object({
+      thought: z.string().optional(),
+      action: z.enum(['search', 'done']).optional(),
+      query: z.string().optional(),
+      coverage: z.number().optional(),
+    });
+    const r = this.safeParse(raw, schema);
+    if (r) {
       return {
         thought: String(r.thought || ''),
         action: r.action === 'done' ? 'done' : 'search',
         query: String(r.query || ''),
         coverage: Math.max(0, Math.min(100, Number(r.coverage) || 0)),
       };
-    } catch {
-      return { thought: '（解析失败，进入下一轮检索）', action: 'search', query: '', coverage: 0 };
     }
+    return { thought: '（解析失败，进入下一轮检索）', action: 'search', query: '', coverage: 0 };
   }
 
-  /** Reflexion：把评审反馈提炼为可执行修改指令（对标 Reflexion 语义梯度） */
+  /** Reflexion：把评审反馈提炼为可执行修改指令（对标 Reflexion 语义梯度）；zod 校验失败兜底 */
   async reflect(topic: string, feedback: string, pastReflections: string): Promise<{ note: string; instructions: string[] }> {
     const raw = await this.complete(
       [{ role: 'user', content: prompts.REFLEXION_PROMPT(topic, feedback, pastReflections) }],
-      { temperature: 0.3 },
+      { temperature: 0.3, context: 'reflect' },
     );
-    try {
-      const r = this.jsonOf<any>(raw);
+    const schema = z.object({
+      note: z.string().optional(),
+      instructions: z.array(z.string()).optional(),
+    });
+    const r = this.safeParse(raw, schema);
+    if (r && (r.note || r.instructions?.length)) {
       return {
         note: String(r.note || '改进论文质量'),
-        instructions: (Array.isArray(r.instructions) ? r.instructions : []).map(String).slice(0, 5),
+        instructions: (r.instructions || []).map(String).slice(0, 5),
       };
-    } catch {
-      return { note: '改进论文质量', instructions: [] };
     }
+    return { note: '改进论文质量', instructions: [] };
   }
 
   // ---------- Phase 2：记忆 ----------
@@ -501,7 +588,7 @@ export class AiService {
   async extractEpisodic(projectName: string, docTitle: string, outline: string, score: number): Promise<{ content: string; keywords: string[] }> {
     const raw = await this.complete(
       [{ role: 'user', content: prompts.EPISODIC_EXTRACT(projectName, docTitle, outline, score) }],
-      { temperature: 0.2 },
+      { temperature: 0.2, context: 'extractEpisodic' },
     );
     try {
       const r = this.jsonOf<any>(raw);

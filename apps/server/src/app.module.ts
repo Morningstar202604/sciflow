@@ -11,6 +11,7 @@ import { SettingsModule } from './settings/settings.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { McpModule } from './mcp/mcp.module';
 import { MemoryModule } from './memory/memory.module';
+import { UsageModule } from './usage/usage.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -27,6 +28,7 @@ import { HealthController } from './health.controller';
     KnowledgeModule,
     McpModule,
     MemoryModule,
+    UsageModule,
   ],
   controllers: [HealthController],
 })

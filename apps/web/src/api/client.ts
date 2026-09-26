@@ -114,6 +114,15 @@ export const api = {
     removeMcpServer: (id: string) => request<{ ok: boolean }>(`/api/settings/mcp-servers/${id}`, { method: 'DELETE' }),
   },
 
+  usage: {
+    summary: () =>
+      request<{
+        total: { calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; avg_latency_ms: number; success_rate: number };
+        byCaller: { caller: string; calls: number; total_tokens: number; success_rate: number }[];
+        byDay: { day: string; calls: number; total_tokens: number }[];
+      }>('/api/usage/summary'),
+  },
+
   mcpExternal: {
     discover: (url: string) =>
       request<{ tools: { name?: string; description?: string }[] }>(`/api/mcp/external/discover`, {

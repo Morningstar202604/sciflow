@@ -100,12 +100,14 @@ export const knowledgeDocs = sqliteTable('knowledge_doc', {
   createdAt: integer('created_at').notNull(),
 });
 
-/** 知识库分块（检索单元） */
+/** 知识库分块（检索单元；context=Contextual Retrieval 文档上下文前缀，vector=TF 向量 JSON） */
 export const knowledgeChunks = sqliteTable('knowledge_chunk', {
   id: text('id').primaryKey(),
   docId: text('doc_id').notNull(),
   content: text('content').notNull(),
   seq: integer('seq').default(0),
+  context: text('context').default(''), // 文档级上下文描述（检索时拼在块前，+35-50% 精度）
+  vector: text('vector').default('[]'), // JSON: 归一化 TF 向量 {term: weight}
 });
 
 export type Project = typeof projects.$inferSelect;
@@ -182,3 +184,19 @@ export const mcpServers = sqliteTable('mcp_server', {
 });
 
 export type McpServer = typeof mcpServers.$inferSelect;
+
+/** LLM 调用日志（token 成本追踪：每一次补全/流式调用的用量审计） */
+export const llmCallLogs = sqliteTable('llm_call_log', {
+  id: text('id').primaryKey(),
+  caller: text('caller').default('general'), // 调用方标识（pipeline/chat/orchestrator 等）
+  model: text('model').default(''),
+  promptTokens: integer('prompt_tokens').default(0),
+  completionTokens: integer('completion_tokens').default(0),
+  totalTokens: integer('total_tokens').default(0),
+  latencyMs: integer('latency_ms').default(0),
+  success: integer('success').default(1),
+  error: text('error').default(''),
+  createdAt: integer('created_at').notNull(),
+});
+
+export type LlmCallLog = typeof llmCallLogs.$inferSelect;

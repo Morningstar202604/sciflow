@@ -88,7 +88,7 @@ export function KnowledgePage({ project }: { project: Project }) {
         </SectionTitle>
         <div
           className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
-            dragging ? 'border-teal-500 bg-teal-50' : 'border-slate-300 hover:border-teal-400 hover:bg-slate-50'
+            dragging ? 'border-teal-500 bg-teal-50' : 'border-slate-300 dark:border-slate-700 hover:border-teal-400 hover:bg-slate-50 dark:hover:bg-slate-800'
           }`}
           onClick={() => fileRef.current?.click()}
           onDragOver={(e) => {
@@ -114,9 +114,9 @@ export function KnowledgePage({ project }: { project: Project }) {
               e.target.value = '';
             }}
           />
-          <FileText size={28} className="mx-auto text-slate-400 mb-2" />
-          <div className="text-sm text-slate-600">点击选择或拖拽 PDF / TXT / Markdown 到此处</div>
-          <div className="text-xs text-slate-400 mt-1">支持 PDF 解析与自动分块（NotebookLM 式 RAG）</div>
+          <FileText size={28} className="mx-auto text-slate-400 dark:text-slate-500 mb-2" />
+          <div className="text-sm text-slate-600 dark:text-slate-300">点击选择或拖拽 PDF / TXT / Markdown 到此处</div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">支持 PDF 解析与自动分块（NotebookLM 式 RAG）</div>
           {busy.startsWith('upload:') && (
             <div className="mt-2">
               <Spinner label={`解析 ${busy.slice(7)}…`} />
@@ -126,22 +126,22 @@ export function KnowledgePage({ project }: { project: Project }) {
 
         {/* 资料列表 */}
         <div className="mt-4">
-          <div className="text-xs text-slate-400 mb-2">知识库（{docs.length} 份资料）</div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">知识库（{docs.length} 份资料）</div>
           {docs.length === 0 ? (
             <Empty text="暂无资料，上传后即可基于资料问答" />
           ) : (
             <div className="space-y-2">
               {docs.map((d) => (
-                <div key={d.id} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2.5">
+                <div key={d.id} className="flex items-center gap-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 px-3 py-2.5">
                   <BookMarked size={15} className="text-teal-500 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-slate-700 truncate">{d.name}</div>
-                    <div className="text-[11px] text-slate-400">
+                    <div className="text-sm text-slate-700 dark:text-slate-200 truncate">{d.name}</div>
+                    <div className="text-[11px] text-slate-400 dark:text-slate-500">
                       <Badge tone={d.type === 'pdf' ? 'red' : d.type === 'markdown' ? 'blue' : 'slate'}>{d.type}</Badge>
                       <span className="ml-2">{d.chunkCount} 个分块</span>
                     </div>
                   </div>
-                  <button onClick={() => remove(d.id)} className="text-slate-400 hover:text-rose-500" title="删除">
+                  <button onClick={() => remove(d.id)} className="text-slate-400 dark:text-slate-500 hover:text-rose-500" title="删除">
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -164,7 +164,7 @@ export function KnowledgePage({ project }: { project: Project }) {
             {busy === 'query' ? <Loader2 size={15} className="animate-spin" /> : <MessageSquare size={15} />} 提问
           </Button>
         </div>
-        <div className="text-xs text-slate-400 mt-1.5">答案严格来自你的资料（NotebookLM 式），不依赖外部知识</div>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">答案严格来自你的资料（NotebookLM 式），不依赖外部知识</div>
 
         {busy === 'query' && (
           <div className="mt-4">
@@ -172,15 +172,15 @@ export function KnowledgePage({ project }: { project: Project }) {
           </div>
         )}
         {answer && (
-          <div className="mt-4 rounded-lg bg-slate-50 p-4">
-            <div className="text-sm leading-relaxed whitespace-pre-wrap text-slate-700">{answer.answer}</div>
+          <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900/50 p-4">
+            <div className="text-sm leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-200">{answer.answer}</div>
             {answer.sources.length > 0 && (
-              <div className="mt-3 border-t border-slate-200 pt-3">
-                <div className="text-xs text-slate-400 mb-2">回答依据来源</div>
+              <div className="mt-3 border-t border-slate-200 dark:border-slate-800 pt-3">
+                <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">回答依据来源</div>
                 {answer.sources.map((s, i) => (
-                  <div key={i} className="text-xs text-slate-500 mb-1.5">
-                    <Badge tone="indigo">{s.docName}</Badge> <span className="text-slate-400">匹配 {s.score}%</span>
-                    <div className="text-slate-400 mt-0.5 truncate">{s.snippet}</div>
+                  <div key={i} className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">
+                    <Badge tone="indigo">{s.docName}</Badge> <span className="text-slate-400 dark:text-slate-500">匹配 {s.score}%</span>
+                    <div className="text-slate-400 dark:text-slate-500 mt-0.5 truncate">{s.snippet}</div>
                   </div>
                 ))}
               </div>

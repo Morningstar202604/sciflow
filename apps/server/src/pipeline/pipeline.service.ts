@@ -93,6 +93,44 @@ export class PipelineService {
     return this.orchestrator.listRuns(id);
   }
 
+  /**
+   * Checkpoint 断点续跑：服务重启后恢复中断任务（对标 LangGraph checkpointer）
+   * - 已有产物文档（后半段）：从 drafting 起断点续跑（drafting 全量重写幂等，安全）
+   * - 无文档（前半段）：标记 interrupted，前端可一键重新运行（重跑成本低）
+   */
+  resumeInterrupted() {
+    const rows = db
+      .select()
+      .from(pipelineTasks)
+      .where(eq(pipelineTasks.status, 'running'))
+      .all();
+    for (const t of rows) {
+      if (t.documentId) {
+        const steps = JSON.parse(t.steps || '[]') as PipelineStepState[];
+        let resumed = false;
+        for (const s of steps) {
+          if (s.key === 'drafting') {
+            s.status = 'running';
+            s.output = '服务重启后续跑（checkpoint 恢复）';
+            resumed = true;
+          } else if (resumed) {
+            s.status = 'pending';
+          }
+        }
+        db.update(pipelineTasks)
+          .set({ steps: JSON.stringify(steps), status: 'running', currentStep: 'drafting', lastError: '', updatedAt: Date.now() })
+          .where(eq(pipelineTasks.id, t.id))
+          .run();
+        this.logger.log(`[checkpoint] 任务 ${t.id} 断点续跑（从 drafting 恢复）`);
+        void this.runAfterConfirmation(t.id, t.documentId);
+      } else {
+        this.logger.warn(`[checkpoint] 任务 ${t.id} 中断于前半段（无产物文档），标记 interrupted`);
+        this.setStatus(t.id, 'interrupted', '', '服务重启中断，可点击重新运行');
+      }
+    }
+    return rows.length;
+  }
+
   // ---------- 状态机 ----------
 
   private loadSteps(id: string): PipelineStepState[] {

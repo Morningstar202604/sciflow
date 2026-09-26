@@ -61,10 +61,10 @@ export function ChatPage({ project }: { project: Project }) {
   return (
     <div className="max-w-3xl mx-auto h-full flex flex-col">
       <Card className="flex-1 flex flex-col min-h-0">
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 shrink-0">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 shrink-0">
           <MessageSquare size={15} className="text-teal-600" />
-          <span className="text-sm font-semibold text-slate-700">科研问答</span>
-          <span className="text-xs text-slate-400">流式输出 · 多轮对话 · 上下文感知当前项目</span>
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">科研问答</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500">流式输出 · 多轮对话 · 上下文感知当前项目</span>
         </div>
 
         <ErrorBox message={error} />
@@ -74,7 +74,7 @@ export function ChatPage({ project }: { project: Project }) {
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
                 className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-                  m.role === 'user' ? 'bg-teal-600 text-white rounded-br-sm' : 'bg-slate-100 text-slate-700 rounded-bl-sm'
+                  m.role === 'user' ? 'bg-teal-600 text-white rounded-br-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-bl-sm'
                 }`}
               >
                 {m.content}
@@ -85,9 +85,9 @@ export function ChatPage({ project }: { project: Project }) {
           <div ref={bottomRef} />
         </div>
 
-        <div className="p-3 border-t border-slate-100 flex gap-2 shrink-0">
+        <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex gap-2 shrink-0">
           <input
-            className="flex-1 rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-teal-500 bg-white"
+            className="flex-1 rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-2.5 text-sm outline-none focus:border-teal-500 bg-white dark:bg-slate-900"
             placeholder="问任何科研问题…"
             value={input}
             onChange={(e) => setInput(e.target.value)}

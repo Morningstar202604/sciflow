@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState, createContext } from 'react';
+import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight,
+  BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
@@ -69,11 +70,18 @@ const VIEW_LABELS: Record<View, string> = {
   settings: '设置',
 };
 
-export default function App() {
+/** 主题上下文（暗色模式，2026 桌面工具标配） */
+export const ThemeContext = createContext<{ theme: 'light' | 'dark'; toggle: () => void }>({
+  theme: 'light',
+  toggle: () => undefined,
+});
+
+function AppInner() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [view, setView] = useState<View>('dashboard');
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [aiReady, setAiReady] = useState(false);
@@ -82,6 +90,23 @@ export default function App() {
   const [renaming, setRenaming] = useState<Project | null>(null);
   const [renameText, setRenameText] = useState('');
   const [projectQuery, setProjectQuery] = useState('');
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('sciflow-theme') as 'light' | 'dark') || 'light');
+
+  // 路由化：pathname 决定当前视图（hash 路由，刷新/分享/深链不丢状态）
+  const view = (location.pathname.replace(/^\//, '') || 'dashboard') as View;
+  const selectedDocId = searchParams.get('doc');
+  const setView = useCallback(
+    (v: View) => {
+      navigate(`/${v}`);
+    },
+    [navigate],
+  );
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem('sciflow-theme', theme);
+  }, [theme]);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -103,6 +128,19 @@ export default function App() {
     loadProjects();
   }, [loadProjects]);
 
+  // Cmd+K / Ctrl+K 全局命令面板快捷键
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandOpen((s) => !s);
+      }
+      if (e.key === 'Escape') setCommandOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const createProject = async () => {
     if (!newName.trim()) return;
     const p = await api.projects.create(newName.trim());
@@ -110,6 +148,7 @@ export default function App() {
     setCurrentProjectId(p.id);
     setNewName('');
     setShowNewProject(false);
+    setCommandOpen(false);
   };
 
   const renameProject = async () => {
@@ -141,199 +180,287 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden bg-slate-50">
-      {/* ============ 左侧边栏：Logo + 项目区 + 功能导航分组 + 底部设置 ============ */}
-      <aside className="w-56 shrink-0 bg-white border-r border-slate-200 flex flex-col">
-        {/* Logo */}
-        <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-[13px] font-bold tracking-tight">
-            S
-          </div>
-          <div className="leading-tight">
-            <div className="text-[15px] font-semibold text-slate-900 tracking-tight">SciFlow</div>
-            <div className="text-[10px] text-slate-400 -mt-0.5">全自动 AI 科研助手</div>
-          </div>
-        </div>
-
-        {/* 功能导航分组（固定首屏，Linear 式） */}
-        <div className="px-3 py-2">
-          {NAV_GROUPS.map((g) => (
-            <div key={g.label} className="mb-1.5">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400 px-2 py-1">{g.label}</div>
-              {g.items.map((n) => {
-                const Icon = n.icon;
-                return (
-                  <button
-                    key={n.key}
-                    onClick={() => setView(n.key)}
-                    className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
-                      view === n.key ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                    }`}
-                  >
-                    <Icon size={14} className={view === n.key ? 'text-teal-400' : 'text-slate-400'} />
-                    {n.label}
-                  </button>
-                );
-              })}
+    <ThemeContext.Provider value={{ theme, toggle: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')) }}>
+      <div className="flex h-full overflow-hidden bg-slate-50 dark:bg-slate-950 dark:text-slate-100">
+        {/* ============ 左侧边栏：Logo + 项目区 + 功能导航分组 + 底部设置 ============ */}
+        <aside className="w-56 shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col">
+          {/* Logo */}
+          <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-[13px] font-bold tracking-tight">
+              S
             </div>
-          ))}
-        </div>
+            <div className="leading-tight">
+              <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100 tracking-tight">SciFlow</div>
+              <div className="text-[10px] text-slate-400 -mt-0.5">全自动 AI 科研助手</div>
+            </div>
+          </div>
 
-        {/* 项目区（可滚动） */}
-        <div className="flex-1 overflow-y-auto px-3 py-1 border-t border-slate-100">
-          <div className="relative pt-2">
-            <Search size={13} className="absolute left-2.5 top-[13px] text-slate-400" />
-            <input
-              className="w-full rounded-lg bg-slate-100 pl-8 pr-2 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1 focus:ring-slate-300 placeholder:text-slate-400"
-              placeholder="搜索项目…"
-              value={projectQuery}
-              onChange={(e) => setProjectQuery(e.target.value)}
-            />
+          {/* 功能导航分组（固定首屏，Linear 式） */}
+          <div className="px-3 py-2">
+            {NAV_GROUPS.map((g) => (
+              <div key={g.label} className="mb-1.5">
+                <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400 px-2 py-1">{g.label}</div>
+                {g.items.map((n) => {
+                  const Icon = n.icon;
+                  return (
+                    <button
+                      key={n.key}
+                      onClick={() => setView(n.key)}
+                      className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
+                        view === n.key ? 'bg-slate-900 text-white dark:bg-teal-600' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900'
+                      }`}
+                    >
+                      <Icon size={14} className={view === n.key ? 'text-teal-400' : 'text-slate-400 dark:text-slate-500'} />
+                      {n.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
-          <div className="flex items-center justify-between px-2 pt-3 pb-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">研究项目</span>
-            <button className="text-slate-400 hover:text-slate-700" title="新建项目" onClick={() => setShowNewProject(true)}>
-              <Plus size={13} />
-            </button>
+
+          {/* 项目区（可滚动） */}
+          <div className="flex-1 overflow-y-auto px-3 py-1 border-t border-slate-100 dark:border-slate-800">
+            <div className="relative pt-2">
+              <Search size={13} className="absolute left-2.5 top-[13px] text-slate-400" />
+              <input
+                className="w-full rounded-lg bg-slate-100 dark:bg-slate-800 pl-8 pr-2 py-1.5 text-xs text-slate-700 dark:text-slate-200 outline-none focus:bg-white dark:focus:bg-slate-700 focus:ring-1 focus:ring-slate-300 placeholder:text-slate-400"
+                placeholder="搜索项目…"
+                value={projectQuery}
+                onChange={(e) => setProjectQuery(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center justify-between px-2 pt-3 pb-1">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">研究项目</span>
+              <button className="text-slate-400 hover:text-slate-700" title="新建项目" onClick={() => setShowNewProject(true)}>
+                <Plus size={13} />
+              </button>
+            </div>
+            {filteredProjects.length === 0 && <div className="text-xs text-slate-400 px-2 py-3">暂无项目，点击 + 创建</div>}
+            {filteredProjects.map((p) => (
+              <div
+                key={p.id}
+                onClick={() => setCurrentProjectId(p.id)}
+                className={`group relative rounded-md px-3 py-2 cursor-pointer text-sm transition-colors ${
+                  currentProjectId === p.id ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900'
+                }`}
+              >
+                {currentProjectId === p.id && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded bg-teal-600" />}
+                <div className="flex items-center justify-between gap-1">
+                  <span className="truncate">{p.name}</span>
+                  <span className="hidden group-hover:flex items-center gap-1">
+                    <button
+                      className="text-[11px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                      title="重命名"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRenaming(p);
+                        setRenameText(p.name);
+                      }}
+                    >
+                      改
+                    </button>
+                    <button
+                      className="text-[11px] text-slate-400 hover:text-rose-600"
+                      title="删除"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeProject(p.id);
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
-          {filteredProjects.length === 0 && <div className="text-xs text-slate-400 px-2 py-3">暂无项目，点击 + 创建</div>}
-          {filteredProjects.map((p) => (
-            <div
-              key={p.id}
-              onClick={() => setCurrentProjectId(p.id)}
-              className={`group relative rounded-md px-3 py-2 cursor-pointer text-sm transition-colors ${
-                currentProjectId === p.id ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+
+          {/* 底部：设置 + AI 状态 + 主题切换 */}
+          <div className="px-3 py-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              onClick={() => setView('settings')}
+              className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
+                view === 'settings' ? 'bg-slate-900 text-white dark:bg-teal-600' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900'
               }`}
             >
-              {currentProjectId === p.id && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded bg-teal-600" />}
-              <div className="flex items-center justify-between gap-1">
-                <span className="truncate">{p.name}</span>
-                <span className="hidden group-hover:flex items-center gap-1">
-                  <button
-                    className="text-[11px] text-slate-400 hover:text-slate-700"
-                    title="重命名"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRenaming(p);
-                      setRenameText(p.name);
-                    }}
-                  >
-                    改
-                  </button>
-                  <button
-                    className="text-[11px] text-slate-400 hover:text-rose-600"
-                    title="删除"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeProject(p.id);
-                    }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </span>
-              </div>
+              <Settings size={14} className={view === 'settings' ? 'text-teal-400' : 'text-slate-400 dark:text-slate-500'} />
+              设置
+            </button>
+            <div className="mt-2 flex items-center gap-1.5 text-[11px] rounded-md px-2.5 py-1 bg-slate-50 dark:bg-slate-800">
+              <button
+                onClick={() => setCommandOpen(true)}
+                className="flex-1 flex items-center gap-1.5 text-slate-500 dark:text-slate-300 hover:text-slate-700"
+                title="命令面板 (Ctrl+K)"
+              >
+                <Command size={11} /> 命令面板
+                <kbd className="ml-auto text-[9px] text-slate-400 border border-slate-200 dark:border-slate-700 rounded px-1">⌘K</kbd>
+              </button>
+              <button
+                onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+                className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                title={theme === 'light' ? '切换暗色模式' : '切换亮色模式'}
+              >
+                {theme === 'light' ? <Moon size={13} /> : <Sun size={13} />}
+              </button>
             </div>
+            <div className={`mt-2 flex items-center gap-1.5 text-[11px] rounded-md px-2.5 py-1 ${aiReady ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-300' : 'text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${aiReady ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              {aiReady ? 'AI 服务已连接' : 'AI 未配置'}
+            </div>
+          </div>
+        </aside>
+
+        {/* ============ 右侧主区 ============ */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* 顶部面包屑：项目名 / 当前页 */}
+          <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-2.5 flex items-center gap-2 shrink-0">
+            {view === 'settings' ? (
+              <span className="text-sm text-slate-700 dark:text-slate-200 font-medium">设置</span>
+            ) : currentProject ? (
+              <div className="flex items-center gap-1.5 text-sm min-w-0">
+                <span className="text-slate-400 truncate max-w-[220px]">{currentProject.name}</span>
+                <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                <span className="text-slate-900 dark:text-slate-100 font-medium whitespace-nowrap">{VIEW_LABELS[view]}</span>
+              </div>
+            ) : (
+              <span className="text-sm text-slate-400">未选择项目</span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              {view !== 'settings' && currentProject && (
+                <Button variant="outline" className="text-xs px-2.5 py-1.5" onClick={() => setShowNewProject(true)}>
+                  <Plus size={13} /> 新建项目
+                </Button>
+              )}
+            </div>
+          </header>
+
+          <main className="flex-1 overflow-y-auto p-6">
+            {error && (
+              <div className="mb-4">
+                <ErrorBox message={error} />
+              </div>
+            )}
+            {!currentProject && view !== 'settings' ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
+                <div className="text-4xl">🔬</div>
+                <div className="text-lg">请先创建一个研究项目</div>
+                <Button onClick={() => setShowNewProject(true)}>
+                  <Plus size={16} /> 新建项目
+                </Button>
+              </div>
+            ) : (
+              <>
+                {view === 'settings' && <SettingsPage />}
+                {view === 'dashboard' && currentProject && <DashboardPage project={currentProject} onNavigate={setView} openDoc={(id) => navigate(`/writing?doc=${id}`)} />}
+                {view === 'writing' && currentProject && <WritingPage project={currentProject} initialDocId={selectedDocId} />}
+                {view === 'literature' && currentProject && <LiteraturePage project={currentProject} />}
+                {view === 'knowledge' && currentProject && <KnowledgePage project={currentProject} />}
+                {view === 'memory' && currentProject && <MemoryPage />}
+                {view === 'pipeline' && currentProject && <PipelinePage project={currentProject} />}
+                {view === 'quality' && currentProject && <QualityPage project={currentProject} />}
+                {view === 'chat' && currentProject && <ChatPage project={currentProject} />}
+                {view === 'submission' && currentProject && <SubmissionPage project={currentProject} />}
+              </>
+            )}
+          </main>
+        </div>
+
+        {/* ============ Cmd+K 命令面板（大厂标配：搜索式快速跳转） ============ */}
+        {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} onNavigate={(v) => setView(v)} onNewProject={() => { setCommandOpen(false); setShowNewProject(true); }} />}
+
+        {/* 新建项目弹窗 */}
+        <Modal open={showNewProject} title="新建研究项目" onClose={() => setShowNewProject(false)} width="max-w-md">
+          <Input placeholder="项目名称，如：图神经网络综述" value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus />
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setShowNewProject(false)}>
+              取消
+            </Button>
+            <Button onClick={createProject} disabled={!newName.trim()}>
+              创建
+            </Button>
+          </div>
+        </Modal>
+
+        {/* 重命名弹窗 */}
+        <Modal open={!!renaming} title="重命名项目" onClose={() => setRenaming(null)} width="max-w-md">
+          <Input placeholder="新名称" value={renameText} onChange={(e) => setRenameText(e.target.value)} autoFocus />
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setRenaming(null)}>
+              取消
+            </Button>
+            <Button onClick={renameProject} disabled={!renameText.trim()}>
+              保存
+            </Button>
+          </div>
+        </Modal>
+      </div>
+    </ThemeContext.Provider>
+  );
+}
+
+/** Cmd+K 命令面板：搜索导航项 + 快捷动作 */
+function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => void; onNavigate: (v: View) => void; onNewProject: () => void }) {
+  const [q, setQ] = useState('');
+  const { theme, toggle } = useContext(ThemeContext);
+  const commands = useMemo(() => {
+    const nav = NAV_GROUPS.flatMap((g) => g.items).map((n) => ({ id: `nav-${n.key}`, label: n.label, group: g(n.key), run: () => onNavigate(n.key) }));
+    return [
+      ...nav,
+      { id: 'theme', label: theme === 'light' ? '切换到暗色模式' : '切换到亮色模式', group: '外观', run: toggle },
+      { id: 'new-project', label: '新建研究项目', group: '项目', run: onNewProject },
+    ];
+  }, [onNavigate, onNewProject, theme, toggle]);
+
+  const filtered = commands.filter((c) => !q.trim() || c.label.toLowerCase().includes(q.trim().toLowerCase()));
+  const [active, setActive] = useState(0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-slate-900/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 dark:border-slate-800">
+          <Search size={15} className="text-slate-400" />
+          <input
+            autoFocus
+            className="flex-1 bg-transparent outline-none text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400"
+            placeholder="输入命令或页面名称…（Esc 关闭）"
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setActive(0); }}
+          />
+          <kbd className="text-[10px] text-slate-400 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5">Esc</kbd>
+        </div>
+        <div className="max-h-80 overflow-y-auto py-2">
+          {filtered.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-400">没有匹配的命令</div>}
+          {filtered.map((c, i) => (
+            <button
+              key={c.id}
+              onMouseEnter={() => setActive(i)}
+              onClick={() => { c.run(); onClose(); }}
+              className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm ${i === active ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300'}`}
+            >
+              <span>{c.label}</span>
+              <span className="text-[11px] text-slate-400">{c.group}</span>
+            </button>
           ))}
         </div>
-
-        {/* 底部：设置 + AI 状态 */}
-        <div className="px-3 py-3 border-t border-slate-200">
-          <button
-            onClick={() => setView('settings')}
-            className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
-              view === 'settings' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-            }`}
-          >
-            <Settings size={14} className={view === 'settings' ? 'text-teal-400' : 'text-slate-400'} />
-            设置
-          </button>
-          <div className={`mt-2 flex items-center gap-1.5 text-[11px] rounded-md px-2.5 py-1 ${aiReady ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${aiReady ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-            {aiReady ? 'AI 服务已连接' : 'AI 未配置'}
-          </div>
+        <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 flex items-center gap-3">
+          <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">↑↓</kbd> 选择</span>
+          <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">Enter</kbd> 执行</span>
+          <span className="ml-auto flex items-center gap-1"><Monitor size={11} /> SciFlow Command</span>
         </div>
-      </aside>
-
-      {/* ============ 右侧主区 ============ */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* 顶部面包屑：项目名 / 当前页 */}
-        <header className="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-2 shrink-0">
-          {view === 'settings' ? (
-            <span className="text-sm text-slate-700 font-medium">设置</span>
-          ) : currentProject ? (
-            <div className="flex items-center gap-1.5 text-sm min-w-0">
-              <span className="text-slate-400 truncate max-w-[220px]">{currentProject.name}</span>
-              <ChevronRight size={14} className="text-slate-300 shrink-0" />
-              <span className="text-slate-900 font-medium whitespace-nowrap">{VIEW_LABELS[view]}</span>
-            </div>
-          ) : (
-            <span className="text-sm text-slate-400">未选择项目</span>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            {view !== 'settings' && currentProject && (
-              <Button variant="outline" className="text-xs px-2.5 py-1.5" onClick={() => setShowNewProject(true)}>
-                <Plus size={13} /> 新建项目
-              </Button>
-            )}
-          </div>
-        </header>
-
-        <main className="flex-1 overflow-y-auto p-6">
-          {error && (
-            <div className="mb-4">
-              <ErrorBox message={error} />
-            </div>
-          )}
-          {!currentProject && view !== 'settings' ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
-              <div className="text-4xl">🔬</div>
-              <div className="text-lg">请先创建一个研究项目</div>
-              <Button onClick={() => setShowNewProject(true)}>
-                <Plus size={16} /> 新建项目
-              </Button>
-            </div>
-          ) : (
-            <>
-              {view === 'settings' && <SettingsPage />}
-              {view === 'dashboard' && currentProject && <DashboardPage project={currentProject} onNavigate={setView} openDoc={(id) => { setSelectedDocId(id); setView('writing'); }} />}
-              {view === 'writing' && currentProject && <WritingPage project={currentProject} initialDocId={selectedDocId} />}
-              {view === 'literature' && currentProject && <LiteraturePage project={currentProject} />}
-              {view === 'knowledge' && currentProject && <KnowledgePage project={currentProject} />}
-              {view === 'memory' && currentProject && <MemoryPage />}
-              {view === 'pipeline' && currentProject && <PipelinePage project={currentProject} />}
-              {view === 'quality' && currentProject && <QualityPage project={currentProject} />}
-              {view === 'chat' && currentProject && <ChatPage project={currentProject} />}
-              {view === 'submission' && currentProject && <SubmissionPage project={currentProject} />}
-            </>
-          )}
-        </main>
       </div>
-
-      {/* 新建项目弹窗 */}
-      <Modal open={showNewProject} title="新建研究项目" onClose={() => setShowNewProject(false)} width="max-w-md">
-        <Input placeholder="项目名称，如：图神经网络综述" value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus />
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setShowNewProject(false)}>
-            取消
-          </Button>
-          <Button onClick={createProject} disabled={!newName.trim()}>
-            创建
-          </Button>
-        </div>
-      </Modal>
-
-      {/* 重命名弹窗 */}
-      <Modal open={!!renaming} title="重命名项目" onClose={() => setRenaming(null)} width="max-w-md">
-        <Input placeholder="新名称" value={renameText} onChange={(e) => setRenameText(e.target.value)} autoFocus />
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setRenaming(null)}>
-            取消
-          </Button>
-          <Button onClick={renameProject} disabled={!renameText.trim()}>
-            保存
-          </Button>
-        </div>
-      </Modal>
     </div>
+  );
+}
+
+function g(key: View) {
+  return NAV_GROUPS.find((grp) => grp.items.some((n) => n.key === key))?.label ?? '';
+}
+
+export default function App() {
+  return (
+    <HashRouter>
+      <AppInner />
+    </HashRouter>
   );
 }

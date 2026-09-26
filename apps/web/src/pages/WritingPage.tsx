@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BookOpen, Check, ChevronRight, FileText, Languages, ListTree, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { BookOpen, Check, ChevronRight, Eye, FileText, Languages, ListTree, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { CitationRow, Doc, Outline, Project, Reference } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, Textarea, jsonText } from '../components/ui';
@@ -18,6 +19,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [polishResult, setPolishResult] = useState<{ original: string; polished: string; reason: string } | null>(null);
   const [polishMode, setPolishMode] = useState<'polish' | 'reduce'>('polish');
   const [translateTarget, setTranslateTarget] = useState<'zh' | 'en'>('zh');
+  const [editorMode, setEditorMode] = useState<'edit' | 'preview' | 'split'>('split');
   const [refs, setRefs] = useState<Reference[]>([]);
   const [citations, setCitations] = useState<CitationRow[]>([]);
   const [history, setHistory] = useState<{ type: string; original: string; polished: string; reason: string }[]>([]);
@@ -194,7 +196,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
           <div
             key={d.id}
             className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm whitespace-nowrap cursor-pointer border ${
-              docId === d.id ? 'bg-teal-600 text-white border-teal-600' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
+              docId === d.id ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-indigo-300'
             }`}
             onClick={() => setDocId(d.id)}
           >
@@ -222,7 +224,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
         {/* 大纲栏 */}
         <Card className={`w-60 shrink-0 p-3 overflow-y-auto flex flex-col ${showOutlinePanel ? '' : 'hidden md:flex'}`}>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
               <ListTree size={14} /> 大纲
             </span>
             <Button variant="ghost" className="px-2 py-0.5 text-xs" onClick={() => setShowOutlinePanel((v) => !v)}>
@@ -230,14 +232,14 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
             </Button>
           </div>
           {!outline ? (
-            <div className="text-xs text-slate-400">暂无大纲。输入主题生成：</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500">暂无大纲。输入主题生成：</div>
           ) : (
             <div className="space-y-1.5">
-              <div className="font-medium text-slate-800 text-sm mb-1">{outline.title}</div>
+              <div className="font-medium text-slate-800 dark:text-slate-100 text-sm mb-1">{outline.title}</div>
               {outline.sections?.map((s, i) => (
                 <div key={i} className="group">
                   <button
-                    className="flex items-center gap-1 w-full text-left text-sm text-slate-600 hover:text-teal-700 py-1 rounded"
+                    className="flex items-center gap-1 w-full text-left text-sm text-slate-600 dark:text-slate-300 hover:text-teal-700 py-1 rounded"
                     onClick={() => draftSection(s.title)}
                     title="点击起草此章节"
                   >
@@ -246,7 +248,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
                     <Sparkles size={12} className="opacity-0 group-hover:opacity-100 ml-auto text-teal-500 shrink-0" />
                   </button>
                   {s.subsections?.length > 0 && (
-                    <div className="ml-4 space-y-0.5 text-xs text-slate-400">
+                    <div className="ml-4 space-y-0.5 text-xs text-slate-400 dark:text-slate-500">
                       {s.subsections.map((sub, j) => (
                         <div key={j}>· {sub}</div>
                       ))}
@@ -256,7 +258,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
               ))}
             </div>
           )}
-          <div className="mt-auto pt-3 border-t border-slate-100">
+          <div className="mt-auto pt-3 border-t border-slate-100 dark:border-slate-800">
             <Input placeholder="研究方向 / 论文主题" value={topicInput} onChange={(e) => setTopicInput(e.target.value)} />
             <Button className="w-full mt-2" onClick={generateOutline} disabled={aiBusy || !docId}>
               {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} AI 生成大纲
@@ -266,9 +268,9 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
         {/* 编辑器 */}
         <Card className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 shrink-0">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800 shrink-0">
             <input
-              className="font-medium text-slate-800 outline-none flex-1 bg-transparent"
+              className="font-medium text-slate-800 dark:text-slate-100 outline-none flex-1 bg-transparent"
               defaultValue={doc.title}
               onBlur={async (e) => {
                 const t = e.target.value.trim();
@@ -279,20 +281,49 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
                 }
               }}
             />
-            {savedAt && <span className="text-xs text-slate-400 flex items-center gap-1"><Check size={12} />已保存</span>}
+            {savedAt && <span className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1"><Check size={12} />已保存</span>}
             <Badge tone="blue">v{doc.version}</Badge>
+            {/* Markdown 预览切换（编辑 / 预览 / 分栏，科研写作标配） */}
+            <div className="flex items-center gap-0.5 ml-auto bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5">
+              {(['edit', 'split', 'preview'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setEditorMode(m)}
+                  title={m === 'edit' ? '编辑' : m === 'preview' ? '预览' : '分栏'}
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors ${
+                    editorMode === m ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                  }`}
+                >
+                  {m === 'edit' ? <Pencil size={11} /> : m === 'preview' ? <Eye size={11} /> : <FileText size={11} />}
+                  {m === 'edit' ? '编辑' : m === 'preview' ? '预览' : '分栏'}
+                </button>
+              ))}
+            </div>
           </div>
-          <Textarea
-            className="flex-1 border-0 rounded-none focus:ring-0 focus:border-0 p-4 text-[13.5px] leading-relaxed"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="在这里撰写论文正文…可使用右侧 AI 工具：大纲生成、章节起草、润色、翻译、降重"
-          />
+          <div className={`flex-1 min-h-0 ${editorMode === 'split' ? 'flex' : ''}`}>
+            {editorMode !== 'preview' && (
+              <Textarea
+                className={`flex-1 border-0 rounded-none focus:ring-0 focus:border-0 p-4 text-[13.5px] leading-relaxed ${editorMode === 'split' ? 'w-1/2 border-r border-slate-100 dark:border-slate-800' : 'w-full'}`}
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="在这里撰写论文正文（支持 Markdown）…可使用右侧 AI 工具：大纲生成、章节起草、润色、翻译、降重"
+              />
+            )}
+            {editorMode !== 'edit' && (
+              <div className={`flex-1 overflow-y-auto p-4 text-[13.5px] leading-relaxed prose prose-sm prose-headings:font-semibold prose-a:text-teal-600 dark:prose-invert ${editorMode === 'split' ? 'w-1/2' : 'w-full'}`}>
+                {content.trim() ? (
+                  <ReactMarkdown>{content}</ReactMarkdown>
+                ) : (
+                  <div className="text-slate-400 dark:text-slate-500 text-sm">预览区：开始撰写后将实时渲染 Markdown 效果（标题、加粗、引用、列表、代码块等）。</div>
+                )}
+              </div>
+            )}
+          </div>
         </Card>
 
         {/* AI 工具面板 */}
         <Card className="w-72 shrink-0 p-3 overflow-y-auto hidden lg:block">
-          <div className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+          <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-1.5">
             <Sparkles size={14} className="text-teal-600" /> AI 工具
           </div>
 
@@ -300,7 +331,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
           {/* 章节起草 */}
           <div className="mb-4">
-            <div className="text-xs font-medium text-slate-500 mb-1.5">章节起草（点击大纲章节或选择）</div>
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">章节起草（点击大纲章节或选择）</div>
             <Select
               options={[
                 { value: '', label: '选择要起草的章节…' },
@@ -316,7 +347,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
           {/* 润色 / 降重 / 翻译 */}
           <div className="mb-4 space-y-2">
-            <div className="text-xs font-medium text-slate-500 mb-1.5">润色 / 降重 / 翻译（默认处理全文，也可先选中文本）</div>
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">润色 / 降重 / 翻译（默认处理全文，也可先选中文本）</div>
             <div className="flex gap-2">
               <Button className="flex-1" variant="outline" onClick={() => doPolish('polish')} disabled={aiBusy}>
                 学术润色
@@ -343,7 +374,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
           {/* 润色结果对比 */}
           {polishResult && (
-            <Card className="p-3 mb-4 bg-slate-50 border-indigo-200">
+            <Card className="p-3 mb-4 bg-slate-50 dark:bg-slate-900/50 border-indigo-200">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-teal-700">三段式结果</span>
                 <Button variant="success" className="px-2 py-0.5 text-xs" onClick={applyPolished}>
@@ -352,16 +383,16 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
               </div>
               <div className="text-xs space-y-2">
                 <div>
-                  <div className="text-slate-400 mb-0.5">原文</div>
-                  <div className="bg-white border border-slate-200 rounded p-2 text-slate-600 max-h-28 overflow-y-auto">{polishResult.original}</div>
+                  <div className="text-slate-400 dark:text-slate-500 mb-0.5">原文</div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded p-2 text-slate-600 dark:text-slate-300 max-h-28 overflow-y-auto">{polishResult.original}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 mb-0.5">润色后</div>
-                  <div className="bg-white border border-emerald-200 rounded p-2 text-slate-800 max-h-28 overflow-y-auto">{polishResult.polished}</div>
+                  <div className="text-slate-400 dark:text-slate-500 mb-0.5">润色后</div>
+                  <div className="bg-white dark:bg-slate-900 border border-emerald-200 rounded p-2 text-slate-800 dark:text-slate-100 max-h-28 overflow-y-auto">{polishResult.polished}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 mb-0.5">理由</div>
-                  <div className="bg-white border border-slate-200 rounded p-2 text-slate-500">{polishResult.reason}</div>
+                  <div className="text-slate-400 dark:text-slate-500 mb-0.5">理由</div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded p-2 text-slate-500 dark:text-slate-400">{polishResult.reason}</div>
                 </div>
               </div>
             </Card>
@@ -369,14 +400,14 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
           {/* 引用管理 */}
           <div className="mb-4">
-            <div className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
               <BookOpen size={12} /> 引用管理（文献库 {refs.length} 条）
             </div>
             {refs.length === 0 ? (
-              <div className="text-xs text-slate-400">文献库为空，请先到「文献调研」检索导入</div>
+              <div className="text-xs text-slate-400 dark:text-slate-500">文献库为空，请先到「文献调研」检索导入</div>
             ) : (
               <select
-                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs bg-white"
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1.5 text-xs bg-white dark:bg-slate-900"
                 onChange={(e) => e.target.value && addCitation(e.target.value)}
                 value=""
               >
@@ -390,10 +421,10 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
             )}
             {citations.length > 0 && (
               <div className="mt-2">
-                <div className="text-xs text-slate-500 mb-1">已引用 {citations.length} 条</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">已引用 {citations.length} 条</div>
                 <div className="max-h-24 overflow-y-auto space-y-1">
                   {citations.map((c) => (
-                    <div key={c.id} className="flex items-center gap-1 text-xs text-slate-500 bg-slate-50 rounded px-2 py-1">
+                    <div key={c.id} className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 rounded px-2 py-1">
                       <span className="truncate flex-1">{c.reference.title}</span>
                       {c.verified ? <Badge tone="green">DOI✓</Badge> : <Badge>未核验</Badge>}
                     </div>
@@ -417,7 +448,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
               </Button>
             </div>
             {exported.length > 0 && (
-              <div className="mt-2 bg-slate-50 border border-slate-200 rounded p-2 text-xs text-slate-600 max-h-32 overflow-y-auto whitespace-pre-wrap">
+              <div className="mt-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded p-2 text-xs text-slate-600 dark:text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap">
                 {exported.map((e, i) => (
                   <div key={i} className="mb-1">
                     {e}
@@ -425,7 +456,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
                 ))}
               </div>
             )}
-            <div className="flex gap-1.5 mt-2 border-t border-slate-100 pt-2">
+            <div className="flex gap-1.5 mt-2 border-t border-slate-100 dark:border-slate-800 pt-2">
               <Button variant="outline" className="text-xs flex-1" onClick={exportFullDoc} disabled={!doc}>
                 导出全文 Markdown
               </Button>
@@ -435,14 +466,14 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
           {/* 历史记录 */}
           {history.length > 0 && (
             <div>
-              <div className="text-xs font-medium text-slate-500 mb-1.5">润色 / 翻译历史（可追溯）</div>
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">润色 / 翻译历史（可追溯）</div>
               <div className="space-y-1.5">
                 {history.slice(0, 6).map((h, i) => (
-                  <details key={i} className="bg-slate-50 rounded p-2 text-xs">
-                    <summary className="cursor-pointer text-slate-600">
+                  <details key={i} className="bg-slate-50 dark:bg-slate-900/50 rounded p-2 text-xs">
+                    <summary className="cursor-pointer text-slate-600 dark:text-slate-300">
                       {h.type === 'polish' ? '润色' : h.type === 'reduce' ? '降重' : '翻译'} · {new Date().toLocaleTimeString()}
                     </summary>
-                    <div className="mt-1 text-slate-400 max-h-20 overflow-y-auto">{h.reason}</div>
+                    <div className="mt-1 text-slate-400 dark:text-slate-500 max-h-20 overflow-y-auto">{h.reason}</div>
                   </details>
                 ))}
               </div>

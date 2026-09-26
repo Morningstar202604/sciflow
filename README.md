@@ -77,6 +77,27 @@ pnpm dev
 pnpm --filter server test
 ```
 
+## 🧭 2026 前沿升级（查漏补缺批次）
+
+对照 2026 主流 Agent 框架（LangGraph 1.x / OpenAI Agents SDK / Claude Agent SDK / Microsoft Agent Framework）补齐的能力，全部本地实现、零额外运行时依赖：
+
+**后端（5 项）**
+- **LLM 成本追踪**：`llm_call_log` 表 + `GET /api/usage/summary`，按任务类型（caller）与近 14 天趋势统计 token 用量 / 成功率 / 延迟。
+- **结构化输出校验**：zod schema 校验大纲/章节/评审等 AI 输出，坏 JSON 自动兜底重试。
+- **Checkpoint 断点续跑**：服务重启后自动恢复 `interrupted` 状态任务，从草稿阶段幂等续跑（对应 LangGraph checkpointing）。
+- **Guardrails 基础版**：MCP 工具参数按 JSON Schema 动态校验（缺参即拒），第三方工具返回统一加 `untrustedContentHint` 与指令隔离（对应 OWASP MCP Top10 输入检查点）。
+- **RAG 检索升级**：BM25 + TF 向量余弦混合评分、上下文前缀（Contextual Retrieval 思路）、零依赖中文 Bigram 分词。
+
+**前端（4 项）**
+- **hash 路由**：`#/settings` 等深层链接直达（对应现代 SPA 可分享状态）。
+- **暗色模式**：`.dark` 变体 + localStorage 持久化 + 命令面板/底部栏切换。
+- **Cmd+K 命令面板**：全局搜索导航 / 新建项目 / 主题切换（Notion 式桌面体验）。
+- **Markdown 实时预览**：写作页编辑 / 预览 / 分栏三态（react-markdown + typography 排版）。
+
+**UI 重构**：大厂式左导航分组（研究工具 / 自动化 / 辅助）、Supervisor 编排按角色分组时间线、teal 统一色板替换 AI 紫。
+
+**全量回归**：`scripts/full_regression.py` 覆盖全部 66 个路由（39 项核心断言全绿 + AI 接口受外部网关限流时自动降级跳过，Guardrail 拒参 / RAG 混合检索 / 成本统计均有专项用例）。
+
 ## 🐳 Docker 部署
 
 ```bash

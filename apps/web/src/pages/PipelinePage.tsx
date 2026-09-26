@@ -148,7 +148,7 @@ export function PipelinePage({ project }: { project: Project }) {
     if (s.status === 'awaiting_confirmation') return { bg: 'bg-amber-400 text-white', icon: <CircleDashed size={14} /> };
     if (s.status === 'retry') return { bg: 'bg-rose-100 text-rose-600', icon: <RotateCcw size={14} /> };
     if (s.status === 'failed') return { bg: 'bg-rose-500 text-white', icon: <CircleDashed size={14} /> };
-    return { bg: 'bg-slate-200 text-slate-500', icon: <CircleDashed size={14} /> };
+    return { bg: 'bg-slate-200 text-slate-500 dark:text-slate-400', icon: <CircleDashed size={14} /> };
   };
 
   const statusText: Record<string, { text: string; tone: 'blue' | 'amber' | 'green' | 'red' }> = {
@@ -163,10 +163,10 @@ export function PipelinePage({ project }: { project: Project }) {
       <ErrorBox message={error} />
 
       <Card className="p-4 mb-4">
-        <div className="flex items-center gap-1.5 mb-3 text-slate-700 font-semibold">
+        <div className="flex items-center gap-1.5 mb-3 text-slate-700 dark:text-slate-200 font-semibold">
           <Workflow size={16} className="text-teal-600" /> 一键全自动流水线
         </div>
-        <div className="text-xs text-slate-400 mb-3">
+        <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
           输入研究主题 → 自动完成 文献调研 → 大纲生成（人工确认）→ 分章起草 → 质量门评分（&lt;80 自动回炉）→ 润色定稿 → 引用格式化
         </div>
         <div className="flex gap-2">
@@ -183,7 +183,7 @@ export function PipelinePage({ project }: { project: Project }) {
         <div className="grid lg:grid-cols-3 gap-4">
           {/* 任务列表 */}
           <Card className="p-3 lg:col-span-1">
-            <div className="text-sm font-semibold text-slate-700 mb-2">任务记录</div>
+            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">任务记录</div>
             <div className="space-y-1.5">
               {tasks.map((t) => {
                 const st = statusText[t.status] || statusText.running;
@@ -191,14 +191,14 @@ export function PipelinePage({ project }: { project: Project }) {
                   <div
                     key={t.id}
                     className={`rounded-lg px-3 py-2 cursor-pointer border ${
-                      activeId === t.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 hover:border-indigo-200'
+                      activeId === t.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 dark:border-slate-800 hover:border-indigo-200'
                     }`}
                     onClick={() => setActiveId(t.id)}
                   >
-                    <div className="text-sm text-slate-800 truncate">{t.topic}</div>
+                    <div className="text-sm text-slate-800 dark:text-slate-100 truncate">{t.topic}</div>
                     <div className="flex items-center gap-2 mt-1">
                       <Badge tone={st.tone}>{st.text}</Badge>
-                      <span className="text-[11px] text-slate-400">{STEP_LABELS[t.currentStep] || t.currentStep}</span>
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500">{STEP_LABELS[t.currentStep] || t.currentStep}</span>
                     </div>
                   </div>
                 );
@@ -214,8 +214,8 @@ export function PipelinePage({ project }: { project: Project }) {
               <>
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <div className="font-medium text-slate-800">{active.topic}</div>
-                    <div className="text-xs text-slate-400">
+                    <div className="font-medium text-slate-800 dark:text-slate-100">{active.topic}</div>
+                    <div className="text-xs text-slate-400 dark:text-slate-500">
                       创建于 {new Date(active.createdAt).toLocaleString()} · 回炉 {active.retryCount} 次
                     </div>
                   </div>
@@ -226,9 +226,9 @@ export function PipelinePage({ project }: { project: Project }) {
 
                 {/* 研究计划（Phase 1a：Planner）+ ReAct 轨迹（Phase 1b） */}
                 {activePlan && (
-                  <Card className="p-3 mb-3 bg-slate-50 border-slate-200">
+                  <Card className="p-3 mb-3 bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
                         <Brain size={13} className="text-teal-500" /> Planner 研究计划
                       </span>
                       <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowPlan((v) => !v)}>
@@ -236,22 +236,22 @@ export function PipelinePage({ project }: { project: Project }) {
                       </Button>
                     </div>
                     {showPlan && (
-                      <div className="text-xs text-slate-600 space-y-1.5">
-                        <div><span className="text-slate-400">目标：</span>{activePlan.objective}</div>
+                      <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+                        <div><span className="text-slate-400 dark:text-slate-500">目标：</span>{activePlan.objective}</div>
                         <div>
-                          <span className="text-slate-400">子问题：</span>
+                          <span className="text-slate-400 dark:text-slate-500">子问题：</span>
                           {(activePlan.researchQuestions as string[]).map((q, i) => (
-                            <span key={i} className="inline-block bg-white border border-slate-200 rounded px-1.5 py-0.5 mr-1 mb-1">{q}</span>
+                            <span key={i} className="inline-block bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded px-1.5 py-0.5 mr-1 mb-1">{q}</span>
                           ))}
                         </div>
                         {activePlan.draftingPlan?.sections && (
                           <div>
-                            <span className="text-slate-400">章节规划：</span>
+                            <span className="text-slate-400 dark:text-slate-500">章节规划：</span>
                             {(activePlan.draftingPlan.sections as string[]).join(' → ')}
                           </div>
                         )}
                         {activePlan.risks?.length > 0 && (
-                          <div><span className="text-slate-400">风险：</span>{activePlan.risks.join('；')}</div>
+                          <div><span className="text-slate-400 dark:text-slate-500">风险：</span>{activePlan.risks.join('；')}</div>
                         )}
                       </div>
                     )}
@@ -279,10 +279,10 @@ export function PipelinePage({ project }: { project: Project }) {
                               <div className="text-blue-800 font-medium">
                                 {t.action === 'done' ? '✅ 收尾：' : '🔍 检索：'}
                                 {t.action === 'done' ? t.thought : `「${t.query}」`}
-                                {t.action === 'search' && <span className="text-slate-400">（获得 {t.found} 篇）</span>}
+                                {t.action === 'search' && <span className="text-slate-400 dark:text-slate-500">（获得 {t.found} 篇）</span>}
                               </div>
                               {t.thought && t.action === 'search' && (
-                                <div className="text-slate-500 mt-0.5 break-all">{t.thought}</div>
+                                <div className="text-slate-500 dark:text-slate-400 mt-0.5 break-all">{t.thought}</div>
                               )}
                             </div>
                           </div>
@@ -294,10 +294,10 @@ export function PipelinePage({ project }: { project: Project }) {
 
                 {/* Supervisor 编排视图（Phase 3：子 Agent 执行轨迹） */}
                 {agents.length > 0 && (
-                  <Card className="p-3 mb-3 bg-violet-50/40 border-violet-200">
+                  <Card className="p-3 mb-3 bg-teal-50/40 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="flex items-center gap-1.5 text-xs font-semibold text-violet-700">
-                        <Bot size={13} className="text-violet-500" /> Supervisor 多 Agent 编排
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-teal-700 dark:text-teal-300">
+                        <Bot size={13} className="text-teal-600" /> Supervisor 多 Agent 编排
                       </span>
                       <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowAgents((v) => !v)}>
                         <Eye size={12} /> {showAgents ? '收起' : `${agents.length} 个 Agent`}
@@ -305,22 +305,48 @@ export function PipelinePage({ project }: { project: Project }) {
                     </div>
                     {showAgents && (
                       <div className="text-xs">
-                        <div className="flex items-center gap-1.5 mb-2 text-violet-500">
+                        <div className="flex items-center gap-1.5 mb-2 text-teal-600 dark:text-teal-400">
                           <Activity size={12} /> 规划 → 并行检索 → 写作 → 评审 → 润色（每格一个子 Agent 执行单元）
                         </div>
-                        <div className="space-y-1">
-                          {agents.map((a) => (
-                            <div key={a.id} className="flex items-center gap-2 bg-white/70 rounded-md border border-slate-200 px-2 py-1.5">
-                              <span
-                                className={`w-2 h-2 rounded-full shrink-0 ${
-                                  a.status === 'done' ? 'bg-emerald-500' : a.status === 'failed' ? 'bg-rose-500' : 'bg-amber-400 animate-pulse'
-                                }`}
-                              />
-                              <span className="font-mono text-[11px] text-violet-700 w-28 shrink-0">{a.agentName}</span>
-                              <span className="text-slate-500 flex-1 min-w-0 truncate">{a.output || a.input}</span>
-                              <span className="text-slate-400 shrink-0">{a.status === 'done' ? `${(a.durationMs / 1000).toFixed(1)}s` : a.status === 'failed' ? `✗ ${(a.error || '').slice(0, 18)}` : '…'}</span>
-                            </div>
-                          ))}
+                        {/* 按角色分组的执行链（2026 Supervisor-Worker 编排视图） */}
+                        <div className="space-y-2">
+                          {['planner', 'research', 'writer', 'reviewer', 'polisher'].map((type) => {
+                            const group = agents.filter((a) => a.agentType === type);
+                            if (group.length === 0) return null;
+                            const labels: Record<string, string> = { planner: '规划 Agent', research: '检索 Agent', writer: '写作 Agent', reviewer: '评审 Agent', polisher: '润色 Agent' };
+                            const colors: Record<string, string> = {
+                              planner: 'border-teal-300 bg-teal-50 dark:bg-teal-900/30 dark:border-teal-700',
+                              research: 'border-sky-300 bg-sky-50 dark:bg-sky-900/30 dark:border-sky-700',
+                              writer: 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-700',
+                              reviewer: 'border-amber-300 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700',
+                              polisher: 'border-violet-300 bg-violet-50 dark:bg-violet-900/30 dark:border-violet-700',
+                            };
+                            const allDone = group.every((a) => a.status === 'done');
+                            const anyFail = group.some((a) => a.status === 'failed');
+                            return (
+                              <div key={type} className={`rounded-lg border p-2 ${colors[type]}`}>
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${anyFail ? 'bg-rose-500' : allDone ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'}`} />
+                                  <span className="font-medium text-[11px] text-slate-600 dark:text-slate-300">{labels[type]}</span>
+                                  <span className="text-[10px] text-slate-400 ml-auto">{group.length} 个实例{group.some((a) => a.durationMs > 0) ? ` · 总耗时 ${(group.reduce((s, a) => s + a.durationMs, 0) / 1000).toFixed(1)}s` : ''}</span>
+                                </div>
+                                <div className="space-y-1">
+                                  {group.map((a) => (
+                                    <div key={a.id} className="flex items-center gap-2 bg-white/80 dark:bg-slate-900/60 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1">
+                                      <span
+                                        className={`w-2 h-2 rounded-full shrink-0 ${
+                                          a.status === 'done' ? 'bg-emerald-500' : a.status === 'failed' ? 'bg-rose-500' : 'bg-amber-400 animate-pulse'
+                                        }`}
+                                      />
+                                      <span className="font-mono text-[11px] text-slate-600 dark:text-slate-300 w-24 shrink-0">{a.agentName}</span>
+                                      <span className="text-slate-500 dark:text-slate-400 flex-1 min-w-0 truncate">{a.output || a.input}</span>
+                                      <span className="text-slate-400 dark:text-slate-500 shrink-0">{a.status === 'done' ? `${(a.durationMs / 1000).toFixed(1)}s` : a.status === 'failed' ? `✗ ${(a.error || '').slice(0, 18)}` : '…'}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -336,12 +362,12 @@ export function PipelinePage({ project }: { project: Project }) {
                         <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${tone.bg}`}>{tone.icon}</div>
                         <div className="flex-1 min-w-0 pt-0.5">
                           <div className="flex items-center gap-2">
-                            <span className={`text-sm ${s.status === 'pending' ? 'text-slate-400' : 'text-slate-700'}`}>{STEP_LABELS[s.key] || s.label}</span>
+                            <span className={`text-sm ${s.status === 'pending' ? 'text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200'}`}>{STEP_LABELS[s.key] || s.label}</span>
                             {AGENT_MAP[s.key] && <Badge tone={AGENT_MAP[s.key].tone}>{AGENT_MAP[s.key].role}</Badge>}
                             {s.retryCount > 0 && <Badge tone="red">回炉 {s.retryCount} 次</Badge>}
                           </div>
                           {s.output && (
-                            <div className="text-xs text-slate-400 mt-0.5 line-clamp-2 break-all">{s.output}</div>
+                            <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2 break-all">{s.output}</div>
                           )}
                         </div>
                         {i < active.steps.length - 1 && <ChevronRight size={13} className="hidden" />}
@@ -364,7 +390,7 @@ export function PipelinePage({ project }: { project: Project }) {
 
                 {/* 产物文档 */}
                 {active.documentId && (
-                  <div className="text-xs text-slate-500 mt-3">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-3">
                     产物文档已生成（ID: {active.documentId.slice(0, 8)}…），可到「论文写作」页查看与继续编辑
                   </div>
                 )}
@@ -378,16 +404,16 @@ export function PipelinePage({ project }: { project: Project }) {
       <Modal open={!!editableOutline} title="确认论文大纲" onClose={() => setEditableOutline(null)} width="max-w-3xl">
         {editableOutline && (
           <div>
-            <div className="text-xs text-slate-400 mb-2">论文标题</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">论文标题</div>
             <Input value={editableOutline.title} onChange={(e) => setEditableOutline({ ...editableOutline, title: e.target.value })} />
-            <div className="text-xs text-slate-400 my-2">
+            <div className="text-xs text-slate-400 dark:text-slate-500 my-2">
               章节（可直接编辑标题，删减行删除章节；确认后进入分章起草）
             </div>
             <div className="space-y-1.5 max-h-72 overflow-y-auto">
               {editableOutline.sections?.map((s, i) => (
                 <div key={i} className="flex items-center gap-2">
                   <input
-                    className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                    className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm"
                     value={s.title}
                     onChange={(e) => {
                       const sections = [...editableOutline.sections];

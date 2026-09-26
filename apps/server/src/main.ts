@@ -38,6 +38,16 @@ async function bootstrap() {
   const port = Number(process.env.PORT || 3000);
   await app.listen(port, '0.0.0.0');
   console.log(`[SciFlow] API 已启动: http://localhost:${port}/api/health`);
+
+  // ---------- Checkpoint 断点续跑：重启后恢复中断的流水线任务（对标 LangGraph checkpointer） ----------
+  try {
+    const { PipelineService } = await import('./pipeline/pipeline.service');
+    const pipeline = app.get(PipelineService);
+    const resumed = pipeline.resumeInterrupted();
+    if (resumed > 0) console.log(`[SciFlow] checkpoint 恢复完成：${resumed} 个中断任务已处理`);
+  } catch (e: any) {
+    console.warn(`[SciFlow] checkpoint 恢复失败（不影响启动）: ${e.message}`);
+  }
 }
 
 bootstrap();
