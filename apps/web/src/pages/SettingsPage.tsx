@@ -83,7 +83,7 @@ export function SettingsPage() {
           }
         >
           <span className="flex items-center gap-2">
-            <Plug size={16} className="text-indigo-600" /> AI 服务配置
+            <Plug size={16} className="text-teal-600" /> AI 服务配置
           </span>
         </SectionTitle>
         {!settings ? (
@@ -126,7 +126,7 @@ export function SettingsPage() {
         <Card className="p-5 mb-4">
           <SectionTitle>
             <span className="flex items-center gap-2">
-              <FlaskConical size={16} className="text-indigo-600" /> 模型路由（fast / strong 双档）
+              <FlaskConical size={16} className="text-teal-600" /> 模型路由（fast / strong 双档）
             </span>
           </SectionTitle>
           <div className="text-xs text-slate-400 mb-3">
@@ -170,7 +170,7 @@ export function SettingsPage() {
           }
         >
           <span className="flex items-center gap-2">
-            <Server size={16} className="text-indigo-600" /> 模型厂商管理（可插拔多模型）
+            <Server size={16} className="text-teal-600" /> 模型厂商管理（可插拔多模型）
           </span>
         </SectionTitle>
         <div className="text-xs text-slate-400 mb-3">
@@ -236,7 +236,7 @@ export function SettingsPage() {
           }
         >
           <span className="flex items-center gap-2">
-            <Database size={16} className="text-indigo-600" /> 环境自检
+            <Database size={16} className="text-teal-600" /> 环境自检
           </span>
         </SectionTitle>
         {check && (
@@ -267,7 +267,7 @@ export function SettingsPage() {
           }
         >
           <span className="flex items-center gap-2">
-            <FlaskConical size={16} className="text-indigo-600" /> 模型连接测试
+            <FlaskConical size={16} className="text-teal-600" /> 模型连接测试
           </span>
         </SectionTitle>
         <div className="flex gap-3 items-end">
@@ -305,7 +305,7 @@ export function SettingsPage() {
           }
         >
           <span className="flex items-center gap-2">
-            <Wrench size={16} className="text-indigo-600" /> MCP 工具台
+            <Wrench size={16} className="text-teal-600" /> MCP 工具台
           </span>
         </SectionTitle>
         <div className="text-xs text-slate-400 mb-3">
@@ -315,7 +315,7 @@ export function SettingsPage() {
           {mcpTools.map((t) => (
             <div key={t.name} className="rounded-lg border border-slate-200 p-3">
               <div className="flex items-center justify-between mb-1">
-                <span className="font-mono text-xs font-semibold text-indigo-700">{t.name}</span>
+                <span className="font-mono text-xs font-semibold text-teal-700">{t.name}</span>
               </div>
               <div className="text-xs text-slate-500 line-clamp-2 mb-2">{t.description}</div>
               <div className="flex gap-1.5">
@@ -381,7 +381,7 @@ export function SettingsPage() {
           }
         >
           <span className="flex items-center gap-2">
-            <Wrench size={16} className="text-indigo-600" /> 外部 MCP 服务器
+            <Wrench size={16} className="text-teal-600" /> 外部 MCP 服务器
           </span>
         </SectionTitle>
         <div className="text-xs text-slate-400 mb-3">
@@ -430,7 +430,7 @@ export function SettingsPage() {
             <div className="space-y-1.5">
               {externalTools.map((t) => (
                 <div key={t.name} className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-indigo-700 w-40 truncate">{t.name}</span>
+                  <span className="font-mono text-xs text-teal-700 w-40 truncate">{t.name}</span>
                   <input
                     className="flex-1 min-w-0 rounded-md border border-slate-300 px-2 py-1 text-xs"
                     placeholder={(t.description || '').slice(0, 40)}

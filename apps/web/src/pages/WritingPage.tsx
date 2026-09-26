@@ -194,7 +194,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
           <div
             key={d.id}
             className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm whitespace-nowrap cursor-pointer border ${
-              docId === d.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
+              docId === d.id ? 'bg-teal-600 text-white border-teal-600' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
             }`}
             onClick={() => setDocId(d.id)}
           >
@@ -237,13 +237,13 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
               {outline.sections?.map((s, i) => (
                 <div key={i} className="group">
                   <button
-                    className="flex items-center gap-1 w-full text-left text-sm text-slate-600 hover:text-indigo-700 py-1 rounded"
+                    className="flex items-center gap-1 w-full text-left text-sm text-slate-600 hover:text-teal-700 py-1 rounded"
                     onClick={() => draftSection(s.title)}
                     title="点击起草此章节"
                   >
                     <ChevronRight size={13} className="shrink-0" />
                     <span className="truncate">{s.title}</span>
-                    <Sparkles size={12} className="opacity-0 group-hover:opacity-100 ml-auto text-indigo-500 shrink-0" />
+                    <Sparkles size={12} className="opacity-0 group-hover:opacity-100 ml-auto text-teal-500 shrink-0" />
                   </button>
                   {s.subsections?.length > 0 && (
                     <div className="ml-4 space-y-0.5 text-xs text-slate-400">
@@ -293,7 +293,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
         {/* AI 工具面板 */}
         <Card className="w-72 shrink-0 p-3 overflow-y-auto hidden lg:block">
           <div className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
-            <Sparkles size={14} className="text-indigo-600" /> AI 工具
+            <Sparkles size={14} className="text-teal-600" /> AI 工具
           </div>
 
           {aiBusy && <Spinner label="AI 正在处理…" />}
@@ -345,7 +345,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
           {polishResult && (
             <Card className="p-3 mb-4 bg-slate-50 border-indigo-200">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold text-indigo-700">三段式结果</span>
+                <span className="text-xs font-semibold text-teal-700">三段式结果</span>
                 <Button variant="success" className="px-2 py-0.5 text-xs" onClick={applyPolished}>
                   应用到正文
                 </Button>

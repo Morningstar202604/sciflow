@@ -70,7 +70,7 @@ export function MemoryPage() {
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 text-slate-700 font-semibold">
-          <Brain size={16} className="text-indigo-600" /> 记忆中心
+          <Brain size={16} className="text-teal-600" /> 记忆中心
         </div>
         <div className="text-xs text-slate-400 mt-1 mb-3">
           Agentic Memory：情景记忆自动沉淀每次完成的研究任务；程序记忆保存写作风格指令，起草时自动注入（对标 NotebookLM / Agentic Memory）
@@ -82,7 +82,7 @@ export function MemoryPage() {
                 key={t}
                 onClick={() => setType(t)}
                 className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                  type === t ? 'bg-white shadow text-indigo-700 font-medium' : 'text-slate-500'
+                  type === t ? 'bg-white shadow text-teal-700 font-medium' : 'text-slate-500'
                 }`}
               >
                 {t === '' ? '全部' : t === 'episodic' ? '情景记忆' : '程序记忆'}
@@ -100,7 +100,7 @@ export function MemoryPage() {
       </Card>
 
       {showAdd && (
-        <Card className="p-4 mb-4 border-indigo-200 bg-indigo-50/50">
+        <Card className="p-4 mb-4 border-indigo-200 bg-teal-50/50">
           <div className="flex items-center gap-1.5 mb-2 text-sm font-medium text-indigo-800">
             <Lightbulb size={15} /> 新增程序记忆（写作风格指令）
           </div>
@@ -133,7 +133,7 @@ export function MemoryPage() {
           {items.map((m) => (
             <Card key={m.id} className="p-3.5 flex items-start gap-3">
               <div className="mt-0.5 shrink-0">
-                {m.type === 'procedural' ? <Lightbulb size={16} className="text-indigo-500" /> : <History size={16} className="text-blue-500" />}
+                {m.type === 'procedural' ? <Lightbulb size={16} className="text-teal-500" /> : <History size={16} className="text-blue-500" />}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">

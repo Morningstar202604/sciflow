@@ -62,7 +62,7 @@ export function SubmissionPage({ project }: { project: Project }) {
               setOutput('');
             }}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px ${
-              tab === t.key ? 'border-indigo-600 text-indigo-700 font-medium' : 'border-transparent text-slate-500 hover:text-slate-800'
+              tab === t.key ? 'border-teal-600 text-teal-700 font-medium' : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <t.icon size={14} /> {t.label}

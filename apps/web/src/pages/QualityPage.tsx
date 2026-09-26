@@ -101,7 +101,7 @@ export function QualityPage({ project }: { project: Project }) {
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <Gauge size={16} className="text-indigo-600" />
+          <Gauge size={16} className="text-teal-600" />
           <span className="text-sm font-semibold text-slate-700 mr-2">选择文档进行 7 维质量评分</span>
           <Select
             className="w-64"
@@ -143,7 +143,7 @@ export function QualityPage({ project }: { project: Project }) {
                     <button
                       key={h.id}
                       className={`w-full text-left text-xs rounded px-2 py-1.5 border ${
-                        selectedHist?.id === h.id ? 'border-indigo-400 bg-indigo-50' : 'border-slate-100 hover:border-indigo-200'
+                        selectedHist?.id === h.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 hover:border-indigo-200'
                       }`}
                       onClick={() => setSelectedHist({ ...h, scoresObj: jsonText<Record<string, number>>(h.scores, {}) })}
                     >

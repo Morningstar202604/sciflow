@@ -144,7 +144,7 @@ export function PipelinePage({ project }: { project: Project }) {
 
   const stepTone = (s: PipelineStep) => {
     if (s.status === 'done') return { bg: 'bg-emerald-500 text-white', icon: <Check size={14} /> };
-    if (s.status === 'running') return { bg: 'bg-indigo-500 text-white animate-pulse', icon: <Loader2 size={14} className="animate-spin" /> };
+    if (s.status === 'running') return { bg: 'bg-teal-500 text-white animate-pulse', icon: <Loader2 size={14} className="animate-spin" /> };
     if (s.status === 'awaiting_confirmation') return { bg: 'bg-amber-400 text-white', icon: <CircleDashed size={14} /> };
     if (s.status === 'retry') return { bg: 'bg-rose-100 text-rose-600', icon: <RotateCcw size={14} /> };
     if (s.status === 'failed') return { bg: 'bg-rose-500 text-white', icon: <CircleDashed size={14} /> };
@@ -164,7 +164,7 @@ export function PipelinePage({ project }: { project: Project }) {
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 mb-3 text-slate-700 font-semibold">
-          <Workflow size={16} className="text-indigo-600" /> 一键全自动流水线
+          <Workflow size={16} className="text-teal-600" /> 一键全自动流水线
         </div>
         <div className="text-xs text-slate-400 mb-3">
           输入研究主题 → 自动完成 文献调研 → 大纲生成（人工确认）→ 分章起草 → 质量门评分（&lt;80 自动回炉）→ 润色定稿 → 引用格式化
@@ -191,7 +191,7 @@ export function PipelinePage({ project }: { project: Project }) {
                   <div
                     key={t.id}
                     className={`rounded-lg px-3 py-2 cursor-pointer border ${
-                      activeId === t.id ? 'border-indigo-400 bg-indigo-50' : 'border-slate-100 hover:border-indigo-200'
+                      activeId === t.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 hover:border-indigo-200'
                     }`}
                     onClick={() => setActiveId(t.id)}
                   >
@@ -229,7 +229,7 @@ export function PipelinePage({ project }: { project: Project }) {
                   <Card className="p-3 mb-3 bg-slate-50 border-slate-200">
                     <div className="flex items-center justify-between mb-2">
                       <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                        <Brain size={13} className="text-indigo-500" /> Planner 研究计划
+                        <Brain size={13} className="text-teal-500" /> Planner 研究计划
                       </span>
                       <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowPlan((v) => !v)}>
                         <Eye size={12} /> {showPlan ? '收起' : '查看'}

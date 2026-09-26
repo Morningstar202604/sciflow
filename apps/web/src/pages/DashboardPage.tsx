@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BookOpen, FileText, FlaskConical, Plus, Workflow } from 'lucide-react';
+import { BookOpen, FileText, FlaskConical, Plus, Workflow, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, Reference } from '../types';
 import { Button, Card, Empty, Spinner, Badge, jsonText, SectionTitle } from '../components/ui';
@@ -33,29 +33,60 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
     openDoc(doc.id);
   };
 
+  const stats = [
+    { label: '论文草稿', value: docs.length, icon: FileText, tone: 'text-slate-900 bg-slate-100' },
+    { label: '参考文献', value: refs.length, icon: BookOpen, tone: 'text-teal-700 bg-teal-50' },
+  ];
+
+  const entries = [
+    { label: '论文写作', desc: '大纲 · 起草 · 润色 · 翻译', icon: BookOpen, view: 'writing' as View },
+    { label: '文献调研', desc: '三源检索 · 综述 · 文献库', icon: FlaskConical, view: 'literature' as View },
+    { label: '全自动流水线', desc: '主题 → 初稿 → 评分 → 定稿', icon: Workflow, view: 'pipeline' as View },
+    { label: '质量评分', desc: '7 维雷达评分与改进建议', icon: Workflow, view: 'quality' as View },
+  ];
+
   return (
     <div className="max-w-5xl mx-auto">
-      <Card className="p-5 mb-5 bg-gradient-to-r from-indigo-600 to-sky-600 text-white border-0">
-        <div className="text-lg font-semibold">{project.name}</div>
-        <div className="text-sm opacity-80 mt-1">{project.description || '暂无项目描述'}</div>
-        <div className="flex gap-4 mt-4 text-sm">
-          <Badge tone="indigo">{docs.length} 篇文档</Badge>
-          <Badge tone="blue">{refs.length} 条文献</Badge>
+      {/* 项目总览（大厂式：白底 + 数据统计，去渐变去重色） */}
+      <Card className="p-6 mb-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-lg font-semibold text-slate-900 tracking-tight">{project.name}</div>
+            <div className="text-sm text-slate-400 mt-1">{project.description || '暂无项目描述'}</div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {stats.map((s) => (
+              <div key={s.label} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3.5 py-2">
+                <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${s.tone}`}>
+                  <s.icon size={14} />
+                </span>
+                <div className="leading-tight">
+                  <div className="text-lg font-semibold text-slate-900 leading-none">{s.value}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">{s.label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </Card>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        {[
-          { label: '论文写作', desc: '大纲 / 起草 / 润色 / 翻译', icon: BookOpen, view: 'writing' as View },
-          { label: '文献调研', desc: '多源检索 / 综述 / 文献库', icon: FlaskConical, view: 'literature' as View },
-          { label: '全自动流水线', desc: '主题 → 初稿 → 评分 → 定稿', icon: Workflow, view: 'pipeline' as View },
-          { label: '质量评分', desc: '7 维雷达评分与改进建议', icon: BookOpen, view: 'quality' as View },
-        ].map((item) => (
-          <Card key={item.label} className="p-4 cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all" onClick={() => onNavigate(item.view)}>
-            <item.icon size={18} className="text-indigo-600 mb-2" />
-            <div className="font-medium text-slate-800 text-sm">{item.label}</div>
+      {/* 功能入口（大厂式网格：图标底 + 名称 + 描述 + 箭头） */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-7">
+        {entries.map((item) => (
+          <button
+            key={item.label}
+            onClick={() => onNavigate(item.view)}
+            className="group text-left rounded-xl border border-slate-200 bg-white p-4 hover:border-slate-300 hover:shadow-sm transition-all"
+          >
+            <div className="flex items-start justify-between">
+              <span className="w-9 h-9 rounded-lg bg-slate-50 flex items-center justify-center text-slate-500 group-hover:bg-teal-50 group-hover:text-teal-600 transition-colors">
+                <item.icon size={17} />
+              </span>
+              <ArrowRight size={14} className="text-slate-200 group-hover:text-slate-400 transition-colors" />
+            </div>
+            <div className="font-medium text-sm text-slate-900 mt-2.5">{item.label}</div>
             <div className="text-xs text-slate-400 mt-0.5">{item.desc}</div>
-          </Card>
+          </button>
         ))}
       </div>
 
@@ -63,7 +94,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
         extra={
           <div className="flex gap-2">
             <input
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm w-52 outline-none focus:border-indigo-500"
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm w-52 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-50"
               placeholder="新建论文草稿标题"
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
@@ -87,9 +118,9 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
           {docs.map((d) => {
             const outline = jsonText<{ title: string; sections: { title: string }[] }>(d.outline, { title: '', sections: [] });
             return (
-              <Card key={d.id} className="p-4 cursor-pointer hover:border-indigo-400 transition-colors" onClick={() => openDoc(d.id)}>
+              <Card key={d.id} className="p-4 cursor-pointer hover:border-slate-300 hover:shadow-sm transition-all" onClick={() => openDoc(d.id)}>
                 <div className="flex items-start justify-between gap-2">
-                  <div className="font-medium text-slate-800 truncate">{d.title}</div>
+                  <div className="font-medium text-slate-900 truncate">{d.title}</div>
                   <Badge tone={d.status === 'final' ? 'green' : d.status === 'polished' ? 'blue' : 'slate'}>
                     {d.status === 'final' ? '已定稿' : d.status === 'polished' ? '已润色' : '草稿'}
                   </Badge>

@@ -142,7 +142,7 @@ export function LiteraturePage({ project }: { project: Project }) {
           </div>
           <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
             {hits.map((h, i) => (
-              <div key={i} className="flex items-start gap-3 border border-slate-100 rounded-lg p-3 hover:border-indigo-200">
+              <div key={i} className="flex items-start gap-3 border border-slate-100 rounded-lg p-3 hover:border-teal-200">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-slate-800">{h.title}</div>
                   <div className="text-xs text-slate-400 mt-0.5">
@@ -171,7 +171,7 @@ export function LiteraturePage({ project }: { project: Project }) {
             key={t.key}
             onClick={() => setTool(t.key)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px ${
-              tool === t.key ? 'border-indigo-600 text-indigo-700 font-medium' : 'border-transparent text-slate-500 hover:text-slate-800'
+              tool === t.key ? 'border-teal-600 text-teal-700 font-medium' : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <t.icon size={14} /> {t.label}

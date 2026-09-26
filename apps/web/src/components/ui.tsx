@@ -15,7 +15,7 @@ export function Button({
   title?: string;
 }) {
   const variants: Record<string, string> = {
-    primary: 'bg-indigo-600 text-white hover:bg-indigo-700',
+    primary: 'bg-teal-600 text-white hover:bg-teal-700',
     ghost: 'text-slate-600 hover:bg-slate-100',
     danger: 'bg-rose-600 text-white hover:bg-rose-700',
     outline: 'border border-slate-300 text-slate-700 hover:bg-slate-50 bg-white',
@@ -40,7 +40,7 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 bg-white ${props.className || ''}`}
+      className={`w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 bg-white ${props.className || ''}`}
     />
   );
 }
@@ -49,7 +49,7 @@ export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
   return (
     <textarea
       {...props}
-      className={`w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 bg-white resize-none leading-relaxed ${props.className || ''}`}
+      className={`w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100 bg-white resize-none leading-relaxed ${props.className || ''}`}
     />
   );
 }
@@ -64,7 +64,7 @@ export function Select({ options, value, onChange, className = '' }: {
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white outline-none focus:border-indigo-500 ${className}`}
+      className={`rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white outline-none focus:border-teal-500 ${className}`}
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -81,7 +81,7 @@ export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?
     green: 'bg-emerald-100 text-emerald-700',
     amber: 'bg-amber-100 text-amber-700',
     red: 'bg-rose-100 text-rose-700',
-    indigo: 'bg-indigo-100 text-indigo-700',
+    indigo: 'bg-teal-100 text-teal-700',
     blue: 'bg-sky-100 text-sky-700',
   };
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>;

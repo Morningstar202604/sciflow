@@ -83,12 +83,12 @@ export function KnowledgePage({ project }: { project: Project }) {
       <Card className="p-5 mb-4">
         <SectionTitle>
           <span className="flex items-center gap-2">
-            <Upload size={16} className="text-indigo-600" /> 上传研究资料
+            <Upload size={16} className="text-teal-600" /> 上传研究资料
           </span>
         </SectionTitle>
         <div
           className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
-            dragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 hover:border-indigo-400 hover:bg-slate-50'
+            dragging ? 'border-teal-500 bg-teal-50' : 'border-slate-300 hover:border-teal-400 hover:bg-slate-50'
           }`}
           onClick={() => fileRef.current?.click()}
           onDragOver={(e) => {
@@ -133,7 +133,7 @@ export function KnowledgePage({ project }: { project: Project }) {
             <div className="space-y-2">
               {docs.map((d) => (
                 <div key={d.id} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2.5">
-                  <BookMarked size={15} className="text-indigo-500 shrink-0" />
+                  <BookMarked size={15} className="text-teal-500 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm text-slate-700 truncate">{d.name}</div>
                     <div className="text-[11px] text-slate-400">
@@ -155,7 +155,7 @@ export function KnowledgePage({ project }: { project: Project }) {
       <Card className="p-5">
         <SectionTitle>
           <span className="flex items-center gap-2">
-            <MessageSquare size={16} className="text-indigo-600" /> 基于资料问答
+            <MessageSquare size={16} className="text-teal-600" /> 基于资料问答
           </span>
         </SectionTitle>
         <div className="flex gap-2">
