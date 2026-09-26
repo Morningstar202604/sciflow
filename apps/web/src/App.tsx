@@ -1,7 +1,7 @@
-import { useCallback, useContext, useEffect, useMemo, useState, createContext } from 'react';
+import { Component, useCallback, useContext, useEffect, useMemo, useState, createContext, type ReactNode } from 'react';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor,
+  BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
@@ -478,10 +478,43 @@ function g(key: View) {
   return NAV_GROUPS.find((grp) => grp.items.some((n) => n.key === key))?.label ?? '';
 }
 
+/** 全局错误边界：页面崩溃时显示友好提示而非白屏（健壮性兜底） */
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center gap-3 p-8">
+          <div className="w-12 h-12 rounded-xl bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center text-rose-500">
+            <XCircleIcon size={22} />
+          </div>
+          <div className="text-sm font-medium text-slate-700 dark:text-slate-200">页面渲染出错</div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 max-w-md text-center break-all">{String(this.state.error?.message || this.state.error)}</div>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+          >
+            重试
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
     <HashRouter>
-      <AppInner />
+      <ErrorBoundary>
+        <AppInner />
+      </ErrorBoundary>
     </HashRouter>
   );
 }

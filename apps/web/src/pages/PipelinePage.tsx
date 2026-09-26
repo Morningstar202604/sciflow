@@ -70,12 +70,18 @@ export function PipelinePage({ project }: { project: Project }) {
     }
   })();
 
+  const normalize = (t: PipelineTask): PipelineTask => ({
+    ...t,
+    steps: Array.isArray(t.steps) ? t.steps : jsonText<PipelineStep[]>(String(t.steps || '[]'), []),
+    trace: typeof t.trace === 'string' ? t.trace : JSON.stringify(t.trace || []),
+  });
+
   const refresh = useCallback(async () => {
     try {
-      const list = await api.pipeline.list(project.id);
+      const list = (await api.pipeline.list(project.id)).map(normalize);
       setTasks(list);
       if (activeId && list.length) {
-        const cur = await api.pipeline.get(activeId);
+        const cur = normalize(await api.pipeline.get(activeId));
         setTasks((s) => s.map((t) => (t.id === cur.id ? cur : t)));
       } else if (list.length) {
         setActiveId(list[0].id);
@@ -97,7 +103,7 @@ export function PipelinePage({ project }: { project: Project }) {
       pollTimer.current = setInterval(() => {
         api.pipeline
           .get(active.id)
-          .then((t) => setTasks((s) => s.map((x) => (x.id === t.id ? t : x))))
+          .then((t) => setTasks((s) => s.map((x) => (x.id === t.id ? normalize(t) : x))))
           .catch(() => undefined);
         api.pipeline.agents(active.id).then(setAgents).catch(() => undefined);
       }, 3000);
