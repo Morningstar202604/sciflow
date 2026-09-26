@@ -12,6 +12,7 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
 import { McpModule } from './mcp/mcp.module';
 import { MemoryModule } from './memory/memory.module';
 import { ResearchModule } from './research/research.module';
+import { JudgmentModule } from './judgment/judgment.module';
 import { UsageModule } from './usage/usage.module';
 import { HealthController } from './health.controller';
 
@@ -30,6 +31,7 @@ import { HealthController } from './health.controller';
     McpModule,
     MemoryModule,
     ResearchModule,
+    JudgmentModule,
     UsageModule,
   ],
   controllers: [HealthController],

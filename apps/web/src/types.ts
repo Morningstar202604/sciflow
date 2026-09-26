@@ -177,6 +177,15 @@ export interface EvidenceStance {
   note: string;
 }
 
+export interface IntentResult {
+  intent: string;
+  label: string;
+  confidence: number;
+  topic: string;
+  route: string;
+  matchedBy: 'rule' | 'llm';
+}
+
 export interface ResearchDesignResult {
   noveltyScore: number;
   noveltyFeedback: string;

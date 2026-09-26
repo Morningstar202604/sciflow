@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, MessageSquare, Send } from 'lucide-react';
-import { streamChat } from '../api/client';
-import type { Project } from '../types';
+import { Loader2, MessageSquare, Navigation, Send, Sparkles } from 'lucide-react';
+import { api, streamChat } from '../api/client';
+import type { IntentResult, Project } from '../types';
 import { Card, ErrorBox, Spinner } from '../components/ui';
 
 interface Msg {
@@ -20,6 +20,8 @@ export function ChatPage({ project }: { project: Project }) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [intent, setIntent] = useState<IntentResult | null>(null);
+  const [intentBusy, setIntentBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,6 +36,15 @@ export function ChatPage({ project }: { project: Project }) {
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((s) => [...s, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true }]);
     setBusy(true);
+
+    // 意图识别（Jev 式判断层：规则优先毫秒级，LLM 兜底）——与对话并行，不阻塞
+    setIntentBusy(true);
+    setIntent(null);
+    api.judgment
+      .intent(text, project.name)
+      .then((r) => setIntent(r))
+      .catch(() => undefined)
+      .finally(() => setIntentBusy(false));
 
     streamChat(
       text,
@@ -68,6 +79,35 @@ export function ChatPage({ project }: { project: Project }) {
         </div>
 
         <ErrorBox message={error} />
+
+        {(intent || intentBusy) && (
+          <div className="px-4 pt-3 shrink-0">
+            <div className="flex items-center gap-2 text-xs bg-teal-50/60 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-xl px-3 py-2 page-in">
+              {intentBusy ? (
+                <>
+                  <Loader2 size={13} className="animate-spin text-teal-600" />
+                  <span className="text-slate-500 dark:text-slate-400">正在识别意图…</span>
+                </>
+              ) : intent ? (
+                <>
+                  <Sparkles size={13} className="text-teal-600 shrink-0" />
+                  <span className="text-slate-600 dark:text-slate-300">
+                    识别意图：<b className="text-teal-700 dark:text-teal-300">{intent.label}</b>
+                    <span className="text-slate-400 dark:text-slate-500">（置信 {Math.round(intent.confidence * 100)}% · {intent.matchedBy === 'rule' ? '规则秒判' : 'AI 判别'}{intent.topic ? ` · 主题：${intent.topic}` : ''}）</span>
+                  </span>
+                  <button
+                    className="ml-auto flex items-center gap-1 shrink-0 text-teal-700 dark:text-teal-300 hover:underline"
+                    onClick={() => {
+                      window.location.hash = intent.route;
+                    }}
+                  >
+                    <Navigation size={12} /> 前往{intent.route === '/literature' ? '文献调研' : intent.route === '/writing' ? '论文写作' : intent.route === '/pipeline' ? '全自动流水线' : intent.route === '/quality' ? '质量评分' : '科研问答'}
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((m, i) => (
