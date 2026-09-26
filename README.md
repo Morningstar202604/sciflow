@@ -69,6 +69,44 @@ pnpm dev
 
 未配置 Key 时应用可正常使用（项目管理/文献检索），AI 功能会给出明确配置提示，不会返回假数据。
 
+
+## 🧪 测试
+
+```bash
+# 单元测试（引用格式化等核心纯逻辑）
+pnpm --filter server test
+```
+
+## 🐳 Docker 部署
+
+```bash
+# 1. 配置环境变量（AI 网关必填）
+cp .env.example .env   # 按注释填写 AI_BASE_URL / AI_API_KEY / AI_MODEL
+
+# 2. 一键起服务（前端 :8080 → 后端 :3000，SQLite 数据持久化到 ./apps/server/data）
+docker compose up -d --build
+```
+
+- 前端 nginx 静态托管 + `/api` 反代；后端 Node 22 + SQLite（WAL）。
+- 镜像不包含 `.env`，AI 配置全部经环境变量注入（`docker-compose.yml` 中 `${AI_*}` 引用）。
+- CORS 默认仅放行 `localhost:5173`，容器部署时设置 `CORS_ORIGIN=http://localhost:8080`。
+
+## 🔒 安全说明
+
+- 本工具定位为**本地/私有部署的单机科研助手**，API 未内置账号体系——请勿直接暴露到公网，部署时务必置于反向代理/内网之后。
+- `.env` 已被 gitignore，CI 会自动校验 `.env` 不被提交；请勿把密钥写入代码。
+- 依赖安全：`pnpm audit` 已清零（drizzle-orm / esbuild / echarts 漏洞均已升级修复）。
+
+## 🛠 工程保障
+
+| 项 | 状态 |
+| --- | --- |
+| 类型检查 | server/web 双端 `tsc --noEmit`（CI 强制） |
+| 单元测试 | server vitest（CI 强制） |
+| 依赖审计 | `pnpm audit` 0 漏洞（CI 前自查） |
+| 前端分包 | echarts/react 独立 vendor chunk，主包 84KB |
+| 稳定性 | 全局 unhandledRejection/uncaughtException 兜底 + SQLite busy_timeout + 优雅关闭 |
+| CI | GitHub Actions：Node 20/22 × typecheck × test × build × 密钥校验 |
 ## 📁 目录结构
 
 ```

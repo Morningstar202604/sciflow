@@ -35,6 +35,9 @@ jobs:
       - name: Typecheck web
         run: pnpm --filter web typecheck
 
+      - name: Unit tests (server)
+        run: pnpm --filter server test
+
       - name: Build server
         run: pnpm --filter server build
 

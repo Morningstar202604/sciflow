@@ -3,15 +3,40 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // ---------- 全局兜底：异步任务（流水线 fire-and-forget）漏网异常不再崩进程 ----------
+  process.on('unhandledRejection', (reason) => {
+    console.error(`[SciFlow] unhandledRejection 已兜底: ${reason instanceof Error ? reason.stack || reason.message : String(reason)}`);
+  });
+  process.on('uncaughtException', (err) => {
+    console.error(`[SciFlow] uncaughtException 已兜底: ${err.stack || err.message}`);
+  });
+
+  // ---------- 优雅关闭：SIGTERM/SIGINT 时安全落盘（WAL check point）+ 退出 ----------
+  let app: any;
+  const shutdown = async (signal: string) => {
+    console.log(`[SciFlow] 收到 ${signal}，正在优雅关闭…`);
+    try {
+      if (app) await app.close();
+    } finally {
+      process.exit(0);
+    }
+  };
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+
+  app = await NestFactory.create(AppModule);
+  // CORS：默认仅放行本地开发来源，可通过 CORS_ORIGIN 配置（如逗号分隔多个域名；* 表示全放行）
+  const corsOrigin = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: true, // 本地开发放开跨域
+    origin: corsOrigin.length === 1 && corsOrigin[0] === '*' ? true : corsOrigin,
     credentials: true,
   });
   app.setGlobalPrefix('api');
   const port = Number(process.env.PORT || 3000);
-  await app.listen(port);
-  // eslint-disable-next-line no-console
+  await app.listen(port, '0.0.0.0');
   console.log(`[SciFlow] API 已启动: http://localhost:${port}/api/health`);
 }
 

@@ -82,9 +82,11 @@ export class SettingsService {
   }
 
   removeProvider(id: string) {
-    const row = sqlite.prepare('SELECT * FROM model_provider WHERE id = ?').get(id);
+    const row = sqlite.prepare('SELECT * FROM model_provider WHERE id = ?').get(id) as { is_active?: number } | undefined;
     if (!row) throw new NotFoundException('厂商不存在');
     sqlite.prepare('DELETE FROM model_provider WHERE id = ?').run(id);
+    // 删除的是激活中的厂商 → AI 服务回退到环境变量配置，避免内存残留失效厂商
+    if (row.is_active === 1) this.ai.resetToEnv();
     return { ok: true };
   }
 

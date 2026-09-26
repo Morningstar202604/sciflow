@@ -12,6 +12,8 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const sqlite = new Database(DB_PATH);
 sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('foreign_keys = ON');
+// 写锁等待上限：并发写入排队而非立即报错（默认 5000ms）
+sqlite.pragma('busy_timeout = 5000');
 
 /** 建表 DDL（与 drizzle schema 保持一致，开箱即跑） */
 sqlite.exec(`

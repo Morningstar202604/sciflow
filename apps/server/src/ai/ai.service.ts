@@ -62,6 +62,14 @@ export class AiService {
     sqlite.prepare('UPDATE model_provider SET is_active = 1, updated_at = ? WHERE id = ?').run(Date.now(), id);
   }
 
+  /** 回退到环境变量配置（删除激活中的厂商时调用，避免内存残留失效厂商） */
+  resetToEnv() {
+    this.baseUrl = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    this.apiKey = process.env.AI_API_KEY || '';
+    this.fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
+    this.strongModel = process.env.AI_MODEL_STRONG || this.fastModel;
+  }
+
   /** 是否已配置真实 AI 密钥 */
   get configured(): boolean {
     return !!this.apiKey;
@@ -140,7 +148,14 @@ export class AiService {
           throw new HttpException(`AI 服务调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
         }
         const data = (await res.json()) as any;
-        return data.choices?.[0]?.message?.content ?? '';
+        const content = data.choices?.[0]?.message?.content ?? '';
+        // 免费网关偶发返回 200 但内容为空 → 按失败重试
+        if (!String(content).trim() && attempt < maxAttempts) {
+          console.warn(`[AiService] 空响应重试 (${attempt}/${maxAttempts - 1})`);
+          await new Promise((r) => setTimeout(r, attempt * 3000));
+          continue;
+        }
+        return String(content);
       } catch (e) {
         if (e instanceof HttpException) throw e;
         if (attempt < maxAttempts) {

@@ -8,9 +8,22 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: process.env.VITE_API_TARGET || 'http://localhost:3000',
         changeOrigin: true,
       },
     },
+  },
+  build: {
+    // 代码分割：echarts（重）与 React 框架拆为独立 vendor chunk，优化首屏与缓存
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ['echarts'],
+          react: ['react', 'react-dom', 'react-dom/client'],
+          ui: ['lucide-react'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 900,
   },
 });
