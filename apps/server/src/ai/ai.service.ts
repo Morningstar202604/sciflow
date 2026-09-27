@@ -300,6 +300,22 @@ export class AiService {
     return this.complete([{ role: 'system', content: prompts.CHAT_SYSTEM }, ...history, { role: 'user', content: question }]);
   }
 
+  /** Agent 化问答：在系统提示中注入项目记忆 + 知识库上下文（RAG） */
+  async chatWithContext(question: string, history: ChatMessage[] = [], context: string = ''): Promise<string> {
+    const sys = context
+      ? `${prompts.CHAT_SYSTEM}\n\n【当前项目上下文】\n${context}\n\n请优先结合上下文回答；上下文不足以覆盖时，再用你的专业知识补充，并说明依据。`
+      : prompts.CHAT_SYSTEM;
+    return this.complete([{ role: 'system', content: sys }, ...history, { role: 'user', content: question }]);
+  }
+
+  /** Agent 化问答（流式） */
+  streamChatWithContext(question: string, history: ChatMessage[] = [], context: string = ''): Promise<ReadableStream<Uint8Array>> {
+    const sys = context
+      ? `${prompts.CHAT_SYSTEM}\n\n【当前项目上下文】\n${context}\n\n请优先结合上下文回答；上下文不足以覆盖时，再用你的专业知识补充，并说明依据。`
+      : prompts.CHAT_SYSTEM;
+    return this.completeStream([{ role: 'system', content: sys }, ...history, { role: 'user', content: question }]);
+  }
+
   /** 科研问答（流式） */
   streamChat(question: string, history: ChatMessage[] = []): Promise<ReadableStream<Uint8Array>> {
     return this.completeStream([{ role: 'system', content: prompts.CHAT_SYSTEM }, ...history, { role: 'user', content: question }]);

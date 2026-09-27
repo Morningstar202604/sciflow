@@ -66,6 +66,7 @@ export function ChatPage({ project }: { project: Project }) {
         setError(msg);
         setBusy(false);
       },
+      project.id,
     );
   };
 

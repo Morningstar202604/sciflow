@@ -218,8 +218,8 @@ export const api = {
   },
 
   chat: {
-    answer: (message: string, history: { role: string; content: string }[] = []) =>
-      request<{ answer: string }>('/api/chat', { method: 'POST', body: JSON.stringify({ message, history }) }),
+    answer: (message: string, history: { role: string; content: string }[] = [], projectId?: string) =>
+      request<{ answer: string }>('/api/chat', { method: 'POST', body: JSON.stringify({ message, history, projectId }) }),
   },
 
   submission: {
@@ -239,11 +239,12 @@ export function streamChat(
   onDelta: (text: string) => void,
   onDone: (full: string) => void,
   onError: (msg: string) => void,
+  projectId?: string,
 ) {
   fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ message, history, projectId }),
   })
     .then(async (res) => {
       if (!res.ok || !res.body) throw new Error(`请求失败 (${res.status})`);

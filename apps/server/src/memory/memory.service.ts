@@ -26,10 +26,11 @@ export class MemoryService {
     return { ...row, keywords };
   }
 
-  /** 记忆列表（按类型过滤 + 关键词搜索） */
-  list(type?: 'episodic' | 'procedural', q?: string) {
+  /** 记忆列表（按类型 + 项目 + 关键词过滤） */
+  list(type?: 'episodic' | 'procedural', q?: string, projectId?: string) {
     const conds: SQL[] = [];
     if (type) conds.push(eq(memoryLogs.type, type));
+    if (projectId) conds.push(eq(memoryLogs.projectId, projectId));
     if (q && q.trim()) conds.push(like(memoryLogs.keywords, `%${q.trim()}%`));
     const where = conds.length ? and(...conds) : undefined;
     const rows = where
