@@ -407,7 +407,12 @@ export class PipelineService {
     } else {
     await this.advance(taskId, 'polish', 'running');
     const finalDoc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
-    const polished = await this.orchestrator.polisherAgent(taskId, finalDoc.content ?? '');
+    // 润色只处理正文主体，图表/参考文献尾部原样保留（此前整体覆盖把图和文献列表洗掉）
+    const content = finalDoc.content ?? '';
+    const figIdx = content.indexOf('\n\n## 图表');
+    const bodyPart = figIdx >= 0 ? content.slice(0, figIdx) : content;
+    const tailPart = figIdx >= 0 ? content.slice(figIdx) : '';
+    const polished = await this.orchestrator.polisherAgent(taskId, bodyPart);
     db.insert(polishRecords)
       .values({
         id: randomUUID(),
@@ -426,7 +431,7 @@ export class PipelineService {
       (polishedText.includes('"original"') && polishedText.includes('"polished"')) ||
       polishedText.includes('```json') ||
       (polishedText.trim().startsWith('{') && polishedText.includes('"reason"'));
-    const fallbackText = jsonLike ? finalDoc.content : polishedText;
+    const fallbackText = (jsonLike ? finalDoc.content : polishedText) + tailPart;
     db.update(documents)
       .set({ content: fallbackText, status: 'polished', updatedAt: Date.now() })
       .where(eq(documents.id, documentId))
