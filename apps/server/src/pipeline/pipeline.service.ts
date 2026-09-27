@@ -338,7 +338,20 @@ export class PipelineService {
       }
       // 引用渲染：占位符 [Ref:N] → 真实文献（作者 年份）+ 文末参考文献列表
       const rendered = this.renderCitations(task.projectId, writerRes.content, agenticHits.map((h) => h.title));
-      db.update(documents).set({ content: rendered, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
+      // 自动配图：生成 2-3 个 mermaid 学术图表（仅首次起草，回炉复用省额度）
+      let finalContent = rendered;
+      if (retry === 0 && this.stepEnabled('figures')) {
+        try {
+          const figs = await this.ai.generateFigures(task.topic, JSON.stringify(outline), rendered);
+          if (figs.length > 0) {
+            const figBlock = figs.map((f) => `### ${f.title}\n\n> ${f.caption}\n\n\n\`\`\`mermaid\n${f.mermaid}\n\`\`\``).join('\n\n');
+            finalContent = `${rendered}\n\n---\n\n## 图表\n\n${figBlock}`;
+          }
+        } catch (e: any) {
+          this.logger.warn(`自动配图失败: ${e.message}`);
+        }
+      }
+      db.update(documents).set({ content: finalContent, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
       await this.advance(taskId, 'drafting', 'done', writerRes.output);
 
       // ⑤ Supervisor：Reviewer Agent 质量门评分 + Reflexion 提炼

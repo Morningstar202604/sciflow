@@ -402,3 +402,24 @@ ${papers}
   "recommendedTopic": "综合给出的一个可操作的论文选题建议（含限定词，如'基于XX的XX在XX场景下的研究'）"
 }
 要求：gaps 给 2-4 条；每条必须绑定到文献库中的真实文献；禁止编造不存在的文献；中文输出。`;
+
+export const GENERATE_FIGURES = (topic: string, outline: string, contentHead: string) => `
+你是一位学术论文图表设计专家。请为下面的综述论文生成 2-3 个高质量的学术图表（mermaid 格式），用于提升论文可视化质量。
+
+论文主题：${topic}
+论文大纲：${outline}
+正文开头（供参考风格）：${contentHead.slice(0, 1200)}
+
+输出要求（严格 JSON，无围栏无前缀文字，字符串内换行用 \n 转义）：
+{
+  "figures": [
+    {
+      "figureType": "flowchart | graph | sequenceDiagram | erDiagram",
+      "title": "图 N：简短标题",
+      "caption": "图表说明（一句话解释读者如何理解该图）",
+      "mermaid": "mermaid 代码（只包含图定义部分，不含图题；节点文字用中文，结构清晰）"
+    }
+  ]
+}
+图表主题建议：① 技术演进路线（从消息传递 GNN 到几何深度学习，flowchart 纵向分阶段）；② 方法分类对比（不同模型家族对比，graph 或 erDiagram）；③ 流水线/框架总览（本研究综述的论述结构，flowchart）。
+要求：mermaid 语法必须正确、可被 mermaid 解析器渲染；不要使用特殊字符破坏语法；每个图至少 5 个节点。`;
