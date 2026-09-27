@@ -27,15 +27,16 @@ export class LiteratureService {
     const q = query.trim();
     if (!q) return [];
 
-    const [openalex, arxiv, s2] = await Promise.allSettled([
+    const [openalex, arxiv, s2, crossref] = await Promise.allSettled([
       this.searchOpenAlex(q, limit),
       this.searchArxiv(q, limit),
       this.searchSemanticScholar(q, limit),
+      this.searchCrossRef(q, limit),
     ]);
 
     const results: PaperHit[] = [];
     const seen = new Set<string>();
-    for (const r of [openalex, arxiv, s2]) {
+    for (const r of [openalex, arxiv, s2, crossref]) {
       if (r.status !== 'fulfilled') {
         this.logger.warn(`检索源失败: ${r.reason?.message || r.reason}`);
         continue;
@@ -110,6 +111,25 @@ export class LiteratureService {
       abstract: p.abstract || '',
       source: 'semantic-scholar' as const,
       citationCount: p.citationCount || 0,
+    }));
+  }
+
+  /** CrossRef 备用源：OpenAlex 匿名搜索暂停/限流时保证元数据完整的真实文献 */
+  private async searchCrossRef(query: string, limit: number): Promise<PaperHit[]> {
+    const url = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=${limit}&select=title,author,issued,container-title,DOI,abstract`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`CrossRef ${res.status}`);
+    const data = (await res.json()) as any;
+    return (data.message?.items || []).map((it: any) => ({
+      title: (it.title || ['(untitled)'])[0],
+      authors: (it.author || []).slice(0, 8).map((a: any) => [a.given, a.family].filter(Boolean).join(' ').trim()),
+      year: it.issued?.['date-parts']?.[0]?.[0] ?? null,
+      venue: (it['container-title'] || [''])[0] || '',
+      doi: it.DOI || '',
+      url: `https://doi.org/${it.DOI}`,
+      abstract: (it.abstract || '').replace(/<[^>]+>/g, '').slice(0, 600) || '',
+      source: 'crossref' as const,
+      citationCount: it['is-referenced-by-count'] || 0,
     }));
   }
 

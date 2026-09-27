@@ -58,7 +58,7 @@ export const POLISH = (text: string, mode: string) => `
 待处理文本：
 ${text}
 
-请输出严格的 JSON（不要任何其他文字）：
+请只输出一个合法的纯 JSON 对象（禁止任何 markdown 代码围栏或前后缀文字，不要反引号）；JSON 字符串内的换行必须使用 \\n 转义，禁止字面换行。JSON 结构：
 {
   "original": "原文（逐字保留）",
   "polished": "处理后的文本",
@@ -80,7 +80,7 @@ export const REVIEW_PAPER = (title: string, content: string) => `
 论文正文：
 ${content}
 
-请输出严格的 JSON（不要任何其他文字）：
+请只输出一个合法的纯 JSON 对象（禁止任何 markdown 代码围栏或前后缀文字，不要反引号）；JSON 字符串内的换行必须使用 \\n 转义，禁止字面换行。JSON 结构：
 {
   "scores": {
     "literature": 0, "logic": 0, "citation": 0, "language": 0, "novelty": 0, "figures": 0, "format": 0
@@ -276,7 +276,7 @@ ${idea}
 相关文献（标题/年份/方法/结论）：
 ${papers || '（暂无，请基于通用科研方法论评估）'}
 
-请输出严格的 JSON（不要任何其他文字）：
+请只输出一个合法的纯 JSON 对象（禁止任何 markdown 代码围栏或前后缀文字，不要反引号）；JSON 字符串内的换行必须使用 \\n 转义，禁止字面换行。JSON 结构：
 {
   "noveltyScore": 0,
   "noveltyFeedback": "新颖性评估：与现有工作的差异化程度、创新点是否成立",
@@ -295,7 +295,7 @@ export const PAPER_COMPARISON = (papers: string) => `
 论文列表（标题 | 年份 | 期刊/来源 | 方法 | 结论）：
 ${papers}
 
-请输出严格的 JSON（不要任何其他文字）：
+请只输出一个合法的纯 JSON 对象（禁止任何 markdown 代码围栏或前后缀文字，不要反引号）；JSON 字符串内的换行必须使用 \\n 转义，禁止字面换行。JSON 结构：
 {
   "summary": "一段 2-4 句的横向总评：这些工作的共同主线、关键分歧、研究空白",
   "rows": [
@@ -313,7 +313,7 @@ export const SIMULATED_REVIEW = (title: string, content: string) => `
 论文正文：
 ${content}
 
-请输出严格的 JSON（不要任何其他文字）：
+请只输出一个合法的纯 JSON 对象（禁止任何 markdown 代码围栏或前后缀文字，不要反引号）；JSON 字符串内的换行必须使用 \\n 转义，禁止字面换行。JSON 结构：
 {
   "reviewers": [
     {

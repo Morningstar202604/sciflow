@@ -410,7 +410,8 @@ export class AiService {
   /** 文献综述 */
   async summarizeLiterature(topic: string, papers: string): Promise<string> {
     const custom = this.getCustomPrompt('summarizeLiterature');
-    return this.complete([{ role: 'user', content: custom ?? prompts.SUMMARIZE_LITERATURE(topic, papers) }], { temperature: 0.5, context: 'summarizeLiterature' });
+    const content = custom ? `${custom}\n\n研究主题：${topic}\n\n待综述文献列表（必须严格基于这些文献）：\n${papers}` : prompts.SUMMARIZE_LITERATURE(topic, papers);
+    return this.complete([{ role: 'user', content }], { temperature: 0.5, context: 'summarizeLiterature' });
   }
 
   /** 期刊推荐 */
@@ -471,7 +472,8 @@ export class AiService {
   /** Elicit 式：文献结构化提取（字段统一字符串化） */
   async extractPaperTable(papers: string): Promise<{ ref: string; title: string; year: number; method: string; results: string; contribution: string; limitations: string }[]> {
     const custom = this.getCustomPrompt('extractPaperTable');
-    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.EXTRACT_PAPER_TABLE(papers) }], { temperature: 0.2, context: 'extractPaperTable' });
+    const content = custom ? `${custom}\n\n待提取文献：\n${papers}` : prompts.EXTRACT_PAPER_TABLE(papers);
+    const raw = await this.complete([{ role: 'user', content }], { temperature: 0.2, context: 'extractPaperTable' });
     try {
       const parsed = this.jsonOf<{ papers: any[] }>(raw);
       return (parsed.papers || []).slice(0, 12).map((p: any) => ({
@@ -494,7 +496,8 @@ export class AiService {
     papers: string,
   ): Promise<{ summary: string; stances: { claim: string; stance: string; count: number; refs: string[]; note: string }[] }> {
     const custom = this.getCustomPrompt('evidenceSynthesis');
-    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.EVIDENCE_SYNTHESIS(question, papers) }], { temperature: 0.3, context: 'evidenceSynthesis' });
+    const content = custom ? `${custom}\n\n研究问题：${question}\n\n证据文献：\n${papers}` : prompts.EVIDENCE_SYNTHESIS(question, papers);
+    const raw = await this.complete([{ role: 'user', content }], { temperature: 0.3, context: 'evidenceSynthesis' });
     try {
       const parsed = this.jsonOf<{ summary: string; stances: any[] }>(raw);
       return {
@@ -640,7 +643,8 @@ export class AiService {
   async generateAbstract(title: string, content: string): Promise<{ abstract: string; keywords: string[] }> {
     const schema = z.object({ abstract: z.string().min(10), keywords: z.array(z.string()).min(1).max(8) });
     const custom = this.getCustomPrompt('generateAbstract');
-    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.GENERATE_ABSTRACT(title, content) }], {
+    const userContent = custom ? `${custom}\n\n论文标题：${title}\n\n论文正文：\n${content.slice(0, 4000)}` : prompts.GENERATE_ABSTRACT(title, content);
+    const raw = await this.complete([{ role: 'user', content: userContent }], {
       temperature: 0.3,
       context: 'generateAbstract',
     });
@@ -673,7 +677,8 @@ export class AiService {
       takeaway: z.string(),
     });
     const custom = this.getCustomPrompt('deepDivePaper');
-    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.DEEP_DIVE_PAPER(paper) }], {
+    const content = custom ? `${custom}\n\n待精读论文：\n${paper}` : prompts.DEEP_DIVE_PAPER(paper);
+    const raw = await this.complete([{ role: 'user', content }], {
       temperature: 0.2,
       context: 'deepDivePaper',
     });
@@ -694,7 +699,8 @@ export class AiService {
       recommendedTopic: z.string(),
     });
     const custom = this.getCustomPrompt('researchGap');
-    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.RESEARCH_GAP(topic, papers) }], {
+    const content = custom ? `${custom}\n\n研究主题：${topic}\n\n已有文献：\n${papers}` : prompts.RESEARCH_GAP(topic, papers);
+    const raw = await this.complete([{ role: 'user', content }], {
       temperature: 0.3,
       context: 'researchGap',
     });

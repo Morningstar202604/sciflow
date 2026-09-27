@@ -31,6 +31,10 @@ export class ReferencesService {
   /** 手动/检索结果入库 */
   create(projectId: string, hit: Partial<PaperHit> & { title: string }) {
     if (!hit.title) throw new BadRequestException('文献标题必填');
+    // 空元数据守卫：无作者且无年份的条目（如 Agentic RAG 补检的纯标题）不进文献库，
+    // 避免污染引用池导致 [Unknown n.d.] / 佚名
+    const authorsOk = (hit.authors || []).length > 0;
+    if (!authorsOk && !hit.year) return null;
     // 按 DOI/标题去重
     const existing = db
       .select()
@@ -59,7 +63,7 @@ export class ReferencesService {
 
   /** 批量导入检索结果 */
   import(projectId: string, hits: (Partial<PaperHit> & { title: string })[]) {
-    return hits.map((h) => this.create(projectId, h)).filter(Boolean);
+    return hits.map((h) => this.create(projectId, h)).filter((x): x is NonNullable<typeof x> => Boolean(x));
   }
 
   remove(id: string) {

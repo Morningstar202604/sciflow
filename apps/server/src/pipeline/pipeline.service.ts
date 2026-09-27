@@ -405,7 +405,16 @@ export class PipelineService {
       .run();
     // 写库保险：若润色结果仍像未解析的 JSON，保留原文，避免污染正文
     const polishedText = String(polished.polished ?? '');
-    const jsonLike = polishedText.trim().startsWith('{') && polishedText.includes('"original"');
+    // 未解析的 JSON 兜底（含 ```json 围栏 / 三字段串 / 嵌套转义）：判定为未解析即保留原文
+    const jsonLike =
+      (polishedText.includes('"original"') && polishedText.includes('"polished"')) ||
+      polishedText.includes('```json') ||
+      (polishedText.trim().startsWith('{') && polishedText.includes('"reason"'));
+    const fallbackText = jsonLike ? finalDoc.content : polishedText;
+    db.update(documents)
+      .set({ content: fallbackText, status: 'polished', updatedAt: Date.now() })
+      .where(eq(documents.id, documentId))
+      .run();
     db.update(documents)
       .set({ content: jsonLike ? finalDoc.content : polishedText, status: 'polished', updatedAt: Date.now() })
       .where(eq(documents.id, documentId))
@@ -460,10 +469,24 @@ export class PipelineService {
     this.setStatus(taskId, 'completed', 'complete');
   }
 
+  /** 供起草引用的文献池：只取元数据完整（有作者或年份）的文献，避免模型引用 [Unknown n.d.] */
+  private refsForDraft(projectId: string) {
+    const all = this.references.list(projectId);
+    return all
+      .filter((r) => {
+        try {
+          const a = JSON.parse(r.authors || '[]') as string[];
+          return a.length > 0 && !!r.year;
+        } catch {
+          return false;
+        }
+      })
+      .slice(0, 12);
+  }
+
   private referencesForPrompt(projectId: string): string {
-    const refs = this.references.list(projectId);
+    const refs = this.refsForDraft(projectId);
     return refs
-      .slice(0, 12)
       .map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}${r.doi ? `，DOI:${r.doi}` : ''}）`)
       .join('\n');
   }
@@ -475,20 +498,20 @@ export class PipelineService {
    */
   private renderCitations(projectId: string, content: string, supplementTitles: string[] = []): string {
     if (!content) return content;
-    const refs = this.references.list(projectId);
+    const refs = this.refsForDraft(projectId);
     const used = new Set<number>();
     const replaceRef = (body: string) =>
       body.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => {
         const idx = Number(n) - 1;
         const r = refs[idx];
-        if (!r) return '[引用待补]';
+        if (!r) return `[文献${n}]`;
         used.add(idx);
         const author = (() => {
           try {
             const arr = JSON.parse(r.authors || '[]') as string[];
-            return arr[0]?.split(' ').pop() || 'Unknown';
+            return arr[0]?.split(' ').pop() || `文献${n}`;
           } catch {
-            return 'Unknown';
+            return `文献${n}`;
           }
         })();
         return `[${author} ${r.year || 'n.d.'}]`;
