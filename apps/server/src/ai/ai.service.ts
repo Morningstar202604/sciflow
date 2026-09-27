@@ -382,7 +382,8 @@ export class AiService {
     feedback: string;
     totalScore: number;
   }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }], { temperature: 0.3, model: 'strong', context: 'reviewPaper' });
+    // 评审用 fast 模型：思考型强模型输出带 reasoning 前缀会破坏 JSON 平衡解析（曾导致全 0 分）
+    const raw = await this.complete([{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }], { temperature: 0.3, model: 'fast', context: 'reviewPaper' });
     let parsed: { scores?: Record<string, number>; feedback?: string } = {};
     try {
       parsed = this.jsonOf<{ scores: Record<string, number>; feedback: string }>(raw);
