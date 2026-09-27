@@ -31,6 +31,17 @@ export class CustomizationController {
     return this.customization.resetIntents();
   }
 
+  // 意图判断模式
+  @Get('judgment-mode')
+  getJudgmentMode() {
+    return { mode: this.customization.getJudgmentMode() };
+  }
+
+  @Post('judgment-mode')
+  setJudgmentMode(@Body() body: { mode: string }) {
+    return this.customization.setJudgmentMode(body.mode);
+  }
+
   // 提示词
   @Get('prompts')
   listPrompts() {

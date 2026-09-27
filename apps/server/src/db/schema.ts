@@ -197,6 +197,11 @@ export const customIntents = sqliteTable('custom_intent', {
   createdAt: integer('created_at').notNull(),
 });
 
+export const appSettings = sqliteTable('app_setting', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+});
+
 export const customPrompts = sqliteTable('custom_prompt', {
   id: text('id').primaryKey(),
   toolKey: text('tool_key').notNull().unique(),

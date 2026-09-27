@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import { customIntents, customPrompts } from '../db/schema';
+import { appSettings, customIntents, customPrompts } from '../db/schema';
 
 /** 高度自定义：意图库 + 提示词 用户可配置（系统默认仅作兜底） */
 
@@ -57,6 +57,21 @@ export class CustomizationService {
   resetIntents() {
     db.delete(customIntents).run();
     return { ok: true };
+  }
+
+  // ---------- 意图判断模式 ----------
+  /** 模式：auto(默认,规则优先+LLM兜底) / rule_first / llm_first / rule_only */
+  getJudgmentMode(): string {
+    const row = db.select().from(appSettings).where(eq(appSettings.key, 'judgment_mode')).get();
+    return row?.value ?? 'auto';
+  }
+
+  setJudgmentMode(mode: string) {
+    if (!['auto', 'rule_first', 'llm_first', 'rule_only'].includes(mode)) throw new BadRequestException('非法判断模式');
+    const existing = db.select().from(appSettings).where(eq(appSettings.key, 'judgment_mode')).get();
+    if (existing) db.update(appSettings).set({ value: mode }).where(eq(appSettings.key, 'judgment_mode')).run();
+    else db.insert(appSettings).values({ key: 'judgment_mode', value: mode }).run();
+    return { mode };
   }
 
   // ---------- 自定义提示词 ----------

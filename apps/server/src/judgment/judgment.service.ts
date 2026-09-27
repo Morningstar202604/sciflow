@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { AiService } from '../ai/ai.service';
 import { db } from '../db/database';
-import { customIntents } from '../db/schema';
+import { appSettings, customIntents } from '../db/schema';
 import { eq } from 'drizzle-orm';
 
 /**
@@ -59,6 +59,15 @@ const intentSchema = z.object({
 export class JudgmentService {
   constructor(private readonly ai: AiService) {}
 
+  /** 意图判断模式（用户可配置）：auto/rule_first=规则优先+LLM兜底，llm_first=LLM优先规则兜底，rule_only=仅规则 */
+  private mode(): string {
+    try {
+      return db.select().from(appSettings).where(eq(appSettings.key, 'judgment_mode')).get()?.value ?? 'auto';
+    } catch {
+      return 'auto';
+    }
+  }
+
   /** 合并意图库：系统默认（只读）+ 数据库自定义（用户可增删改启停） */
   private mergedIntents(): { key: string; label: string; route: string; keywords: string[] }[] {
     const merged = [...INTENTS];
@@ -100,7 +109,41 @@ export class JudgmentService {
 
   /** 意图识别：规则优先 → LLM 兜底（zod 校验）；provider 可切 Jev 判别器 */
   async intent(text: string, context: string = ''): Promise<IntentResult> {
+    const mode = this.mode();
     const rule = this.ruleMatch(text);
+    // rule_only：只走规则，未命中即通用问答（零成本，适合高频稳定场景）
+    if (mode === 'rule_only') {
+      if (rule) {
+        const it = this.mergedIntents().find((i) => i.key === rule.key)!;
+        return {
+          intent: it.key,
+          label: it.label,
+          confidence: Math.round(Math.min(0.6 + rule.matched.length * 0.15, 0.95) * 100) / 100,
+          topic: this.extractTopic(text),
+          route: it.route,
+          matchedBy: 'rule',
+        };
+      }
+      return { intent: 'qa', label: '科研问答', confidence: 0.5, topic: this.extractTopic(text), route: '/chat', matchedBy: 'rule' };
+    }
+    // llm_first：LLM 优先，失败降级规则
+    if (mode === 'llm_first') {
+      const llm = await this.llmJudgment(text, context);
+      if (llm) return llm;
+      if (rule) {
+        const it = this.mergedIntents().find((i) => i.key === rule.key)!;
+        return {
+          intent: it.key,
+          label: it.label,
+          confidence: Math.round(Math.min(0.6 + rule.matched.length * 0.15, 0.95) * 100) / 100,
+          topic: this.extractTopic(text),
+          route: it.route,
+          matchedBy: 'rule',
+        };
+      }
+      return { intent: 'qa', label: '科研问答', confidence: 0.5, topic: this.extractTopic(text), route: '/chat', matchedBy: 'llm' };
+    }
+    // auto / rule_first（默认）：规则优先，LLM 兜底
     if (rule) {
       const it = this.mergedIntents().find((i) => i.key === rule.key)!;
       return {
@@ -112,6 +155,13 @@ export class JudgmentService {
         matchedBy: 'rule',
       };
     }
+    const llm = await this.llmJudgment(text, context);
+    if (llm) return llm;
+    return { intent: 'qa', label: '科研问答', confidence: 0.5, topic: this.extractTopic(text), route: '/chat', matchedBy: 'llm' };
+  }
+
+  /** LLM 判别兜底（结构化输出 + zod 校验） */
+  private async llmJudgment(text: string, context: string = ''): Promise<IntentResult | null> {
     // LLM 兜底（结构化输出 + zod 校验）
     try {
       const schema = z.object({

@@ -188,6 +188,10 @@ CREATE TABLE IF NOT EXISTS custom_intent (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS app_setting (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS custom_prompt (
   id TEXT PRIMARY KEY,
   tool_key TEXT NOT NULL UNIQUE,

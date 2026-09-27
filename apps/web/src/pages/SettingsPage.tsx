@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState } from 'react';
 import { ToastContext } from '../App';
-import { CheckCircle2, Coins, Database, FlaskConical, Gauge, Loader2, Plug, Plus, Power, RefreshCw, Server, Trash2, Wand2, Wrench, XCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Coins, Database, FlaskConical, Gauge, Loader2, Plug, Plus, Power, RefreshCw, Server, Trash2, Wand2, Wrench, XCircle } from 'lucide-react';
 import { api } from '../api/client';
 import type { AppSettings, CustomIntent, CustomPromptTool, McpServerInfo, McpToolInfo, ModelProvider, SelfCheck } from '../types';
 import { Badge, Button, Card, ErrorBox, Input, Modal, SectionTitle, Select, Spinner, Textarea } from '../components/ui';
@@ -39,6 +39,9 @@ export function SettingsPage() {
   const [promptTools, setPromptTools] = useState<CustomPromptTool[]>([]);
   const [editingPrompt, setEditingPrompt] = useState<CustomPromptTool | null>(null);
   const [promptText, setPromptText] = useState('');
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({ intent: false, prompt: false });
+  const [judgmentMode, setJudgmentMode] = useState('auto');
+  const [modeLoaded, setModeLoaded] = useState(false);
 
   const load = async () => {
     try {
@@ -48,6 +51,9 @@ export function SettingsPage() {
       setProviders(await api.settings.listProviders());
       setIntents(await api.customization.listIntents());
       setPromptTools(await api.customization.listPrompts());
+      const mode = await api.customization.getJudgmentMode();
+      setJudgmentMode(mode.mode);
+      setModeLoaded(true);
       setMcpServers(await api.settings.listMcpServers());
       api.usage.summary().then(setUsage).catch(() => undefined);
     } catch (e: any) {
@@ -251,6 +257,9 @@ export function SettingsPage() {
                   setProviders(await api.settings.listProviders());
       setIntents(await api.customization.listIntents());
       setPromptTools(await api.customization.listPrompts());
+      const mode = await api.customization.getJudgmentMode();
+      setJudgmentMode(mode.mode);
+      setModeLoaded(true);
                   setSettings(await api.settings.get());
                 } catch (e: any) {
                   setError(e.message);
@@ -295,6 +304,9 @@ export function SettingsPage() {
                         setProviders(await api.settings.listProviders());
       setIntents(await api.customization.listIntents());
       setPromptTools(await api.customization.listPrompts());
+      const mode = await api.customization.getJudgmentMode();
+      setJudgmentMode(mode.mode);
+      setModeLoaded(true);
                         setSettings(await api.settings.get());
                       } catch (e: any) {
                         setError(e.message);
@@ -312,6 +324,9 @@ export function SettingsPage() {
                     setProviders(await api.settings.listProviders());
       setIntents(await api.customization.listIntents());
       setPromptTools(await api.customization.listPrompts());
+      const mode = await api.customization.getJudgmentMode();
+      setJudgmentMode(mode.mode);
+      setModeLoaded(true);
                   }}
                 >
                   删除
@@ -555,148 +570,191 @@ export function SettingsPage() {
         )}
       </Card>
 
-      {/* ===== 自定义中心 · 意图识别 ===== */}
+      {/* ===== 自定义中心（默认折叠 · 渐进披露） ===== */}
+
+      {/* · 意图识别自定义（可折叠） */}
       <Card className="p-5 mt-4">
-        <SectionTitle
-          extra={
-            <Button variant="outline" onClick={load}>
-              <RefreshCw size={13} /> 刷新
-            </Button>
-          }
+        <button
+          className="w-full flex items-center justify-between text-left"
+          onClick={() => setOpenSections((o) => ({ ...o, intent: !o.intent }))}
         >
-          <span className="flex items-center gap-2">
-            <Wand2 size={16} className="text-teal-600" /> 意图识别自定义
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <Wand2 size={16} className="text-teal-600" />
+            意图识别自定义
+            <span className="text-[11px] font-normal text-slate-400">
+              {intents.length > 0 ? `已自定义 ${intents.length} 个意图` : '使用系统内置 17 个意图'}
+            </span>
           </span>
-        </SectionTitle>
-        <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
-          自定义科研动作意图：新增意图后，科研问答识别时优先命中你的关键词（Jev 式规则秒判）。系统内置 17 个意图不可删除，但可用同 key 覆盖。
-        </div>
-        <div className="grid sm:grid-cols-4 gap-2 mb-2">
-          <Input placeholder="意图标识（如 meta_analysis）" value={intentForm.key} onChange={(e) => setIntentForm({ ...intentForm, key: e.target.value })} />
-          <Input placeholder="中文标签（如 Meta 分析）" value={intentForm.label} onChange={(e) => setIntentForm({ ...intentForm, label: e.target.value })} />
-          <select
-            className="rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-2 text-xs bg-white dark:bg-slate-900 outline-none focus:border-teal-500"
-            value={intentForm.route}
-            onChange={(e) => setIntentForm({ ...intentForm, route: e.target.value })}
-          >
-            <option value="/literature">文献调研</option>
-            <option value="/writing">论文写作</option>
-            <option value="/pipeline">全自动流水线</option>
-            <option value="/quality">质量评分</option>
-            <option value="/chat">科研问答</option>
-          </select>
-          <Input placeholder="触发词，逗号分隔（如 meta分析,荟萃分析）" value={intentForm.keywords} onChange={(e) => setIntentForm({ ...intentForm, keywords: e.target.value })} />
-        </div>
-        <Button
-          variant="outline"
-          className="text-xs mb-3"
-          disabled={!intentForm.key || !intentForm.label}
-          onClick={async () => {
-            try {
-              await api.customization.createIntent({
-                key: intentForm.key,
-                label: intentForm.label,
-                route: intentForm.route,
-                keywords: intentForm.keywords.split(/[,，\s]+/).filter(Boolean),
-              });
-              setIntentForm({ key: '', label: '', route: '/literature', keywords: '' });
-              setIntents(await api.customization.listIntents());
-              toast('success', '自定义意图已生效');
-            } catch (e: any) {
-              setError(e.message);
-            }
-          }}
-        >
-          <Plus size={13} /> 新增意图
-        </Button>
-        {intents.length === 0 ? (
-          <div className="text-xs text-slate-400 dark:text-slate-500">暂无自定义意图（系统内置 17 个科研意图默认生效）</div>
-        ) : (
-          <div className="space-y-1.5">
-            {intents.map((it) => (
-              <div key={it.id} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
-                <Badge tone={it.enabled ? 'teal' : 'slate'}>{it.enabled ? '启用' : '停用'}</Badge>
-                <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{it.label}</span>
-                <span className="text-[11px] text-slate-400">{it.key} · {it.route}</span>
-                <span className="text-[11px] text-slate-400 truncate flex-1">
-                  {(() => { try { return JSON.parse(it.keywords).join('、'); } catch { return it.keywords; } })()}
-                </span>
-                <button
-                  className="text-slate-300 hover:text-teal-600"
-                  onClick={async () => {
-                    try {
-                      await api.customization.updateIntent(it.id, { enabled: it.enabled ? 0 : 1 });
-                      setIntents(await api.customization.listIntents());
-                    } catch (e: any) {
-                      setError(e.message);
-                    }
-                  }}
-                >
-                  <Power size={13} />
-                </button>
-                <button className="text-slate-300 hover:text-rose-500" onClick={async () => {
+          <span className="flex items-center gap-2">
+            <span className="text-[11px] text-slate-400">
+              判断模式：{judgmentMode === 'auto' ? '规则优先 + LLM 兜底' : judgmentMode === 'rule_first' ? '规则优先' : judgmentMode === 'llm_first' ? 'LLM 优先' : '仅规则'}
+            </span>
+            {openSections.intent ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+          </span>
+        </button>
+        {openSections.intent && (
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 dark:text-slate-400 w-24 shrink-0">意图判断模式</span>
+              <select
+                className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1.5 text-xs bg-white dark:bg-slate-900 outline-none focus:border-teal-500"
+                value={judgmentMode}
+                onChange={async (e) => {
+                  const mode = e.target.value;
+                  setJudgmentMode(mode);
+                  await api.customization.setJudgmentMode(mode);
+                  toast('success', `判断模式已切换：${mode === 'auto' ? '规则优先 + LLM 兜底' : mode === 'rule_first' ? '规则优先' : mode === 'llm_first' ? 'LLM 优先' : '仅规则'}`);
+                }}
+              >
+                <option value="auto">自动（规则优先 + LLM 兜底，推荐）</option>
+                <option value="rule_first">规则优先（未命中再调 LLM）</option>
+                <option value="llm_first">LLM 优先（更灵活，耗 token）</option>
+                <option value="rule_only">仅规则（零成本，未命中一律问答）</option>
+              </select>
+            </div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-900/50 rounded px-3 py-2">
+              自定义科研动作意图：新增意图后，科研问答识别时优先命中你的关键词（Jev 式规则秒判）。系统内置 17 个意图不可删除，但可用同 key 覆盖。
+            </div>
+            <div className="grid sm:grid-cols-4 gap-2">
+              <Input placeholder="意图标识（如 meta_analysis）" value={intentForm.key} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIntentForm({ ...intentForm, key: e.target.value })} />
+              <Input placeholder="中文标签（如 Meta 分析）" value={intentForm.label} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIntentForm({ ...intentForm, label: e.target.value })} />
+              <select
+                className="rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-2 text-xs bg-white dark:bg-slate-900 outline-none focus:border-teal-500"
+                value={intentForm.route}
+                onChange={(e) => setIntentForm({ ...intentForm, route: e.target.value })}
+              >
+                <option value="/literature">文献调研</option>
+                <option value="/writing">论文写作</option>
+                <option value="/pipeline">全自动流水线</option>
+                <option value="/quality">质量评分</option>
+                <option value="/chat">科研问答</option>
+              </select>
+              <Input placeholder="触发词，逗号分隔（如 meta分析,荟萃分析）" value={intentForm.keywords} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIntentForm({ ...intentForm, keywords: e.target.value })} />
+            </div>
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                className="text-xs"
+                disabled={!intentForm.key || !intentForm.label}
+                onClick={async () => {
                   try {
-                    await api.customization.deleteIntent(it.id);
+                    await api.customization.createIntent({
+                      key: intentForm.key,
+                      label: intentForm.label,
+                      route: intentForm.route,
+                      keywords: intentForm.keywords.split(/[,，\s]+/).filter(Boolean),
+                    });
+                    setIntentForm({ key: '', label: '', route: '/literature', keywords: '' });
                     setIntents(await api.customization.listIntents());
-                    toast('success', '自定义意图已删除');
+                    toast('success', '自定义意图已生效');
                   } catch (e: any) {
                     setError(e.message);
                   }
-                }}>
-                  <Trash2 size={13} />
-                </button>
+                }}
+              >
+                <Plus size={13} /> 新增意图
+              </Button>
+              <span className="text-[11px] text-slate-400">{intents.length} 个自定义意图</span>
+            </div>
+            {intents.length === 0 ? (
+              <div className="text-xs text-slate-400 dark:text-slate-500">暂无自定义意图（系统内置 17 个科研意图默认生效）</div>
+            ) : (
+              <div className="space-y-1.5">
+                {intents.map((it) => (
+                  <div key={it.id} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                    <Badge tone={it.enabled ? 'teal' : 'slate'}>{it.enabled ? '启用' : '停用'}</Badge>
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{it.label}</span>
+                    <span className="text-[11px] text-slate-400">{it.key} · {it.route}</span>
+                    <span className="text-[11px] text-slate-400 truncate flex-1">
+                      {(() => { try { return JSON.parse(it.keywords).join('、'); } catch { return it.keywords; } })()}
+                    </span>
+                    <button
+                      className="text-slate-300 hover:text-teal-600"
+                      onClick={async () => {
+                        try {
+                          await api.customization.updateIntent(it.id, { enabled: it.enabled ? 0 : 1 });
+                          setIntents(await api.customization.listIntents());
+                        } catch (e: any) {
+                          setError(e.message);
+                        }
+                      }}
+                    >
+                      <Power size={13} />
+                    </button>
+                    <button className="text-slate-300 hover:text-rose-500" onClick={async () => {
+                      try {
+                        await api.customization.deleteIntent(it.id);
+                        setIntents(await api.customization.listIntents());
+                        toast('success', '自定义意图已删除');
+                      } catch (e: any) {
+                        setError(e.message);
+                      }
+                    }}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
       </Card>
 
-      {/* ===== 自定义中心 · 科研工具提示词 ===== */}
+      {/* · 科研工具提示词自定义（可折叠） */}
       <Card className="p-5 mt-4">
-        <SectionTitle
-          extra={
-            <Button variant="outline" onClick={load}>
-              <RefreshCw size={13} /> 刷新
-            </Button>
-          }
+        <button
+          className="w-full flex items-center justify-between text-left"
+          onClick={() => setOpenSections((o) => ({ ...o, prompt: !o.prompt }))}
         >
-          <span className="flex items-center gap-2">
-            <FlaskConical size={16} className="text-teal-600" /> 科研工具提示词自定义
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <FlaskConical size={16} className="text-teal-600" />
+            科研工具提示词自定义
+            <span className="text-[11px] font-normal text-slate-400">
+              {(() => { const n = promptTools.filter((t) => t.customized).length; return n > 0 ? `${n}/${promptTools.length} 个已自定义` : '全部使用系统默认'; })()}
+            </span>
           </span>
-        </SectionTitle>
-        <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
-          每个 AI 科研工具（综述/精读/缺口/对比/评审…）默认提示词可被你的自定义覆盖：点击「编辑」写入你的专属提示词（含你的领域规范/输出格式/风格要求），未配置时自动使用系统默认。
-        </div>
-        <div className="grid sm:grid-cols-2 gap-2">
-          {promptTools.map((t) => (
-            <div key={t.toolKey} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{t.toolLabel}</span>
-              <span className="text-[11px] text-slate-400 truncate flex-1">{t.toolKey}</span>
-              <Badge tone={t.customized ? (t.enabled ? 'green' : 'amber') : 'slate'}>{t.customized ? (t.enabled ? '已自定义' : '已停用') : '系统默认'}</Badge>
-              <button
-                className="text-xs text-teal-600 hover:underline"
-                onClick={() => {
-                  setEditingPrompt(t);
-                  setPromptText(t.prompt);
-                }}
-              >
-                编辑
-              </button>
-              {t.customized && (
-                <button
-                  className="text-slate-300 hover:text-rose-500"
-                  onClick={async () => {
-                    await api.customization.deletePrompt(t.toolKey);
-                    setPromptTools(await api.customization.listPrompts());
-                    toast('success', `${t.toolLabel} 已恢复系统默认`);
-                  }}
-                >
-                  <Trash2 size={13} />
-                </button>
-              )}
+          {openSections.prompt ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+        </button>
+        {openSections.prompt && (
+          <div className="mt-4">
+            <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+              每个 AI 科研工具（综述/精读/缺口/对比/评审…）默认提示词可被你的自定义覆盖：点击「编辑」写入你的专属提示词（含你的领域规范/输出格式/风格要求），未配置时自动使用系统默认。
             </div>
-          ))}
-        </div>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {promptTools.map((t) => (
+                <div key={t.toolKey} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{t.toolLabel}</span>
+                  <span className="text-[11px] text-slate-400 truncate flex-1">{t.toolKey}</span>
+                  <Badge tone={t.customized ? (t.enabled ? 'green' : 'amber') : 'slate'}>{t.customized ? (t.enabled ? '已自定义' : '已停用') : '系统默认'}</Badge>
+                  <button
+                    className="text-xs text-teal-600 hover:underline"
+                    onClick={() => {
+                      setEditingPrompt(t);
+                      setPromptText(t.prompt);
+                    }}
+                  >
+                    编辑
+                  </button>
+                  {t.customized && (
+                    <button
+                      className="text-slate-300 hover:text-rose-500"
+                      onClick={async () => {
+                        await api.customization.deletePrompt(t.toolKey);
+                        setPromptTools(await api.customization.listPrompts());
+      const mode = await api.customization.getJudgmentMode();
+      setJudgmentMode(mode.mode);
+      setModeLoaded(true);
+                        toast('success', `${t.toolLabel} 已恢复系统默认`);
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* 提示词编辑弹窗 */}
@@ -720,6 +778,9 @@ export function SettingsPage() {
                 try {
                   await api.customization.upsertPrompt(editingPrompt.toolKey, promptText);
                   setPromptTools(await api.customization.listPrompts());
+      const mode = await api.customization.getJudgmentMode();
+      setJudgmentMode(mode.mode);
+      setModeLoaded(true);
                   setEditingPrompt(null);
                   toast('success', `${editingPrompt.toolLabel} 提示词已保存`);
                 } catch (e: any) {

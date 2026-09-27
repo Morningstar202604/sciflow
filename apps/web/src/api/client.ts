@@ -92,6 +92,8 @@ export const api = {
     upsertPrompt: (toolKey: string, prompt: string, enabled = 1) =>
       request<CustomPromptTool[]>(`/api/customization/prompts/${toolKey}`, { method: 'POST', body: JSON.stringify({ prompt, enabled }) }),
     deletePrompt: (toolKey: string) => request<{ ok: boolean }>(`/api/customization/prompts/${toolKey}`, { method: 'DELETE' }),
+    getJudgmentMode: () => request<{ mode: string }>('/api/customization/judgment-mode'),
+    setJudgmentMode: (mode: string) => request<{ mode: string }>('/api/customization/judgment-mode', { method: 'POST', body: JSON.stringify({ mode }) }),
   },
 
   judgment: {
