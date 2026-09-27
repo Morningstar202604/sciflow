@@ -339,8 +339,10 @@ export class PipelineService {
           agenticTitles.map((t) => ({ title: t, authors: [] })),
         );
       }
-      const finalDoc0 = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
-      void finalDoc0;
+      // 引用渲染：占位符 [Ref:N] → 真实文献（作者 年份）+ 文末参考文献列表
+      const agenticHits = this.orchestrator.extractWriterHits(taskId);
+      const rendered = this.renderCitations(task.projectId, writerRes.content, agenticHits);
+      db.update(documents).set({ content: rendered, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
       await this.advance(taskId, 'drafting', 'done', writerRes.output);
 
       // ⑤ Supervisor：Reviewer Agent 质量门评分 + Reflexion 提炼
@@ -464,6 +466,56 @@ export class PipelineService {
       .slice(0, 12)
       .map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}${r.doi ? `，DOI:${r.doi}` : ''}）`)
       .join('\n');
+  }
+
+  /**
+   * 引用渲染：把正文中的 [Ref:N] / [补充Ref:M] 占位符替换为真实文献（作者 年份），
+   * 并在文末生成"参考文献"列表（GB/T 7714 顺序编码制）。
+   * 修复：此前成文引用全是占位符，评审判定"引用造假"。
+   */
+  private renderCitations(projectId: string, content: string, supplementTitles: string[] = []): string {
+    if (!content) return content;
+    const refs = this.references.list(projectId);
+    const used = new Set<number>();
+    const replaceRef = (body: string) =>
+      body.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => {
+        const idx = Number(n) - 1;
+        const r = refs[idx];
+        if (!r) return '[引用待补]';
+        used.add(idx);
+        const author = (() => {
+          try {
+            const arr = JSON.parse(r.authors || '[]') as string[];
+            return arr[0]?.split(' ').pop() || 'Unknown';
+          } catch {
+            return 'Unknown';
+          }
+        })();
+        return `[${author} ${r.year || 'n.d.'}]`;
+      });
+    let out = replaceRef(content);
+    // [补充Ref:M] → Writer Agentic RAG 补检文献（按标题）
+    out = out.replace(/\[补充Ref:(\d+)\]/g, (_m, n: string) => {
+      const idx = Number(n) - 1;
+      const title = supplementTitles[idx];
+      return title ? `[${title.slice(0, 32)}…]` : '[补充文献]';
+    });
+    // 文末参考文献列表
+    if (used.size) {
+      const list = [...used].sort((a, b) => a - b).map((i, k) => {
+        const r = refs[i];
+        const authors = (() => {
+          try {
+            return (JSON.parse(r.authors || '[]') as string[]).join(', ') || '佚名';
+          } catch {
+            return '佚名';
+          }
+        })();
+        return `[${k + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi}` : ''}`;
+      });
+      out += `\n\n## 参考文献\n\n${list.join('\n')}`;
+    }
+    return out;
   }
 
   /** Reflexion 指令（最新一条）：回炉起草时注入 */
