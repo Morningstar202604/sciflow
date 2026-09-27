@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { documents, citations, references, polishRecords } from '../db/schema';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx';
 import { AiService } from '../ai/ai.service';
 
 const MAX_VERSIONS = 20;
@@ -223,6 +224,87 @@ export class DocumentsService {
       });
     }
     return { markdown: lines.join('\n'), filename: `${doc.title.replace(/[\\/:*?"<>|]/g, '_')}.md` };
+  }
+
+  /** Markdown 纯文本化（docx 段落用）：去 #、**、链接、列表符 */
+  private mdToPlain(md: string): string {
+    return md
+      .replace(/!\[.*?\]\(.*?\)/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/^[-*+]\s+/gm, '')
+      .replace(/^\d+\.\s+/gm, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/~~([^~]+)~~/g, '$1')
+      .replace(/[|>]+\s?/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /** 导出 Word(.docx) 全文——交稿/投稿刚需（标题 + 大纲 + 正文 + 参考文献） */
+  async exportDocx(id: string) {
+    const doc = this.get(id);
+    const outline = this.parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline || '[]');
+    const citeRows = db.select().from(citations).where(eq(citations.documentId, id)).all();
+    const refList = citeRows
+      .map((c) => db.select().from(references).where(eq(references.id, c.referenceId)).get())
+      .filter(Boolean) as any[];
+
+    const children: Paragraph[] = [
+      new Paragraph({ text: doc.title || '未命名论文', heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }),
+      new Paragraph({ text: `导出时间：${new Date().toLocaleString('zh-CN')} · SciFlow 全自动 AI 科研助手`, alignment: AlignmentType.CENTER }),
+      new Paragraph({ text: '', spacing: { after: 120 } }),
+    ];
+
+    if (outline.sections?.length) {
+      children.push(new Paragraph({ text: '大纲', heading: HeadingLevel.HEADING_1 }));
+      outline.sections.forEach((s) => {
+        children.push(new Paragraph({ text: s.title, bullet: { level: 0 } }));
+        (s.subsections || []).forEach((sub) => children.push(new Paragraph({ text: sub, bullet: { level: 1 } })));
+      });
+      children.push(new Paragraph({ text: '', spacing: { after: 120 } }));
+    }
+
+    children.push(new Paragraph({ text: '正文', heading: HeadingLevel.HEADING_1 }));
+    const content = doc.content || '（正文为空）';
+    const paragraphs = this.mdToPlain(content).split('\n');
+    // 正文按段落转 docx 段落；识别 ## 标题提升为 Heading2
+    for (const raw of paragraphs) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (/^##\s/.test(line)) {
+        children.push(new Paragraph({ text: line.replace(/^##\s+/, ''), heading: HeadingLevel.HEADING_2, spacing: { before: 160 } }));
+      } else if (/^###\s/.test(line)) {
+        children.push(new Paragraph({ text: line.replace(/^###\s+/, ''), heading: HeadingLevel.HEADING_3, spacing: { before: 120 } }));
+      } else {
+        children.push(new Paragraph({ text: line, spacing: { after: 100 } }));
+      }
+    }
+
+    if (refList.length) {
+      children.push(new Paragraph({ text: '', spacing: { after: 120 } }));
+      children.push(new Paragraph({ text: '参考文献', heading: HeadingLevel.HEADING_1 }));
+      refList.forEach((r, i) => {
+        const authors = (() => {
+          try {
+            const arr = JSON.parse(r.authors || '[]') as string[];
+            return arr.length ? arr.join(', ') : '';
+          } catch {
+            return '';
+          }
+        })();
+        const line = `${i + 1}. ${r.title}${authors ? ` — ${authors}` : ''}${r.year ? ` (${r.year})` : ''}${r.venue ? `, ${r.venue}` : ''}${r.doi ? `, DOI: ${r.doi}` : ''}`;
+        children.push(new Paragraph({ text: line, spacing: { after: 80 } }));
+      });
+    }
+
+    const buffer = await Packer.toBuffer(new Document({ sections: [{ children }] }));
+    return {
+      base64: buffer.toString('base64'),
+      filename: `${doc.title.replace(/[\\/:*?"<>|]/g, '_')}.docx`,
+    };
   }
 
   private getRefsForPrompt(documentId: string): string {

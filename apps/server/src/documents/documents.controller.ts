@@ -87,4 +87,10 @@ export class DocumentsController {
   exportMarkdown(@Param('id') id: string) {
     return this.documents.exportMarkdown(id);
   }
+
+  /** 导出 Word(.docx) 全文（交稿/投稿） */
+  @Get(':id/export-docx')
+  async exportDocx(@Param('id') id: string) {
+    return this.documents.exportDocx(id);
+  }
 }

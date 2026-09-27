@@ -171,6 +171,29 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       setExportFormat(format);
     });
 
+  /** 导出 Word(.docx)——交稿/投稿刚需 */
+  const exportWord = async () => {
+    if (!doc) return;
+    try {
+      setAiBusy(true);
+      const { base64, filename } = await api.documents.exportDocx(doc.id);
+      const bytes = atob(base64);
+      const buf = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('success', 'Word 文档已导出（含标题/大纲/正文/参考文献）');
+    } catch {
+      toast('error', 'Word 导出失败');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   /** 导出全文 Markdown（标题+大纲+正文+引用） */
   const exportFullDoc = () =>
     run(async () => {
@@ -659,6 +682,9 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                 </Button>
                 <Button variant="outline" className="text-xs flex-1" onClick={exportLatex} disabled={!doc}>
                   导出 LaTeX
+                </Button>
+                <Button variant="outline" className="text-xs flex-1" onClick={exportWord} disabled={!doc || aiBusy}>
+                  {aiBusy ? '生成中…' : '导出 Word'}
                 </Button>
               </div>
             </div>

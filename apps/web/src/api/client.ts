@@ -78,6 +78,8 @@ export const api = {
       request<string[]>(`/api/documents/${id}/export-citations?format=${format}`),
     exportMarkdown: (id: string) =>
       request<{ markdown: string; filename: string }>(`/api/documents/${id}/export`),
+    exportDocx: (id: string) =>
+      request<{ base64: string; filename: string }>(`/api/documents/${id}/export-docx`),
     abstract: (id: string) => request<{ abstract: string; keywords: string[] }>(`/api/documents/${id}/abstract`, { method: 'POST' }),
   },
 
