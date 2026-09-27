@@ -436,10 +436,6 @@ export class PipelineService {
       .set({ content: fallbackText, status: 'polished', updatedAt: Date.now() })
       .where(eq(documents.id, documentId))
       .run();
-    db.update(documents)
-      .set({ content: jsonLike ? finalDoc.content : polishedText, status: 'polished', updatedAt: Date.now() })
-      .where(eq(documents.id, documentId))
-      .run();
     await this.advance(taskId, 'polish', 'done', '润色完成（原文+润色文+理由已存档）');
     }
 

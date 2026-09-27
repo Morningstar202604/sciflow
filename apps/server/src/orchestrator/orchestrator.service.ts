@@ -218,6 +218,24 @@ export class AgentOrchestratorService {
   }
 
   // ---------- ③ Writer Agent：分章起草（Phase 4 Agentic RAG：边写边查 + 注入记忆/反思） ----------
+  /** 剥 JSON 围栏 / 整篇 JSON 对象，返回正文（起草模型偶发输出 ````json {...}```` 或思考前缀） */
+  private stripJsonWrapper(s: string): string {
+    let t = s.trim();
+    if (t.startsWith('```')) {
+      t = t.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+    }
+    if (t.startsWith('{') || t.startsWith('[')) {
+      try {
+        const o = JSON.parse(t);
+        if (o && typeof o === 'object') {
+          const body = o.content || o.polished || o.body || o.original || (Array.isArray(o) ? o[0]?.content : null);
+          if (typeof body === 'string' && body.length > 100) return body;
+        }
+      } catch { /* 非 JSON，原样保留 */ }
+    }
+    return s;
+  }
+
   async writerAgent(
     taskId: string,
     documentId: string,
@@ -264,6 +282,8 @@ export class AgentOrchestratorService {
           })),
         });
       }
+      // 清洗：剥 ```json 围栏 / 整篇 JSON 对象（2.5-flash 偶发输出漂移），避免原始 JSON 污染正文
+      content = this.stripJsonWrapper(content);
       return {
         output: `已起草 ${outline.sections.length} 个章节，共 ${content.length} 字（每章经 Agentic RAG 补检）`,
         detail: { sectionResults, fullContent: content },
