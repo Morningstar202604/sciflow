@@ -228,7 +228,7 @@ export class AgentOrchestratorService {
   ): Promise<{ output: string; content: string }> {
     const res = await this.runAgent(taskId, 'writer', 'writer#draft', `章节 ${outline.sections.length} 个：${outline.sections.map((s) => s.title).join(' / ')}`, async () => {
       let content = '';
-      const sectionResults: { title: string; chars: number; agenticRounds: number; supplementalHits: string[] }[] = [];
+      const sectionResults: { title: string; chars: number; agenticRounds: number; supplementalHits: { title: string; authors: string[]; year: number | null; venue: string; doi: string; url: string; abstract: string; source: string; citationCount: number }[] }[] = [];
       const seen = new Set<string>();
       for (const section of outline.sections) {
         // Phase 4：Agentic RAG —— 每章起草前按章节主题自定向补检索（回炉时不重复补检，省额度）
@@ -247,7 +247,22 @@ export class AgentOrchestratorService {
           `${ctx.refsPrompt}${extraRefs ? `\n本节补充检索到的文献（Agentic RAG）：\n${extraRefs}` : ''}${ctx.styleHint}\n${ctx.reflexion ? `质量评审反馈（回炉改进指令）：${ctx.reflexion}` : ''}`,
         );
         content += `## ${section.title}\n\n${sectionText}\n\n`;
-        sectionResults.push({ title: section.title, chars: sectionText.length, agenticRounds: rounds, supplementalHits: fresh.slice(0, 5).map((h) => h.title) });
+        sectionResults.push({
+          title: section.title,
+          chars: sectionText.length,
+          agenticRounds: rounds,
+          supplementalHits: fresh.slice(0, 5).map((h) => ({
+            title: h.title,
+            authors: h.authors || [],
+            year: h.year ?? null,
+            venue: h.venue || '',
+            doi: h.doi || '',
+            url: h.url || '',
+            abstract: (h.abstract || '').slice(0, 400),
+            source: h.source,
+            citationCount: h.citationCount || 0,
+          })),
+        });
       }
       return {
         output: `已起草 ${outline.sections.length} 个章节，共 ${content.length} 字（每章经 Agentic RAG 补检）`,
@@ -266,7 +281,7 @@ export class AgentOrchestratorService {
   }
 
   /** 汇总 Writer Agent 补充检索到的文献标题（供流水线回填文献库） */
-  extractWriterHits(taskId: string): string[] {
+  extractWriterHits(taskId: string): PaperHit[] {
     const run = db
       .select()
       .from(agentRuns)
@@ -274,8 +289,21 @@ export class AgentOrchestratorService {
       .all()
       .find((r) => r.taskId === taskId && r.status === 'done');
     if (!run) return [];
-    const detail = safeParse(run.detail ?? '{}') as { sectionResults?: { supplementalHits?: string[] }[] } | null;
-    return [...new Set((detail?.sectionResults || []).flatMap((s) => s.supplementalHits || []))];
+    const detail = safeParse(run.detail ?? '{}') as {
+      sectionResults?: {
+        supplementalHits?: { title: string; authors: string[]; year: number | null; venue: string; doi: string; url: string; abstract: string; source: string; citationCount: number }[]
+      }[]
+    } | null;
+    const seen = new Set<string>();
+    const out: PaperHit[] = [];
+    for (const s of detail?.sectionResults || []) {
+      for (const h of s.supplementalHits || []) {
+        if (!h?.title || seen.has(h.title)) continue;
+        seen.add(h.title);
+        out.push({ title: h.title, authors: h.authors || [], year: h.year, venue: h.venue, doi: h.doi, url: h.url, abstract: h.abstract, source: h.source as PaperHit['source'], citationCount: h.citationCount });
+      }
+    }
+    return out;
   }
 
   /**

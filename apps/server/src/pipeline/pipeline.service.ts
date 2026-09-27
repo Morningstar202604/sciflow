@@ -331,17 +331,13 @@ export class PipelineService {
         { skipAgenticSearch: retry > 0 },
       );
       db.update(documents).set({ content: writerRes.content, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
-      // Phase 4：Writer Agent 补充检索到的文献回填文献库（Agentic RAG 闭环）
-      const agenticTitles = this.orchestrator.extractWriterHits(taskId);
-      if (agenticTitles.length > 0) {
-        this.references.import(
-          task.projectId,
-          agenticTitles.map((t) => ({ title: t, authors: [] })),
-        );
+      // Phase 4：Writer Agent 补充检索到的文献回填文献库（Agentic RAG 闭环，带完整元数据）
+      const agenticHits = this.orchestrator.extractWriterHits(taskId);
+      if (agenticHits.length > 0) {
+        this.references.import(task.projectId, agenticHits);
       }
       // 引用渲染：占位符 [Ref:N] → 真实文献（作者 年份）+ 文末参考文献列表
-      const agenticHits = this.orchestrator.extractWriterHits(taskId);
-      const rendered = this.renderCitations(task.projectId, writerRes.content, agenticHits);
+      const rendered = this.renderCitations(task.projectId, writerRes.content, agenticHits.map((h) => h.title));
       db.update(documents).set({ content: rendered, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
       await this.advance(taskId, 'drafting', 'done', writerRes.output);
 
