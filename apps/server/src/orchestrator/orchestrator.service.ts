@@ -107,6 +107,7 @@ export class AgentOrchestratorService {
       .from(agentRuns)
       .where(eq(agentRuns.agentType, 'planner'))
       .all()
+      .reverse()
       .find((r) => r.taskId === taskId && r.agentName === 'planner#research-plan');
     const full = safeParse(row?.detail ?? '{}') as { verifiedTopic: string; objective: string; researchQuestions: string[]; searchStrategy: { keywords: string[] }; draftingPlan: { sections: string[] }; risks: string[] };
     return {
@@ -295,6 +296,7 @@ export class AgentOrchestratorService {
       .from(agentRuns)
       .where(eq(agentRuns.agentType, 'writer'))
       .all()
+      .reverse()
       .find((r) => r.taskId === taskId && r.status === 'done');
     const detail = safeParse(row?.detail ?? '{}') as { fullContent?: string } | null;
     return { output: res.output, content: detail?.fullContent || '' };
@@ -307,6 +309,7 @@ export class AgentOrchestratorService {
       .from(agentRuns)
       .where(eq(agentRuns.agentType, 'writer'))
       .all()
+      .reverse()
       .find((r) => r.taskId === taskId && r.status === 'done');
     if (!run) return [];
     const detail = safeParse(run.detail ?? '{}') as {
@@ -396,6 +399,7 @@ export class AgentOrchestratorService {
       .from(agentRuns)
       .where(eq(agentRuns.agentType, 'reviewer'))
       .all()
+      .reverse()
       .find((r) => r.taskId === taskId && r.status === 'done');
     const full = safeParse(row?.detail ?? '{}') as { report: { totalScore: number; feedback: string }; reflexion: { note: string; instructions: string[] } | null };
     return { report: full.report, reflexion: full.reflexion || null };
@@ -413,6 +417,7 @@ export class AgentOrchestratorService {
       .from(agentRuns)
       .where(eq(agentRuns.agentType, 'polisher'))
       .all()
+      .reverse()
       .find((r) => r.taskId === taskId && r.status === 'done');
     const full = safeParse(row?.detail ?? '{}') as { original: string; polished: string; reason: string };
     return { original: full.original || '', polished: full.polished || '', reason: full.reason || '' };
