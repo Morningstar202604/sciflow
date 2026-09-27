@@ -645,17 +645,25 @@ export class AiService {
   async generateFigures(topic: string, outline: string, content: string): Promise<{ title: string; caption: string; mermaid: string }[]> {
     const custom = this.getCustomPrompt('generateFigures');
     const content2 = custom ? `${custom}\n\n论文主题：${topic}\n\n论文大纲：${outline}\n\n正文开头：\n${content.slice(0, 1200)}` : prompts.GENERATE_FIGURES(topic, outline, content);
-    const raw = await this.complete([{ role: 'user', content: content2 }], { temperature: 0.3, model: 'fast', context: 'generateFigures' });
-    try {
-      const parsed = this.jsonOf<{ figures?: { figureType: string; title: string; caption: string; mermaid: string }[] }>(raw);
-      return (parsed.figures || []).slice(0, 3).map((f) => ({
-        title: String(f.title || ''),
-        caption: String(f.caption || ''),
-        mermaid: String(f.mermaid || '').trim(),
-      })).filter((f) => f.mermaid && f.title);
-    } catch {
+    // 解析失败重试一次（fast 模型偶发输出非严格 JSON）；两次失败返回空并告警
+    let parsed: { figures?: { figureType: string; title: string; caption: string; mermaid: string }[] } | null = null;
+    for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+      const raw = await this.complete([{ role: 'user', content: content2 }], { temperature: 0.3, model: 'fast', context: 'generateFigures' });
+      try {
+        parsed = this.jsonOf<{ figures?: { figureType: string; title: string; caption: string; mermaid: string }[] }>(raw);
+      } catch {
+        this.logger.warn(`配图 JSON 解析失败（第 ${attempt + 1} 次），重试…`);
+      }
+    }
+    if (!parsed) {
+      this.logger.warn('配图两次解析均失败，本轮跳过图表生成');
       return [];
     }
+    return (parsed.figures || []).slice(0, 3).map((f) => ({
+      title: String(f.title || ''),
+      caption: String(f.caption || ''),
+      mermaid: String(f.mermaid || '').trim(),
+    })).filter((f) => f.mermaid && f.title);
   }
 
   async generateAbstract(title: string, content: string): Promise<{ abstract: string; keywords: string[] }> {

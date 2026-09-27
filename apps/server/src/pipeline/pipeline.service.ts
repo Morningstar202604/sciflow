@@ -342,7 +342,7 @@ export class PipelineService {
       let prevFigures = '';
       if (retry > 0) {
         const prev = db.select().from(documents).where(eq(documents.id, documentId)).get();
-        const m = (prev?.content || '').match(/## 图表[\s\S]*$/);
+        const m = (prev?.content || '').match(/## 图表[\s\S]*?(?=\n\n## |$)/);
         if (m) prevFigures = `\n\n---\n\n${m[0]}`;
       }
       // 自动配图：生成 2-3 个 mermaid 学术图表（仅首次起草，回炉复用省额度）
