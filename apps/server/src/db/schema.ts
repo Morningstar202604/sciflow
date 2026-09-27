@@ -186,6 +186,26 @@ export const mcpServers = sqliteTable('mcp_server', {
 export type McpServer = typeof mcpServers.$inferSelect;
 
 /** LLM 调用日志（token 成本追踪：每一次补全/流式调用的用量审计） */
+export const customIntents = sqliteTable('custom_intent', {
+  id: text('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  label: text('label').notNull(),
+  route: text('route').notNull(),
+  keywords: text('keywords').notNull(),
+  enabled: integer('enabled').default(1),
+  isCustom: integer('is_custom').default(1),
+  createdAt: integer('created_at').notNull(),
+});
+
+export const customPrompts = sqliteTable('custom_prompt', {
+  id: text('id').primaryKey(),
+  toolKey: text('tool_key').notNull().unique(),
+  toolLabel: text('tool_label').notNull(),
+  prompt: text('prompt').notNull(),
+  enabled: integer('enabled').default(1),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export const llmCallLogs = sqliteTable('llm_call_log', {
   id: text('id').primaryKey(),
   caller: text('caller').default('general'), // 调用方标识（pipeline/chat/orchestrator 等）

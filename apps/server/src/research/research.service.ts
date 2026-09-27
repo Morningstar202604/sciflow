@@ -67,8 +67,9 @@ export class ResearchService {
           (p.abstract ? ` | 摘要：${p.abstract.slice(0, 200)}` : ''),
       )
       .join('\n');
+    const custom = this.ai.getCustomPrompt('designReview');
     const raw = await this.ai.complete(
-      [{ role: 'user', content: prompts.DESIGN_REVIEW(idea, paperText) }],
+      [{ role: 'user', content: custom ?? prompts.DESIGN_REVIEW(idea, paperText) }],
       { temperature: 0.5, model: 'strong', context: 'designReview' },
     );
     const parsed = this.ai.safeParse(raw, designReviewSchema);
@@ -91,8 +92,9 @@ export class ResearchService {
           `结论：${p.conclusion || p.abstract?.slice(120, 240) || 'N/A'}`,
       )
       .join('\n');
+    const custom = this.ai.getCustomPrompt('paperComparison');
     const raw = await this.ai.complete(
-      [{ role: 'user', content: prompts.PAPER_COMPARISON(paperText) }],
+      [{ role: 'user', content: custom ?? prompts.PAPER_COMPARISON(paperText) }],
       { temperature: 0.4, model: 'strong', context: 'paperComparison' },
     );
     const parsed = this.ai.safeParse(raw, comparisonSchema);
@@ -107,8 +109,9 @@ export class ResearchService {
     if (content.trim().length < 50) {
       return { error: '论文内容过短（至少 50 字），暂无法评审' };
     }
+    const custom = this.ai.getCustomPrompt('simulatedReview');
     const raw = await this.ai.complete(
-      [{ role: 'user', content: prompts.SIMULATED_REVIEW(title, content.slice(0, 8000)) }],
+      [{ role: 'user', content: custom ?? prompts.SIMULATED_REVIEW(title, content.slice(0, 8000)) }],
       { temperature: 0.4, model: 'strong', context: 'simulatedReview' },
     );
     const parsed = this.ai.safeParse(raw, simulatedReviewSchema);

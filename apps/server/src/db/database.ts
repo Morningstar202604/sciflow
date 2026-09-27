@@ -176,6 +176,26 @@ CREATE TABLE IF NOT EXISTS mcp_server (
   enabled INTEGER DEFAULT 1,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS custom_intent (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  route TEXT NOT NULL,
+  keywords TEXT NOT NULL,
+  enabled INTEGER DEFAULT 1,
+  is_custom INTEGER DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS custom_prompt (
+  id TEXT PRIMARY KEY,
+  tool_key TEXT NOT NULL UNIQUE,
+  tool_label TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  enabled INTEGER DEFAULT 1,
+  updated_at INTEGER NOT NULL
+);
 `);
 
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */

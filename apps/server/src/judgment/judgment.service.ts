@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { AiService } from '../ai/ai.service';
+import { db } from '../db/database';
+import { customIntents } from '../db/schema';
+import { eq } from 'drizzle-orm';
 
 /**
  * 判断层（Judgment Layer）——对标 Jev System One Model
@@ -56,12 +59,38 @@ const intentSchema = z.object({
 export class JudgmentService {
   constructor(private readonly ai: AiService) {}
 
+  /** 合并意图库：系统默认（只读）+ 数据库自定义（用户可增删改启停） */
+  private mergedIntents(): { key: string; label: string; route: string; keywords: string[] }[] {
+    const merged = [...INTENTS];
+    try {
+      const rows = db.select().from(customIntents).where(eq(customIntents.enabled, 1)).all();
+      for (const r of rows) {
+        let kw: string[] = [];
+        try {
+          kw = JSON.parse(r.keywords || '[]');
+        } catch {
+          /* 忽略 */
+        }
+        const idx = merged.findIndex((i) => i.key === r.key);
+        if (idx >= 0) {
+          merged[idx] = { key: r.key, label: r.label, route: r.route, keywords: kw };
+        } else {
+          merged.push({ key: r.key, label: r.label, route: r.route, keywords: kw });
+        }
+      }
+    } catch {
+      /* 数据库不可用时回退系统默认 */
+    }
+    return merged;
+  }
+
   /** 规则快速命中：关键词扫描（Jev 式 System One，零成本毫秒级） */
   private ruleMatch(text: string): { key: string; matched: string[] } | null {
-    const t = text.toLowerCase();
+    // 去空格小写归一（'meta 分析' 与 'meta分析' 等价）
+    const t = text.toLowerCase().replace(/\s+/g, '');
     let best: { key: string; matched: string[] } | null = null;
-    for (const it of INTENTS) {
-      const hit = it.keywords.filter((k) => t.includes(k.toLowerCase()));
+    for (const it of this.mergedIntents()) {
+      const hit = it.keywords.filter((k) => t.includes(k.toLowerCase().replace(/\s+/g, '')));
       if (hit.length > 0 && (!best || hit.length > best.matched.length)) {
         best = { key: it.key, matched: hit };
       }
@@ -73,7 +102,7 @@ export class JudgmentService {
   async intent(text: string, context: string = ''): Promise<IntentResult> {
     const rule = this.ruleMatch(text);
     if (rule) {
-      const it = INTENTS.find((i) => i.key === rule.key)!;
+      const it = this.mergedIntents().find((i) => i.key === rule.key)!;
       return {
         intent: it.key,
         label: it.label,
@@ -90,7 +119,7 @@ export class JudgmentService {
         confidence: z.number().min(0).max(1),
         topic: z.string(),
       });
-      const candidates = INTENTS.map((i) => `${i.key}(${i.label})`).join('、');
+      const candidates = this.mergedIntents().map((i) => `${i.key}(${i.label})`).join('、');
       const prompt = `你是科研助手的意图判别器。用户消息：${text}${context ? `\n项目上下文：${context}` : ''}
 请判断用户想执行哪个科研动作，只允许从以下候选中选择一个：${candidates}。
 要求：
@@ -100,7 +129,7 @@ export class JudgmentService {
       const raw = await this.ai.complete([{ role: 'user', content: prompt }], { temperature: 0, context: 'judgmentIntent' });
       const parsed = this.ai.safeParse(raw, schema);
       if (parsed) {
-        const it = INTENTS.find((i) => i.key === parsed.intent);
+        const it = this.mergedIntents().find((i) => i.key === parsed.intent);
         if (it) {
           return {
             intent: it.key,

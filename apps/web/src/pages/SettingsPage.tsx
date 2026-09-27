@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { CheckCircle2, Coins, Database, FlaskConical, Gauge, Loader2, Plug, RefreshCw, Server, Wrench, XCircle } from 'lucide-react';
+import { useContext, useEffect, useState } from 'react';
+import { ToastContext } from '../App';
+import { CheckCircle2, Coins, Database, FlaskConical, Gauge, Loader2, Plug, Plus, Power, RefreshCw, Server, Trash2, Wand2, Wrench, XCircle } from 'lucide-react';
 import { api } from '../api/client';
-import type { AppSettings, McpServerInfo, McpToolInfo, ModelProvider, SelfCheck } from '../types';
-import { Badge, Button, Card, ErrorBox, SectionTitle, Select, Spinner, Textarea } from '../components/ui';
+import type { AppSettings, CustomIntent, CustomPromptTool, McpServerInfo, McpToolInfo, ModelProvider, SelfCheck } from '../types';
+import { Badge, Button, Card, ErrorBox, Input, Modal, SectionTitle, Select, Spinner, Textarea } from '../components/ui';
 
 interface UsageSummary {
   total: { calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; avg_latency_ms: number; success_rate: number };
@@ -11,6 +12,7 @@ interface UsageSummary {
 }
 
 export function SettingsPage() {
+  const toast = useContext(ToastContext);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [check, setCheck] = useState<SelfCheck | null>(null);
   const [checking, setChecking] = useState(false);
@@ -31,6 +33,12 @@ export function SettingsPage() {
   const [externalResult, setExternalResult] = useState<string>('');
   const [activeServerId, setActiveServerId] = useState('');
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [intents, setIntents] = useState<CustomIntent[]>([]);
+  const [intentForm, setIntentForm] = useState({ key: '', label: '', route: '/literature', keywords: '' });
+  const [intentEditing, setIntentEditing] = useState<string | null>(null);
+  const [promptTools, setPromptTools] = useState<CustomPromptTool[]>([]);
+  const [editingPrompt, setEditingPrompt] = useState<CustomPromptTool | null>(null);
+  const [promptText, setPromptText] = useState('');
 
   const load = async () => {
     try {
@@ -38,6 +46,8 @@ export function SettingsPage() {
       setMcpInfo(await api.mcp.info());
       setMcpTools((await api.mcp.tools()).tools);
       setProviders(await api.settings.listProviders());
+      setIntents(await api.customization.listIntents());
+      setPromptTools(await api.customization.listPrompts());
       setMcpServers(await api.settings.listMcpServers());
       api.usage.summary().then(setUsage).catch(() => undefined);
     } catch (e: any) {
@@ -239,6 +249,8 @@ export function SettingsPage() {
                   await api.settings.saveProvider(provForm);
                   setProvForm({ name: '', baseUrl: '', apiKey: '', model: '' });
                   setProviders(await api.settings.listProviders());
+      setIntents(await api.customization.listIntents());
+      setPromptTools(await api.customization.listPrompts());
                   setSettings(await api.settings.get());
                 } catch (e: any) {
                   setError(e.message);
@@ -281,6 +293,8 @@ export function SettingsPage() {
                       try {
                         await api.settings.activateProvider(p.id);
                         setProviders(await api.settings.listProviders());
+      setIntents(await api.customization.listIntents());
+      setPromptTools(await api.customization.listPrompts());
                         setSettings(await api.settings.get());
                       } catch (e: any) {
                         setError(e.message);
@@ -296,6 +310,8 @@ export function SettingsPage() {
                   onClick={async () => {
                     await api.settings.removeProvider(p.id);
                     setProviders(await api.settings.listProviders());
+      setIntents(await api.customization.listIntents());
+      setPromptTools(await api.customization.listPrompts());
                   }}
                 >
                   删除
@@ -538,6 +554,184 @@ export function SettingsPage() {
           <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 rounded p-2">{externalResult}</div>
         )}
       </Card>
+
+      {/* ===== 自定义中心 · 意图识别 ===== */}
+      <Card className="p-5 mt-4">
+        <SectionTitle
+          extra={
+            <Button variant="outline" onClick={load}>
+              <RefreshCw size={13} /> 刷新
+            </Button>
+          }
+        >
+          <span className="flex items-center gap-2">
+            <Wand2 size={16} className="text-teal-600" /> 意图识别自定义
+          </span>
+        </SectionTitle>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+          自定义科研动作意图：新增意图后，科研问答识别时优先命中你的关键词（Jev 式规则秒判）。系统内置 17 个意图不可删除，但可用同 key 覆盖。
+        </div>
+        <div className="grid sm:grid-cols-4 gap-2 mb-2">
+          <Input placeholder="意图标识（如 meta_analysis）" value={intentForm.key} onChange={(e) => setIntentForm({ ...intentForm, key: e.target.value })} />
+          <Input placeholder="中文标签（如 Meta 分析）" value={intentForm.label} onChange={(e) => setIntentForm({ ...intentForm, label: e.target.value })} />
+          <select
+            className="rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-2 text-xs bg-white dark:bg-slate-900 outline-none focus:border-teal-500"
+            value={intentForm.route}
+            onChange={(e) => setIntentForm({ ...intentForm, route: e.target.value })}
+          >
+            <option value="/literature">文献调研</option>
+            <option value="/writing">论文写作</option>
+            <option value="/pipeline">全自动流水线</option>
+            <option value="/quality">质量评分</option>
+            <option value="/chat">科研问答</option>
+          </select>
+          <Input placeholder="触发词，逗号分隔（如 meta分析,荟萃分析）" value={intentForm.keywords} onChange={(e) => setIntentForm({ ...intentForm, keywords: e.target.value })} />
+        </div>
+        <Button
+          variant="outline"
+          className="text-xs mb-3"
+          disabled={!intentForm.key || !intentForm.label}
+          onClick={async () => {
+            try {
+              await api.customization.createIntent({
+                key: intentForm.key,
+                label: intentForm.label,
+                route: intentForm.route,
+                keywords: intentForm.keywords.split(/[,，\s]+/).filter(Boolean),
+              });
+              setIntentForm({ key: '', label: '', route: '/literature', keywords: '' });
+              setIntents(await api.customization.listIntents());
+              toast('success', '自定义意图已生效');
+            } catch (e: any) {
+              setError(e.message);
+            }
+          }}
+        >
+          <Plus size={13} /> 新增意图
+        </Button>
+        {intents.length === 0 ? (
+          <div className="text-xs text-slate-400 dark:text-slate-500">暂无自定义意图（系统内置 17 个科研意图默认生效）</div>
+        ) : (
+          <div className="space-y-1.5">
+            {intents.map((it) => (
+              <div key={it.id} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                <Badge tone={it.enabled ? 'teal' : 'slate'}>{it.enabled ? '启用' : '停用'}</Badge>
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{it.label}</span>
+                <span className="text-[11px] text-slate-400">{it.key} · {it.route}</span>
+                <span className="text-[11px] text-slate-400 truncate flex-1">
+                  {(() => { try { return JSON.parse(it.keywords).join('、'); } catch { return it.keywords; } })()}
+                </span>
+                <button
+                  className="text-slate-300 hover:text-teal-600"
+                  onClick={async () => {
+                    try {
+                      await api.customization.updateIntent(it.id, { enabled: it.enabled ? 0 : 1 });
+                      setIntents(await api.customization.listIntents());
+                    } catch (e: any) {
+                      setError(e.message);
+                    }
+                  }}
+                >
+                  <Power size={13} />
+                </button>
+                <button className="text-slate-300 hover:text-rose-500" onClick={async () => {
+                  try {
+                    await api.customization.deleteIntent(it.id);
+                    setIntents(await api.customization.listIntents());
+                    toast('success', '自定义意图已删除');
+                  } catch (e: any) {
+                    setError(e.message);
+                  }
+                }}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* ===== 自定义中心 · 科研工具提示词 ===== */}
+      <Card className="p-5 mt-4">
+        <SectionTitle
+          extra={
+            <Button variant="outline" onClick={load}>
+              <RefreshCw size={13} /> 刷新
+            </Button>
+          }
+        >
+          <span className="flex items-center gap-2">
+            <FlaskConical size={16} className="text-teal-600" /> 科研工具提示词自定义
+          </span>
+        </SectionTitle>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+          每个 AI 科研工具（综述/精读/缺口/对比/评审…）默认提示词可被你的自定义覆盖：点击「编辑」写入你的专属提示词（含你的领域规范/输出格式/风格要求），未配置时自动使用系统默认。
+        </div>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {promptTools.map((t) => (
+            <div key={t.toolKey} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+              <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{t.toolLabel}</span>
+              <span className="text-[11px] text-slate-400 truncate flex-1">{t.toolKey}</span>
+              <Badge tone={t.customized ? (t.enabled ? 'green' : 'amber') : 'slate'}>{t.customized ? (t.enabled ? '已自定义' : '已停用') : '系统默认'}</Badge>
+              <button
+                className="text-xs text-teal-600 hover:underline"
+                onClick={() => {
+                  setEditingPrompt(t);
+                  setPromptText(t.prompt);
+                }}
+              >
+                编辑
+              </button>
+              {t.customized && (
+                <button
+                  className="text-slate-300 hover:text-rose-500"
+                  onClick={async () => {
+                    await api.customization.deletePrompt(t.toolKey);
+                    setPromptTools(await api.customization.listPrompts());
+                    toast('success', `${t.toolLabel} 已恢复系统默认`);
+                  }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* 提示词编辑弹窗 */}
+      {editingPrompt && (
+        <Modal open onClose={() => setEditingPrompt(null)} title={`编辑提示词 · ${editingPrompt.toolLabel}`}>
+          <Textarea
+            rows={8}
+            className="mb-3"
+            placeholder="在这里编写自定义提示词…（建议包含：角色、任务、输入格式、输出 JSON 结构要求）"
+            value={promptText}
+            onChange={(e) => setPromptText(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" className="text-xs" onClick={() => setEditingPrompt(null)}>
+              取消
+            </Button>
+            <Button
+              className="text-xs"
+              disabled={!promptText.trim()}
+              onClick={async () => {
+                try {
+                  await api.customization.upsertPrompt(editingPrompt.toolKey, promptText);
+                  setPromptTools(await api.customization.listPrompts());
+                  setEditingPrompt(null);
+                  toast('success', `${editingPrompt.toolLabel} 提示词已保存`);
+                } catch (e: any) {
+                  setError(e.message);
+                }
+              }}
+            >
+              保存
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

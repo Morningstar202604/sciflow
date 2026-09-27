@@ -177,6 +177,25 @@ export interface EvidenceStance {
   note: string;
 }
 
+export interface CustomIntent {
+  id: string;
+  key: string;
+  label: string;
+  route: string;
+  keywords: string;
+  enabled: number;
+  isCustom: number;
+  createdAt: number;
+}
+
+export interface CustomPromptTool {
+  toolKey: string;
+  toolLabel: string;
+  prompt: string;
+  enabled: number;
+  customized: boolean;
+}
+
 export interface IntentResult {
   intent: string;
   label: string;

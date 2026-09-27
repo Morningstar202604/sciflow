@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { sqlite } from '../db/database';
 import { db } from '../db/database';
-import { llmCallLogs } from '../db/schema';
+import { llmCallLogs, customPrompts } from '../db/schema';
+import { eq } from 'drizzle-orm';
 import * as prompts from './prompts';
 
 export interface ChatMessage {
@@ -122,6 +123,16 @@ export class AiService {
 
   /** zod 结构化输出校验：schema 校验通过返回解析值，失败返回 null（调用处走兜底，杜绝坏 JSON 反复补工） */
   /** 结构化输出校验：zod schema 解析 LLM 返回的 JSON */
+  /** 自定义提示词查询：用户配置优先，未配置返回 null（调用方回退系统默认） */
+  getCustomPrompt(toolKey: string): string | null {
+    try {
+      const row = db.select().from(customPrompts).where(eq(customPrompts.toolKey, toolKey)).get();
+      return row?.enabled ? row.prompt : null;
+    } catch {
+      return null;
+    }
+  }
+
   safeParse<T>(text: string, schema: z.ZodType<T>): T | null {
     try {
       const obj = this.jsonOf<unknown>(text);
@@ -375,7 +386,8 @@ export class AiService {
 
   /** 文献综述 */
   async summarizeLiterature(topic: string, papers: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.SUMMARIZE_LITERATURE(topic, papers) }], { temperature: 0.5, context: 'summarizeLiterature' });
+    const custom = this.getCustomPrompt('summarizeLiterature');
+    return this.complete([{ role: 'user', content: custom ?? prompts.SUMMARIZE_LITERATURE(topic, papers) }], { temperature: 0.5, context: 'summarizeLiterature' });
   }
 
   /** 期刊推荐 */
@@ -440,7 +452,8 @@ export class AiService {
 
   /** Elicit 式：文献结构化提取（字段统一字符串化） */
   async extractPaperTable(papers: string): Promise<{ ref: string; title: string; year: number; method: string; results: string; contribution: string; limitations: string }[]> {
-    const raw = await this.complete([{ role: 'user', content: prompts.EXTRACT_PAPER_TABLE(papers) }], { temperature: 0.2, context: 'extractPaperTable' });
+    const custom = this.getCustomPrompt('extractPaperTable');
+    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.EXTRACT_PAPER_TABLE(papers) }], { temperature: 0.2, context: 'extractPaperTable' });
     try {
       const parsed = this.jsonOf<{ papers: any[] }>(raw);
       return (parsed.papers || []).slice(0, 12).map((p: any) => ({
@@ -462,7 +475,8 @@ export class AiService {
     question: string,
     papers: string,
   ): Promise<{ summary: string; stances: { claim: string; stance: string; count: number; refs: string[]; note: string }[] }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.EVIDENCE_SYNTHESIS(question, papers) }], { temperature: 0.3, context: 'evidenceSynthesis' });
+    const custom = this.getCustomPrompt('evidenceSynthesis');
+    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.EVIDENCE_SYNTHESIS(question, papers) }], { temperature: 0.3, context: 'evidenceSynthesis' });
     try {
       const parsed = this.jsonOf<{ summary: string; stances: any[] }>(raw);
       return {
@@ -607,7 +621,8 @@ export class AiService {
   /** 论文摘要 + 关键词生成（zod 结构化校验） */
   async generateAbstract(title: string, content: string): Promise<{ abstract: string; keywords: string[] }> {
     const schema = z.object({ abstract: z.string().min(10), keywords: z.array(z.string()).min(1).max(8) });
-    const raw = await this.complete([{ role: 'user', content: prompts.GENERATE_ABSTRACT(title, content) }], {
+    const custom = this.getCustomPrompt('generateAbstract');
+    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.GENERATE_ABSTRACT(title, content) }], {
       temperature: 0.3,
       context: 'generateAbstract',
     });
@@ -639,7 +654,8 @@ export class AiService {
       futureWork: z.string(),
       takeaway: z.string(),
     });
-    const raw = await this.complete([{ role: 'user', content: prompts.DEEP_DIVE_PAPER(paper) }], {
+    const custom = this.getCustomPrompt('deepDivePaper');
+    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.DEEP_DIVE_PAPER(paper) }], {
       temperature: 0.2,
       context: 'deepDivePaper',
     });
@@ -659,7 +675,8 @@ export class AiService {
         .min(1),
       recommendedTopic: z.string(),
     });
-    const raw = await this.complete([{ role: 'user', content: prompts.RESEARCH_GAP(topic, papers) }], {
+    const custom = this.getCustomPrompt('researchGap');
+    const raw = await this.complete([{ role: 'user', content: custom ?? prompts.RESEARCH_GAP(topic, papers) }], {
       temperature: 0.3,
       context: 'researchGap',
     });

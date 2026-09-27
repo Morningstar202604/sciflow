@@ -13,6 +13,7 @@ import { McpModule } from './mcp/mcp.module';
 import { MemoryModule } from './memory/memory.module';
 import { ResearchModule } from './research/research.module';
 import { JudgmentModule } from './judgment/judgment.module';
+import { CustomizationModule } from './settings/customization.module';
 import { UsageModule } from './usage/usage.module';
 import { HealthController } from './health.controller';
 
@@ -32,6 +33,7 @@ import { HealthController } from './health.controller';
     MemoryModule,
     ResearchModule,
     JudgmentModule,
+    CustomizationModule,
     UsageModule,
   ],
   controllers: [HealthController],

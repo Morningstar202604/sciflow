@@ -1,7 +1,7 @@
 import type {
   Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
-  AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult,
+  AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool,
 } from '../types';
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -79,6 +79,19 @@ export const api = {
     exportMarkdown: (id: string) =>
       request<{ markdown: string; filename: string }>(`/api/documents/${id}/export`),
     abstract: (id: string) => request<{ abstract: string; keywords: string[] }>(`/api/documents/${id}/abstract`, { method: 'POST' }),
+  },
+
+  customization: {
+    listIntents: () => request<CustomIntent[]>('/api/customization/intents'),
+    createIntent: (body: { key: string; label: string; route: string; keywords: string[] }) =>
+      request<CustomIntent>('/api/customization/intents', { method: 'POST', body: JSON.stringify(body) }),
+    updateIntent: (id: string, patch: Partial<{ label: string; route: string; keywords: string[]; enabled: number }>) =>
+      request<CustomIntent[]>(`/api/customization/intents/${id}`, { method: 'POST', body: JSON.stringify(patch) }),
+    deleteIntent: (id: string) => request<{ ok: boolean }>(`/api/customization/intents/${id}`, { method: 'DELETE' }),
+    listPrompts: () => request<CustomPromptTool[]>('/api/customization/prompts'),
+    upsertPrompt: (toolKey: string, prompt: string, enabled = 1) =>
+      request<CustomPromptTool[]>(`/api/customization/prompts/${toolKey}`, { method: 'POST', body: JSON.stringify({ prompt, enabled }) }),
+    deletePrompt: (toolKey: string) => request<{ ok: boolean }>(`/api/customization/prompts/${toolKey}`, { method: 'DELETE' }),
   },
 
   judgment: {
