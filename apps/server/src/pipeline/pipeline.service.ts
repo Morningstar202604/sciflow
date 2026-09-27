@@ -330,21 +330,21 @@ export class PipelineService {
         { refsPrompt: this.referencesForPrompt(task.projectId), styleHint, reflexion },
         { skipAgenticSearch: retry > 0 },
       );
+      // 回炉时保留上一版文档的图表章节（必须在写入新正文之前提取，否则被覆盖）
+      let prevFigures = '';
+      if (retry > 0) {
+        const prev = db.select().from(documents).where(eq(documents.id, documentId)).get();
+        const m = (prev?.content || '').match(/## 图表[\s\S]*?$/);
+        if (m) prevFigures = `\n\n---\n\n${m[0]}`;
+      }
       db.update(documents).set({ content: writerRes.content, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
       // Phase 4：Writer Agent 补充检索到的文献回填文献库（Agentic RAG 闭环，带完整元数据）
       const agenticHits = this.orchestrator.extractWriterHits(taskId);
       if (agenticHits.length > 0) {
         this.references.import(task.projectId, agenticHits);
       }
-      // 引用渲染：占位符 [Ref:N] → 真实文献（作者 年份）+ 文末参考文献列表
+      // 引用渲染：占位符 [Ref:N] → 顺序编码制 [N] + 文末参考文献列表
       const rendered = this.renderCitations(task.projectId, writerRes.content, agenticHits.map((h) => h.title));
-      // 回炉时保留上一版文档的图表章节（重写正文会丢失已生成的图）
-      let prevFigures = '';
-      if (retry > 0) {
-        const prev = db.select().from(documents).where(eq(documents.id, documentId)).get();
-        const m = (prev?.content || '').match(/## 图表[\s\S]*?(?=\n\n## |$)/);
-        if (m) prevFigures = `\n\n---\n\n${m[0]}`;
-      }
       // 自动配图：生成 2-3 个 mermaid 学术图表（仅首次起草，回炉复用省额度）
       let finalContent = rendered + prevFigures;
       if (retry === 0 && this.stepEnabled('figures')) {
