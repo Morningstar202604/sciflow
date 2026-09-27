@@ -652,11 +652,11 @@ export class AiService {
       try {
         parsed = this.jsonOf<{ figures?: { figureType: string; title: string; caption: string; mermaid: string }[] }>(raw);
       } catch {
-        this.logger.warn(`配图 JSON 解析失败（第 ${attempt + 1} 次），重试…`);
+        console.warn(`[sciflow] 配图 JSON 解析失败（第 ${attempt + 1} 次），重试…`);
       }
     }
     if (!parsed) {
-      this.logger.warn('配图两次解析均失败，本轮跳过图表生成');
+      console.warn('[sciflow] 配图两次解析均失败，本轮跳过图表生成');
       return [];
     }
     return (parsed.figures || []).slice(0, 3).map((f) => ({
