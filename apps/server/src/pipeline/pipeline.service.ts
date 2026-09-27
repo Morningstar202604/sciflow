@@ -338,8 +338,15 @@ export class PipelineService {
       }
       // 引用渲染：占位符 [Ref:N] → 真实文献（作者 年份）+ 文末参考文献列表
       const rendered = this.renderCitations(task.projectId, writerRes.content, agenticHits.map((h) => h.title));
+      // 回炉时保留上一版文档的图表章节（重写正文会丢失已生成的图）
+      let prevFigures = '';
+      if (retry > 0) {
+        const prev = db.select().from(documents).where(eq(documents.id, documentId)).get();
+        const m = (prev?.content || '').match(/## 图表[\s\S]*$/);
+        if (m) prevFigures = `\n\n---\n\n${m[0]}`;
+      }
       // 自动配图：生成 2-3 个 mermaid 学术图表（仅首次起草，回炉复用省额度）
-      let finalContent = rendered;
+      let finalContent = rendered + prevFigures;
       if (retry === 0 && this.stepEnabled('figures')) {
         try {
           const figs = await this.ai.generateFigures(task.topic, JSON.stringify(outline), rendered);
@@ -502,8 +509,10 @@ export class PipelineService {
       const ab = (r.abstract || '').toLowerCase();
       return PipelineService.DOMAIN_KW.some((k) => t.includes(k) || ab.includes(k));
     });
-    // 相关文献不足 6 条时放宽为全部有元数据文献，保证起草有文献可用
-    return (rel.length >= 6 ? rel : meta).slice(0, 12);
+    // 相关文献不足 6 条时放宽为全部有元数据文献；按被引量降序（高被引里程碑优先），池子 20 条保证覆盖广度
+    return (rel.length >= 6 ? rel : meta)
+      .sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0))
+      .slice(0, 20);
   }
 
   private referencesForPrompt(projectId: string): string {
