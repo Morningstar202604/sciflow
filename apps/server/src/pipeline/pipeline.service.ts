@@ -479,18 +479,31 @@ export class PipelineService {
   }
 
   /** 供起草引用的文献池：只取元数据完整（有作者或年份）的文献，避免模型引用 [Unknown n.d.] */
+  /** 科研综述领域关键词：标题/摘要命中任一才进入引用池（过滤检索噪音如 MapReduce/物种起源/语言研究类） */
+  private static readonly DOMAIN_KW = [
+    'graph neural', 'gnn', 'molecular', 'molecule', 'drug', 'protein', 'ligand', 'chemical',
+    'pharmaco', 'biomed', 'bioinform', 'deep learning', 'machine learning', 'neural network',
+    'geometric', 'equivariant', 'graph', 'neural', 'chem',
+    '图神经', '分子', '药物', '蛋白', '几何', '深度学习', '消息传递', '药',
+  ];
+
   private refsForDraft(projectId: string) {
     const all = this.references.list(projectId);
-    return all
-      .filter((r) => {
-        try {
-          const a = JSON.parse(r.authors || '[]') as string[];
-          return a.length > 0 && !!r.year;
-        } catch {
-          return false;
-        }
-      })
-      .slice(0, 12);
+    const meta = all.filter((r) => {
+      try {
+        const a = JSON.parse(r.authors || '[]') as string[];
+        return a.length > 0 && !!r.year;
+      } catch {
+        return false;
+      }
+    });
+    const rel = meta.filter((r) => {
+      const t = (r.title || '').toLowerCase();
+      const ab = (r.abstract || '').toLowerCase();
+      return PipelineService.DOMAIN_KW.some((k) => t.includes(k) || ab.includes(k));
+    });
+    // 相关文献不足 6 条时放宽为全部有元数据文献，保证起草有文献可用
+    return (rel.length >= 6 ? rel : meta).slice(0, 12);
   }
 
   private referencesForPrompt(projectId: string): string {
@@ -543,7 +556,7 @@ export class PipelineService {
             return '佚名';
           }
         })();
-        return `[${k + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi}` : ''}`;
+        return `[${k + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi.replace(/^https?:\/\//, '')}` : ''}`;
       });
       out += `\n\n## 参考文献\n\n${list.join('\n')}`;
     }
