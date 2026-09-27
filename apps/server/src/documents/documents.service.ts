@@ -286,6 +286,29 @@ export function formatCitation(ref: { title: string; authors: string; year: numb
       return `[${index}] ${authors} "${ref.title},"${venue}${year}.${doi}`;
     case 'vancouver':
       return `${index}. ${authors} ${ref.title}${venue}${year}.${doi}`;
+    case 'bibtex': {
+      // BibTeX（LaTeX 论文引用刚需）：@article{key, author, title, journal, year, doi}
+      const arr = (() => {
+        try {
+          return JSON.parse(ref.authors || '[]') as string[];
+        } catch {
+          return [];
+        }
+      })();
+      const keyBase = (arr[0]?.split(' ').pop() || 'unknown').toLowerCase().replace(/[^a-z]/g, '');
+      const key = `${keyBase}${ref.year || 'n.d.'}`;
+      const authorsBib = arr.length === 0 ? 'Anonymous' : arr.join(' and ');
+      const titleClean = ref.title.replace(/[{}&%$#_^~\\]/g, '');
+      const venueClean = (ref.venue || '').replace(/[{}&%$#_^~\\]/g, '');
+      const doiLine = ref.doi ? `,
+  doi = {${ref.doi}}` : '';
+      return `@article{${key},
+  author = {${authorsBib}},
+  title = {${titleClean}},
+  journal = {${venueClean}},
+  year = {${ref.year || 'n.d.'}}${doiLine}
+}`;
+    }
     case 'gbt': {
       // GB/T 7714-2015 顺序编码制：[序号] 作者. 题名[文献类型标志]. 出版地: 出版者, 年份: 页码. DOI
       const namePart = (() => {

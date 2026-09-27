@@ -634,6 +634,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                   { value: 'ieee', label: 'IEEE' },
                   { value: 'vancouver', label: 'Vancouver' },
                   { value: 'gbt', label: 'GB/T 7714' },
+                  { value: 'bibtex', label: 'BibTeX (.bib)' },
                 ]}
                 value={exportFormat}
                 onChange={(v) => exportRefs(v)}
