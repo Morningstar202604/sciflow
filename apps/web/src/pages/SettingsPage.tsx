@@ -1,8 +1,8 @@
 import { useContext, useEffect, useState } from 'react';
 import { ToastContext } from '../App';
-import { CheckCircle2, ChevronDown, ChevronUp, Coins, Database, FlaskConical, Gauge, Loader2, Plug, Plus, Power, RefreshCw, Server, Trash2, Wand2, Wrench, XCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Coins, Database, FlaskConical, Gauge, Loader2, Plug, Plus, Power, RefreshCw, Server, Trash2, Wand2, Workflow, Wrench, XCircle } from 'lucide-react';
 import { api } from '../api/client';
-import type { AppSettings, CustomIntent, CustomPromptTool, McpServerInfo, McpToolInfo, ModelProvider, SelfCheck } from '../types';
+import type { AppSettings, CustomIntent, CustomPromptTool, McpServerInfo, McpToolInfo, ModelProvider, PipelineStepConfig, QualityWeightItem, SelfCheck } from '../types';
 import { Badge, Button, Card, ErrorBox, Input, Modal, SectionTitle, Select, Spinner, Textarea } from '../components/ui';
 
 interface UsageSummary {
@@ -42,6 +42,9 @@ export function SettingsPage() {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ intent: false, prompt: false });
   const [judgmentMode, setJudgmentMode] = useState('auto');
   const [modeLoaded, setModeLoaded] = useState(false);
+  const [pipelineSteps, setPipelineSteps] = useState<PipelineStepConfig[]>([]);
+  const [qualityWeights, setQualityWeights] = useState<QualityWeightItem[]>([]);
+  const [weightInputs, setWeightInputs] = useState<Record<string, string>>({});
 
   const load = async () => {
     try {
@@ -51,6 +54,10 @@ export function SettingsPage() {
       setProviders(await api.settings.listProviders());
       setIntents(await api.customization.listIntents());
       setPromptTools(await api.customization.listPrompts());
+      setPipelineSteps(await api.customization.listPipelineSteps());
+      const w = await api.customization.listQualityWeights();
+      setQualityWeights(w);
+      setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
       setModeLoaded(true);
@@ -257,6 +264,10 @@ export function SettingsPage() {
                   setProviders(await api.settings.listProviders());
       setIntents(await api.customization.listIntents());
       setPromptTools(await api.customization.listPrompts());
+      setPipelineSteps(await api.customization.listPipelineSteps());
+      const w = await api.customization.listQualityWeights();
+      setQualityWeights(w);
+      setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
       setModeLoaded(true);
@@ -304,6 +315,10 @@ export function SettingsPage() {
                         setProviders(await api.settings.listProviders());
       setIntents(await api.customization.listIntents());
       setPromptTools(await api.customization.listPrompts());
+      setPipelineSteps(await api.customization.listPipelineSteps());
+      const w = await api.customization.listQualityWeights();
+      setQualityWeights(w);
+      setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
       setModeLoaded(true);
@@ -324,6 +339,10 @@ export function SettingsPage() {
                     setProviders(await api.settings.listProviders());
       setIntents(await api.customization.listIntents());
       setPromptTools(await api.customization.listPrompts());
+      setPipelineSteps(await api.customization.listPipelineSteps());
+      const w = await api.customization.listQualityWeights();
+      setQualityWeights(w);
+      setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
       setModeLoaded(true);
@@ -741,6 +760,10 @@ export function SettingsPage() {
                       onClick={async () => {
                         await api.customization.deletePrompt(t.toolKey);
                         setPromptTools(await api.customization.listPrompts());
+      setPipelineSteps(await api.customization.listPipelineSteps());
+      const w = await api.customization.listQualityWeights();
+      setQualityWeights(w);
+      setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
       setModeLoaded(true);
@@ -752,6 +775,149 @@ export function SettingsPage() {
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* · 流水线步骤自定义（可折叠） */}
+      <Card className="p-5 mt-4">
+        <button
+          className="w-full flex items-center justify-between text-left"
+          onClick={() => setOpenSections((o) => ({ ...o, pipeline: !o.pipeline }))}
+        >
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <Workflow size={16} className="text-teal-600" />
+            流水线步骤自定义
+            <span className="text-[11px] font-normal text-slate-400">
+              {(() => { const off = pipelineSteps.filter((s) => !s.enabled).length; return off > 0 ? `${pipelineSteps.length - off}/${pipelineSteps.length} 步启用（${off} 步已关）` : '8 步全启用（默认）'; })()}
+            </span>
+          </span>
+          {openSections.pipeline ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+        </button>
+        {openSections.pipeline && (
+          <div className="mt-4">
+            <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+              全自动流水线的 8 个阶段可自定义启停：关闭的步骤直接跳过（步骤显示「已禁用」）。
+              「主题验证 / 分章起草 / 完成」为骨架步骤不可关闭。改动对之后新建的流水线生效。
+            </div>
+            <div className="grid sm:grid-cols-2 gap-1.5">
+              {pipelineSteps.map((st) => (
+                <div key={st.key} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                  <button
+                    className={`relative w-7 h-4 rounded-full transition-colors ${st.enabled ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-700'} ${st.core ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    onClick={async () => {
+                      if (st.core) return;
+                      try {
+                        await api.customization.updatePipelineStep(st.key, st.enabled ? 0 : 1);
+                        setPipelineSteps(await api.customization.listPipelineSteps());
+                        toast('success', `${st.label} ${st.enabled ? '已停用' : '已启用'}`);
+                      } catch (e: any) {
+                        setError(e.message);
+                      }
+                    }}
+                  >
+                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${st.enabled ? 'left-3.5' : 'left-0.5'}`} />
+                  </button>
+                  <span className="text-xs text-slate-700 dark:text-slate-200">{st.label}</span>
+                  <span className="text-[11px] text-slate-400 flex-1">{st.key}</span>
+                  {st.core ? (
+                    <span className="text-[10px] text-slate-400">骨架</span>
+                  ) : st.enabled ? (
+                    <Badge tone="teal">启用</Badge>
+                  ) : (
+                    <Badge tone="slate">已禁用</Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="mt-3">
+              <Button
+                variant="outline"
+                className="text-xs"
+                onClick={async () => {
+                  await api.customization.resetPipelineSteps();
+                  setPipelineSteps(await api.customization.listPipelineSteps());
+                  toast('success', '已恢复 8 步全启用');
+                }}
+              >
+                恢复默认（8 步全启用）
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* · 质量评分权重自定义（可折叠） */}
+      <Card className="p-5 mt-4">
+        <button
+          className="w-full flex items-center justify-between text-left"
+          onClick={() => setOpenSections((o) => ({ ...o, weights: !o.weights }))}
+        >
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <Gauge size={16} className="text-teal-600" />
+            质量评分权重自定义
+            <span className="text-[11px] font-normal text-slate-400">
+              {qualityWeights.every((x) => x.weight === 1) ? '7 维等权（默认）' : '已自定义加权'}
+            </span>
+          </span>
+          {openSections.weights ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+        </button>
+        {openSections.weights && (
+          <div className="mt-4">
+            <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+              论文质量总分 = 各维度得分 × 权重 的加权平均。默认 7 维等权（各 1），可按你的评审偏好加大某维度影响力（如更看重「新颖」）。
+            </div>
+            <div className="grid sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {qualityWeights.map((d) => (
+                <div key={d.key} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                  <span className="text-xs text-slate-700 dark:text-slate-200 w-12">{d.label}</span>
+                  <Input
+                    className="w-20"
+                    value={weightInputs[d.key] ?? String(d.weight)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWeightInputs((o) => ({ ...o, [d.key]: e.target.value }))}
+                  />
+                  <span className="text-[11px] text-slate-400">×</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button
+                className="text-xs"
+                onClick={async () => {
+                  try {
+                    const weights: Record<string, number> = {};
+                    for (const d of qualityWeights) {
+                      const v = Number(weightInputs[d.key]);
+                      if (!Number.isFinite(v) || v <= 0 || v > 5) {
+                        setError(`${d.label} 权重需在 (0,5] 之间`);
+                        return;
+                      }
+                      weights[d.key] = v;
+                    }
+                    await api.customization.setQualityWeights(weights);
+                    setQualityWeights(await api.customization.listQualityWeights());
+                    toast('success', '评分权重已保存（影响之后的质量评分）');
+                  } catch (e: any) {
+                    setError(e.message);
+                  }
+                }}
+              >
+                保存权重
+              </Button>
+              <Button
+                variant="outline"
+                className="text-xs"
+                onClick={async () => {
+                  const w = qualityWeights.map((x) => ({ ...x, weight: 1 }));
+                  await api.customization.setQualityWeights(Object.fromEntries(w.map((x) => [x.key, 1])));
+                  setQualityWeights(await api.customization.listQualityWeights());
+                  setWeightInputs(Object.fromEntries(w.map((x) => [x.key, '1'])));
+                  toast('success', '已恢复 7 维等权');
+                }}
+              >
+                恢复等权
+              </Button>
             </div>
           </div>
         )}
@@ -778,6 +944,10 @@ export function SettingsPage() {
                 try {
                   await api.customization.upsertPrompt(editingPrompt.toolKey, promptText);
                   setPromptTools(await api.customization.listPrompts());
+      setPipelineSteps(await api.customization.listPipelineSteps());
+      const w = await api.customization.listQualityWeights();
+      setQualityWeights(w);
+      setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
       setModeLoaded(true);

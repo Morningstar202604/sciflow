@@ -31,6 +31,33 @@ export class CustomizationController {
     return this.customization.resetIntents();
   }
 
+  // 流水线步骤
+  @Get('pipeline-steps')
+  listPipelineSteps() {
+    return this.customization.listPipelineSteps();
+  }
+
+  @Post('pipeline-steps/:stepKey')
+  updatePipelineStep(@Param('stepKey') stepKey: string, @Body() body: { enabled: number }) {
+    return this.customization.updatePipelineStep(stepKey, body.enabled);
+  }
+
+  @Delete('pipeline-steps')
+  resetPipelineSteps() {
+    return this.customization.resetPipelineSteps();
+  }
+
+  // 质量评分权重
+  @Get('quality-weights')
+  listQualityWeights() {
+    return this.customization.listQualityWeights();
+  }
+
+  @Post('quality-weights')
+  setQualityWeights(@Body() body: { weights: Record<string, number> }) {
+    return this.customization.setQualityWeights(body.weights);
+  }
+
   // 意图判断模式
   @Get('judgment-mode')
   getJudgmentMode() {

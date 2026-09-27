@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs } from '../db/schema';
+import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs , pipelineConfigs} from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { LiteratureService } from '../literature/literature.service';
 import { ReferencesService } from '../references/references.service';
@@ -12,7 +12,7 @@ import { AgentOrchestratorService } from '../orchestrator/orchestrator.service';
 export interface PipelineStepState {
   key: string;
   label: string;
-  status: 'pending' | 'running' | 'awaiting_confirmation' | 'done' | 'retry' | 'failed';
+  status: 'pending' | 'running' | 'awaiting_confirmation' | 'done' | 'retry' | 'failed' | 'skipped';
   output?: string;
   retryCount: number;
 }
@@ -43,6 +43,16 @@ export class PipelineService {
     private readonly quality: QualityService,
     private readonly orchestrator: AgentOrchestratorService,
   ) {}
+
+  /** 步骤启停：用户可在设置页自定义（pipeline_config 表），默认全部启用 */
+  private stepEnabled(key: string): boolean {
+    try {
+      const r = db.select().from(pipelineConfigs).where(eq(pipelineConfigs.stepKey, key)).get();
+      return !r || (r.enabled ?? 1) === 1;
+    } catch {
+      return true;
+    }
+  }
 
   /** 创建流水线任务并立即后台执行（借鉴 Agent Laboratory 三阶段流水线） */
   create(projectId: string, topic: string) {
@@ -191,6 +201,14 @@ export class PipelineService {
     );
 
     // ② Supervisor：3 路 ResearchAgent 并行 ReAct（Phase 1b + Phase 3 编排）
+    if (!this.stepEnabled('literature')) {
+      // 用户禁用文献调研：跳过检索，用通用结构起草
+      await this.advance(taskId, 'literature', 'skipped', '用户已禁用文献调研');
+      const trace = '[]';
+      db.update(pipelineTasks).set({ trace, updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
+      await this.continueFromOutline(taskId, verifiedTopic, '（用户已禁用文献调研，按通用学术结构起草）');
+      return;
+    }
     await this.advance(taskId, 'literature', 'running');
     const { hits, trace } = await this.orchestrator.researchAgents(taskId, task.topic, plan);
     db.update(pipelineTasks).set({ trace: JSON.stringify(trace), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
@@ -203,12 +221,41 @@ export class PipelineService {
       : '（未检索到文献，将按通用学术结构起草）';
     await this.advance(taskId, 'literature', 'done', `检索到 ${hits.length} 篇文献\n${summary.slice(0, 500)}`);
 
-    // ③ 大纲生成 → 等待人工确认（Human-in-the-loop）
+    await this.continueFromOutline(taskId, verifiedTopic, summary);
+    return;
+  }
+
+  /** ③ 大纲生成：禁用时自动生成不暂停，启用时等待人工确认（Human-in-the-loop） */
+  private async continueFromOutline(taskId: string, verifiedTopic: string, summary: string) {
+    if (!this.stepEnabled('outline')) {
+      // 用户禁用大纲确认：自动生成大纲直接进入起草
+      await this.advance(taskId, 'outline', 'running');
+      const outline = await this.ai.writeOutline(verifiedTopic, summary);
+      await this.advance(taskId, 'outline', 'done', JSON.stringify(outline));
+      this.setStatus(taskId, 'running', 'drafting');
+      const task = this.get(taskId);
+      const now = Date.now();
+      const doc = {
+        id: randomUUID(),
+        projectId: task.projectId,
+        title: outline.title || verifiedTopic,
+        content: '',
+        outline: JSON.stringify(outline),
+        version: 1,
+        versions: '[]',
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now,
+      };
+      db.insert(documents).values(doc).run();
+      db.update(pipelineTasks).set({ documentId: doc.id, updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
+      void this.runAfterConfirmation(taskId, doc.id);
+      return;
+    }
     await this.advance(taskId, 'outline', 'running');
     const outline = await this.ai.writeOutline(verifiedTopic, summary);
     await this.advance(taskId, 'outline', 'awaiting_confirmation', JSON.stringify(outline));
     this.setStatus(taskId, 'awaiting_confirmation', 'outline');
-    return; // 停下等人工确认
   }
 
   /** 人工确认大纲后：创建文档并继续起草 → 质量门 → 回炉 → 润色 → 引用 → 完成 */
@@ -297,6 +344,11 @@ export class PipelineService {
       await this.advance(taskId, 'drafting', 'done', writerRes.output);
 
       // ⑤ Supervisor：Reviewer Agent 质量门评分 + Reflexion 提炼
+      if (!this.stepEnabled('quality-gate')) {
+        await this.advance(taskId, 'quality-gate', 'skipped', '用户已禁用质量门评分');
+        report = { totalScore: 85, feedback: '质量门已禁用，跳过评分' };
+        break;
+      }
       await this.advance(taskId, 'quality-gate', 'running');
       const latestDoc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
       const review = await this.orchestrator.reviewerAgent(taskId, documentId, doc.title, latestDoc.content ?? '', task.topic, this.reflexionLogs(taskId));
@@ -331,6 +383,10 @@ export class PipelineService {
     }
 
     // ⑥ Supervisor：Polisher Agent 润色定稿（三段式，借鉴 GPT-Academic）
+    if (!this.stepEnabled('polish')) {
+      await this.advance(taskId, 'polish', 'skipped', '用户已禁用润色');
+      db.update(documents).set({ status: 'polished', updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
+    } else {
     await this.advance(taskId, 'polish', 'running');
     const finalDoc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
     const polished = await this.orchestrator.polisherAgent(taskId, finalDoc.content ?? '');
@@ -353,8 +409,12 @@ export class PipelineService {
       .where(eq(documents.id, documentId))
       .run();
     await this.advance(taskId, 'polish', 'done', '润色完成（原文+润色文+理由已存档）');
+    }
 
     // ⑦ 引用格式化
+    if (!this.stepEnabled('citation-format')) {
+      await this.advance(taskId, 'citation-format', 'skipped', '用户已禁用引用格式化');
+    } else {
     await this.advance(taskId, 'citation-format', 'running');
     const citationRows = db
       .select()
@@ -367,6 +427,7 @@ export class PipelineService {
       'done',
       `已就绪 ${citationRows.length} 条文献（可到论文编辑页按 APA/IEEE/Vancouver 导出）`,
     );
+    }
 
     // ⑧ 完成 + Phase 2a：先沉淀情景记忆，再置 completed（保证完成即记忆可查）
     await this.advance(taskId, 'complete', 'done');

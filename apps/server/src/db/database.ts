@@ -188,6 +188,11 @@ CREATE TABLE IF NOT EXISTS custom_intent (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS pipeline_config (
+  step_key TEXT PRIMARY KEY,
+  enabled INTEGER DEFAULT 1,
+  step_order INTEGER DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS app_setting (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

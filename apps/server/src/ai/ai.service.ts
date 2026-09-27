@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { sqlite } from '../db/database';
 import { db } from '../db/database';
-import { llmCallLogs, customPrompts } from '../db/schema';
+import { llmCallLogs, customPrompts, appSettings } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import * as prompts from './prompts';
 
@@ -380,7 +380,18 @@ export class AiService {
     const dims = ['literature', 'logic', 'citation', 'language', 'novelty', 'figures', 'format'] as const;
     const scores = {} as Record<string, number>;
     for (const d of dims) scores[d] = Math.max(0, Math.min(100, Number(parsed.scores?.[d]) || 0));
-    const total = Math.round(dims.reduce((sum, d) => sum + scores[d], 0) / dims.length);
+    // 权重可自定义（用户可在设置页调整，默认等权）
+    let weights: Record<string, number> = {};
+    try {
+      const row = db.select().from(appSettings).where(eq(appSettings.key, 'quality_weights')).get();
+      weights = JSON.parse(row?.value || '{}');
+    } catch {
+      /* 使用默认等权 */
+    }
+    const total = Math.round(
+      dims.reduce((sum, d) => sum + scores[d] * (weights[d] ?? 1), 0) /
+        dims.reduce((sum, d) => sum + (weights[d] ?? 1), 0),
+    );
     return { scores: scores as any, feedback: String(parsed.feedback || '').trim(), totalScore: total };
   }
 

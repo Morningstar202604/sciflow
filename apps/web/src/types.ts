@@ -196,6 +196,20 @@ export interface CustomPromptTool {
   customized: boolean;
 }
 
+export interface PipelineStepConfig {
+  key: string;
+  label: string;
+  core: boolean;
+  enabled: number;
+  customized: boolean;
+}
+
+export interface QualityWeightItem {
+  key: string;
+  label: string;
+  weight: number;
+}
+
 export interface IntentResult {
   intent: string;
   label: string;

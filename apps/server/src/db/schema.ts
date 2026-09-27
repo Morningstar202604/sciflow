@@ -197,6 +197,12 @@ export const customIntents = sqliteTable('custom_intent', {
   createdAt: integer('created_at').notNull(),
 });
 
+export const pipelineConfigs = sqliteTable('pipeline_config', {
+  stepKey: text('step_key').primaryKey(),
+  enabled: integer('enabled').default(1),
+  stepOrder: integer('step_order').default(0),
+});
+
 export const appSettings = sqliteTable('app_setting', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),

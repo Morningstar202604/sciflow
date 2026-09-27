@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import { appSettings, customIntents, customPrompts } from '../db/schema';
+import { appSettings, customIntents, customPrompts, pipelineConfigs } from '../db/schema';
 
 /** 高度自定义：意图库 + 提示词 用户可配置（系统默认仅作兜底） */
 
@@ -57,6 +57,85 @@ export class CustomizationService {
   resetIntents() {
     db.delete(customIntents).run();
     return { ok: true };
+  }
+
+  // ---------- 流水线步骤自定义 ----------
+  /** 8 步流水线（topic-verify/complete 为骨架不可禁用） */
+  listPipelineSteps() {
+    const STEPS = [
+      { key: 'topic-verify', label: '主题验证', core: true },
+      { key: 'literature', label: '文献调研', core: false },
+      { key: 'outline', label: '大纲生成', core: false },
+      { key: 'drafting', label: '分章起草', core: false },
+      { key: 'quality-gate', label: '质量门评分', core: false },
+      { key: 'polish', label: '润色定稿', core: false },
+      { key: 'citation-format', label: '引用格式化', core: false },
+      { key: 'complete', label: '完成', core: true },
+    ];
+    const rows = db.select().from(pipelineConfigs).all();
+    return STEPS.map((st) => {
+      const r = rows.find((x) => x.stepKey === st.key);
+      return { key: st.key, label: st.label, core: st.core, enabled: r ? (r.enabled ?? 1) : 1, customized: !!r };
+    });
+  }
+
+  updatePipelineStep(stepKey: string, enabled: number) {
+    const step = this.listPipelineSteps().find((s) => s.key === stepKey);
+    if (!step) throw new BadRequestException('未知步骤');
+    if (step.core && !enabled) throw new BadRequestException('骨架步骤不可禁用');
+    const existing = db.select().from(pipelineConfigs).where(eq(pipelineConfigs.stepKey, stepKey)).get();
+    if (existing) db.update(pipelineConfigs).set({ enabled }).where(eq(pipelineConfigs.stepKey, stepKey)).run();
+    else db.insert(pipelineConfigs).values({ stepKey, enabled, stepOrder: 0 }).run();
+    return this.listPipelineSteps();
+  }
+
+  resetPipelineSteps() {
+    db.delete(pipelineConfigs).run();
+    return { ok: true };
+  }
+
+  /** 供流水线引擎读取：stepKey -> enabled */
+  getPipelineStepMap(): Record<string, number> {
+    const rows = db.select().from(pipelineConfigs).all();
+    const m: Record<string, number> = {};
+    for (const r of rows) m[r.stepKey] = r.enabled ?? 1;
+    return m;
+  }
+
+  // ---------- 质量评分权重 ----------
+  listQualityWeights() {
+    const DIMS = [
+      { key: 'literature', label: '文献' },
+      { key: 'logic', label: '逻辑' },
+      { key: 'citation', label: '引用' },
+      { key: 'language', label: '语言' },
+      { key: 'novelty', label: '新颖' },
+      { key: 'figures', label: '图表' },
+      { key: 'format', label: '格式' },
+    ];
+    const row = db.select().from(appSettings).where(eq(appSettings.key, 'quality_weights')).get();
+    let weights: Record<string, number> = {};
+    try { weights = JSON.parse(row?.value || '{}'); } catch { /* 忽略 */ }
+    return DIMS.map((d) => ({ key: d.key, label: d.label, weight: weights[d.key] ?? 1 }));
+  }
+
+  setQualityWeights(weights: Record<string, number>) {
+    const valid = ['literature', 'logic', 'citation', 'language', 'novelty', 'figures', 'format'];
+    for (const k of Object.keys(weights)) {
+      if (!valid.includes(k)) throw new BadRequestException(`未知维度 ${k}`);
+      const w = Number(weights[k]);
+      if (!Number.isFinite(w) || w <= 0 || w > 5) throw new BadRequestException(`${k} 权重需在 (0,5]`);
+    }
+    const existing = db.select().from(appSettings).where(eq(appSettings.key, 'quality_weights')).get();
+    if (existing) db.update(appSettings).set({ value: JSON.stringify(weights) }).where(eq(appSettings.key, 'quality_weights')).run();
+    else db.insert(appSettings).values({ key: 'quality_weights', value: JSON.stringify(weights) }).run();
+    return this.listQualityWeights();
+  }
+
+  /** 供评分引擎读取 */
+  getQualityWeightsMap(): Record<string, number> {
+    const row = db.select().from(appSettings).where(eq(appSettings.key, 'quality_weights')).get();
+    try { return JSON.parse(row?.value || '{}'); } catch { return {}; }
   }
 
   // ---------- 意图判断模式 ----------

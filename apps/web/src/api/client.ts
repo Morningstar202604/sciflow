@@ -1,7 +1,7 @@
 import type {
   Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
-  AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool,
+  AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool, PipelineStepConfig, QualityWeightItem,
 } from '../types';
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -92,6 +92,13 @@ export const api = {
     upsertPrompt: (toolKey: string, prompt: string, enabled = 1) =>
       request<CustomPromptTool[]>(`/api/customization/prompts/${toolKey}`, { method: 'POST', body: JSON.stringify({ prompt, enabled }) }),
     deletePrompt: (toolKey: string) => request<{ ok: boolean }>(`/api/customization/prompts/${toolKey}`, { method: 'DELETE' }),
+    listPipelineSteps: () => request<PipelineStepConfig[]>('/api/customization/pipeline-steps'),
+    updatePipelineStep: (stepKey: string, enabled: number) =>
+      request<PipelineStepConfig[]>(`/api/customization/pipeline-steps/${stepKey}`, { method: 'POST', body: JSON.stringify({ enabled }) }),
+    resetPipelineSteps: () => request<{ ok: boolean }>('/api/customization/pipeline-steps', { method: 'DELETE' }),
+    listQualityWeights: () => request<QualityWeightItem[]>('/api/customization/quality-weights'),
+    setQualityWeights: (weights: Record<string, number>) =>
+      request<QualityWeightItem[]>('/api/customization/quality-weights', { method: 'POST', body: JSON.stringify({ weights }) }),
     getJudgmentMode: () => request<{ mode: string }>('/api/customization/judgment-mode'),
     setJudgmentMode: (mode: string) => request<{ mode: string }>('/api/customization/judgment-mode', { method: 'POST', body: JSON.stringify({ mode }) }),
   },
