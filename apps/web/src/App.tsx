@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, useCallback, useContext, useEffect, useMemo, useState, createContext, type ReactNode } from 'react';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
+  BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
@@ -123,13 +123,19 @@ function AppInner() {
     localStorage.setItem('sciflow-theme', theme);
   }, [theme]);
 
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (attempt = 1) => {
     try {
       const list = await api.projects.list();
       setProjects(list);
       setCurrentProjectId((prev) => (list.some((p) => p.id === prev) ? prev : (list[0]?.id ?? null)));
+      setError('');
     } catch (e: any) {
-      setError(e.message);
+      // 初始化失败自动重试（后端冷启动场景）：最多 4 次，2s 间隔
+      if (attempt < 4) {
+        setTimeout(() => loadProjects(attempt + 1), 2000);
+      } else {
+        setError(e.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -253,9 +259,14 @@ function AppInner() {
             </div>
             <div className="flex items-center justify-between px-2 pt-3 pb-1">
               <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">研究项目</span>
-              <button className="text-slate-400 hover:text-slate-700" title="新建项目" onClick={() => setShowNewProject(true)}>
-                <Plus size={13} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button className="text-slate-400 hover:text-slate-700" title="刷新项目列表" onClick={() => { setLoading(true); loadProjects(); }}>
+                  <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+                </button>
+                <button className="text-slate-400 hover:text-slate-700" title="新建项目" onClick={() => setShowNewProject(true)}>
+                  <Plus size={13} />
+                </button>
+              </div>
             </div>
             {filteredProjects.length === 0 && <div className="text-xs text-slate-400 px-2 py-3">暂无项目，点击 + 创建</div>}
             {filteredProjects.map((p) => (

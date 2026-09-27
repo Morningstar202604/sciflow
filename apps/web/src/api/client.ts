@@ -242,11 +242,12 @@ export function streamChat(
   onDone: (full: string) => void,
   onError: (msg: string) => void,
   projectId?: string,
+  docContext?: string,
 ) {
   fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history, projectId }),
+    body: JSON.stringify({ message, history, projectId, docContext }),
   })
     .then(async (res) => {
       if (!res.ok || !res.body) throw new Error(`请求失败 (${res.status})`);

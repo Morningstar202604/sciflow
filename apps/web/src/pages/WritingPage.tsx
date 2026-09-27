@@ -5,6 +5,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { BookOpen, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Languages, ListTree, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
+import { ChatPanel } from './ChatPanel';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { CitationRow, Doc, Outline, Project, Reference, ResearchDesignResult, SimulatedReviewResult } from '../types';
@@ -383,6 +384,20 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           </div>
         </Card>
 
+        {/* 内联 AI 写作助手：问答全程贯通当前文档，快捷润色/翻译/摘要 */}
+        <ChatPanel
+          project={project}
+          doc={doc}
+          onDocUpdated={async (patch) => {
+            if (!doc) return;
+            try {
+              await api.documents.update(doc.id, patch);
+              setDoc((prev) => (prev ? { ...prev, ...patch } : prev));
+            } catch {
+              toast('error', '保存到文档失败');
+            }
+          }}
+        />
         {/* 编辑器 */}
         <Card className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800 shrink-0">

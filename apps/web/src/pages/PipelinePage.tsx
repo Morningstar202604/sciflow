@@ -166,6 +166,8 @@ export function PipelinePage({ project }: { project: Project }) {
     awaiting_confirmation: { text: '等待大纲确认', tone: 'amber' },
     completed: { text: '已完成', tone: 'green' },
     failed: { text: '失败', tone: 'red' },
+    cancelled: { text: '已取消', tone: 'red' },
+    interrupted: { text: '已中断', tone: 'amber' },
   };
 
   return (

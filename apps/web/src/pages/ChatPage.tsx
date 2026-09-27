@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, MessageSquare, Navigation, Send, Sparkles } from 'lucide-react';
+import { FileText, Loader2, MessageSquare, Navigation, Send, Sparkles } from 'lucide-react';
 import { api, streamChat } from '../api/client';
 import type { IntentResult, Project } from '../types';
 import { Card, ErrorBox, Spinner } from '../components/ui';
@@ -22,7 +22,32 @@ export function ChatPage({ project }: { project: Project }) {
   const [error, setError] = useState('');
   const [intent, setIntent] = useState<IntentResult | null>(null);
   const [intentBusy, setIntentBusy] = useState(false);
+  const [docs, setDocs] = useState<{ id: string; title: string; content?: string; outline?: string }[]>([]);
+  const [linkedDocId, setLinkedDocId] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // 加载项目文档列表（关联上下文用）
+  useEffect(() => {
+    api.documents
+      .list(project.id)
+      .then((list) => setDocs(list))
+      .catch(() => undefined);
+  }, [project.id]);
+
+  /** 组装当前文档上下文（标题+大纲+正文前 1600 字） */
+  const docContextFor = (docId: string) => {
+    const doc = docs.find((d) => d.id === docId);
+    if (!doc) return '';
+    const outline = (() => {
+      try {
+        const o = JSON.parse(doc.outline || '[]');
+        return Array.isArray(o.sections) ? o.sections.map((s: any) => s.title).join(' / ') : '';
+      } catch {
+        return '';
+      }
+    })();
+    return `标题：${doc.title}\n大纲：${outline || '（未设置）'}\n正文摘要：${(doc.content || '').replace(/[#*`>]/g, '').slice(0, 1600)}`;
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -67,6 +92,7 @@ export function ChatPage({ project }: { project: Project }) {
         setBusy(false);
       },
       project.id,
+      linkedDocId ? docContextFor(linkedDocId) : undefined,
     );
   };
 
@@ -76,7 +102,21 @@ export function ChatPage({ project }: { project: Project }) {
         <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 shrink-0">
           <MessageSquare size={15} className="text-teal-600" />
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">科研问答</span>
-          <span className="text-xs text-slate-400 dark:text-slate-500">流式输出 · 多轮对话 · 上下文感知当前项目</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500 hidden sm:inline">流式输出 · 多轮对话 · 上下文感知当前项目</span>
+          <div className="ml-auto flex items-center gap-1.5 min-w-0">
+            <FileText size={13} className="text-slate-400 shrink-0" />
+            <select
+              className="text-xs bg-transparent text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-md px-1.5 py-1 max-w-[180px] outline-none focus:ring-1 focus:ring-teal-500"
+              value={linkedDocId}
+              onChange={(e) => setLinkedDocId(e.target.value)}
+              title="关联论文：问答将结合这篇论文的大纲与正文作答"
+            >
+              <option value="">关联论文（可选）</option>
+              {docs.map((d) => (
+                <option key={d.id} value={d.id}>{d.title}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <ErrorBox message={error} />

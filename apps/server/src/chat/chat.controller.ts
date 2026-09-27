@@ -8,20 +8,20 @@ export class ChatController {
   constructor(private readonly chat: ChatService) {}
 
   @Post()
-  async answer(@Body() body: { message: string; history?: ChatMessage[]; projectId?: string }) {
-    return this.chat.answer(body.message, body.history || [], body.projectId);
+  async answer(@Body() body: { message: string; history?: ChatMessage[]; projectId?: string; docContext?: string }) {
+    return this.chat.answer(body.message, body.history || [], body.projectId, body.docContext);
   }
 
   /** SSE 流式问答 */
   @Post('stream')
-  async stream(@Body() body: { message: string; history?: ChatMessage[]; projectId?: string }, @Res() res: Response) {
+  async stream(@Body() body: { message: string; history?: ChatMessage[]; projectId?: string; docContext?: string }, @Res() res: Response) {
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
     try {
-      const upstream = await this.chat.stream(body.message, body.history || [], body.projectId);
+      const upstream = await this.chat.stream(body.message, body.history || [], body.projectId, body.docContext);
       const reader = upstream.getReader();
       const decoder = new TextDecoder();
       let buffer = '';

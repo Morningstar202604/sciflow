@@ -13,7 +13,7 @@ export class ChatService {
   ) {}
 
   /** 组装项目上下文：程序/情景记忆 + 知识库检索片段（NotebookLM 式 RAG 注入） */
-  private async contextFor(projectId?: string, question?: string): Promise<string> {
+  private async contextFor(projectId?: string, question?: string, docContext?: string): Promise<string> {
     const parts: string[] = [];
     try {
       const mems = this.memory.list(undefined, undefined, projectId).slice(0, 4);
@@ -24,6 +24,9 @@ export class ChatService {
       /* 记忆不可用时忽略 */
     }
     try {
+      if (docContext && docContext.trim()) {
+        parts.push(`当前正在撰写的论文（优先理解并关联此上下文）：\n${docContext.trim().slice(0, 2500)}`);
+      }
       if (projectId && question) {
         const hits = await this.knowledge.search(projectId, question, 3);
         if (hits.length) {
@@ -36,13 +39,13 @@ export class ChatService {
     return parts.join('\n\n');
   }
 
-  async answer(message: string, history: ChatMessage[] = [], projectId?: string) {
-    const ctx = await this.contextFor(projectId, message);
+  async answer(message: string, history: ChatMessage[] = [], projectId?: string, docContext?: string) {
+    const ctx = await this.contextFor(projectId, message, docContext);
     return { answer: ctx ? await this.ai.chatWithContext(message, history, ctx) : await this.ai.chat(message, history) };
   }
 
-  stream(message: string, history: ChatMessage[] = [], projectId?: string) {
-    return this.contextFor(projectId, message).then((ctx) =>
+  stream(message: string, history: ChatMessage[] = [], projectId?: string, docContext?: string) {
+    return this.contextFor(projectId, message, docContext).then((ctx) =>
       ctx ? this.ai.streamChatWithContext(message, history, ctx) : this.ai.streamChat(message, history),
     );
   }
