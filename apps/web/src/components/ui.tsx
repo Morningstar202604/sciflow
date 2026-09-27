@@ -1,5 +1,5 @@
 import { ReactNode, useEffect } from 'react';
-import { CheckCircle2, Info, Loader2, X, XCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Info, Loader2, X, XCircle } from 'lucide-react';
 
 const btnBase =
   'inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none whitespace-nowrap active:scale-[0.97] select-none';
@@ -152,6 +152,47 @@ export function Modal({ open, title, children, onClose, width = 'max-w-2xl' }: {
         {children}
       </div>
     </div>
+  );
+}
+
+/** 统一错误提取：后端 Nest 错误（message）与前端 Error 统一取可读信息 */
+export function errMsg(e: any): string {
+  return e?.message ? String(e.message) : String(e);
+}
+
+/** 可折叠卡片（渐进披露）：默认折叠只显示标题+摘要，点击展开内容 */
+export function CollapsibleCard({
+  icon,
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+  right,
+}: {
+  icon: ReactNode;
+  title: string;
+  summary?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+  right?: ReactNode;
+}) {
+  return (
+    <Card className="p-5 mt-4">
+      <button className="w-full flex items-center justify-between text-left" onClick={onToggle}>
+        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+          {icon}
+          {title}
+          {summary ? <span className="text-[11px] font-normal text-slate-400">{summary}</span> : null}
+        </span>
+        <span className="flex items-center gap-2">
+          {right}
+          {open ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+        </span>
+      </button>
+      {open ? <div className="mt-4">{children}</div> : null}
+    </Card>
   );
 }
 

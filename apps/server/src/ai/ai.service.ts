@@ -166,6 +166,30 @@ export class AiService {
     }
   }
 
+  /** 统一构造 OpenAI 兼容补全请求（complete / completeStream / testConnection 共用） */
+  private buildChatRequest(
+    model: string,
+    messages: ChatMessage[],
+    opts: { temperature?: number; maxTokens?: number; stream?: boolean },
+    timeoutMs: number,
+  ) {
+    return fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: opts.temperature ?? 0.7,
+        max_tokens: opts.maxTokens ?? 4096,
+        stream: opts.stream ?? false,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  }
+
   /** 非流式补全（全局令牌桶排队 + 429 退避重试 + token 成本追踪） */
   async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
     this.assertConfigured();
@@ -176,21 +200,7 @@ export class AiService {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       await this.acquireToken();
       try {
-        const res = await fetch(`${this.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages,
-            temperature: opts.temperature ?? 0.7,
-            max_tokens: opts.maxTokens ?? 4096,
-            stream: false,
-          }),
-          signal: AbortSignal.timeout(180_000),
-        });
+        const res = await this.buildChatRequest(model, messages, { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false }, 180_000);
         if (res.status === 429 && attempt < maxAttempts) {
           const backoff = attempt * 10000;
           console.warn(`[AiService] 429 限流，${backoff / 1000}s 后重试 (${attempt}/${maxAttempts - 1})`);
@@ -244,21 +254,7 @@ export class AiService {
     const t0 = Date.now();
     const model = this.resolveModel(opts);
     const caller = opts.context || 'general';
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: opts.temperature ?? 0.7,
-        max_tokens: opts.maxTokens ?? 4096,
-        stream: true,
-      }),
-      signal: AbortSignal.timeout(300_000),
-    });
+    const res = await this.buildChatRequest(model, messages, { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: true }, 300_000);
     if (!res.ok || !res.body) {
       const errText = await res.text().catch(() => '');
       this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: `HTTP ${res.status}` });
@@ -439,17 +435,12 @@ export class AiService {
     const target = model || this.fastModel;
     const t0 = Date.now();
     try {
-      const res = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
-        body: JSON.stringify({
-          model: target,
-          messages: [{ role: 'user', content: '请只回复两个字：正常' }],
-          max_tokens: 16,
-          stream: false,
-        }),
-        signal: AbortSignal.timeout(30_000),
-      });
+      const res = await this.buildChatRequest(
+        target,
+        [{ role: 'user', content: '请只回复两个字：正常' }],
+        { temperature: 0, maxTokens: 16, stream: false },
+        30_000,
+      );
       if (!res.ok) {
         const err = await res.text().catch(() => '');
         return { ok: false, reply: `HTTP ${res.status}: ${err.slice(0, 200)}`, model: target, latencyMs: Date.now() - t0 };

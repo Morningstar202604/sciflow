@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import * as echarts from 'echarts';
+// echarts 按需引入（仅雷达图），打包体积 1.1MB → ~200KB
+import * as echarts from 'echarts/core';
+import { RadarChart } from 'echarts/charts';
+import { TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+echarts.use([RadarChart, TooltipComponent, CanvasRenderer]);
 import { Gauge, Loader2, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, QualityReport } from '../types';

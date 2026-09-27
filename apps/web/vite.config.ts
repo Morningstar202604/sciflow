@@ -18,7 +18,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          echarts: ['echarts'],
+          // echarts 按需引入后不再整包打包（QualityPage 仅雷达图）
           react: ['react', 'react-dom', 'react-dom/client'],
           ui: ['lucide-react'],
         },

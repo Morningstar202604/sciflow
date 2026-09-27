@@ -1,4 +1,4 @@
-import { Component, useCallback, useContext, useEffect, useMemo, useState, createContext, type ReactNode } from 'react';
+import { Component, Suspense, lazy, useCallback, useContext, useEffect, useMemo, useState, createContext, type ReactNode } from 'react';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
@@ -10,7 +10,8 @@ import { DashboardPage } from './pages/DashboardPage';
 import { WritingPage } from './pages/WritingPage';
 import { LiteraturePage } from './pages/LiteraturePage';
 import { PipelinePage } from './pages/PipelinePage';
-import { QualityPage } from './pages/QualityPage';
+// 质量评分页懒加载：echarts 仅在进入该页时下载（首屏优化）
+const QualityPage = lazy(() => import('./pages/QualityPage').then((m) => ({ default: m.QualityPage })));
 import { ChatPage } from './pages/ChatPage';
 import { SubmissionPage } from './pages/SubmissionPage';
 import { KnowledgePage } from './pages/KnowledgePage';
@@ -375,7 +376,11 @@ function AppInner() {
                 {view === 'knowledge' && currentProject && <KnowledgePage project={currentProject} />}
                 {view === 'memory' && currentProject && <MemoryPage />}
                 {view === 'pipeline' && currentProject && <PipelinePage project={currentProject} />}
-                {view === 'quality' && currentProject && <QualityPage project={currentProject} />}
+                {view === 'quality' && currentProject && (
+                  <Suspense fallback={<div className="p-8 text-sm text-slate-400">加载质量评分…</div>}>
+                    <QualityPage project={currentProject} />
+                  </Suspense>
+                )}
                 {view === 'chat' && currentProject && <ChatPage project={currentProject} />}
                 {view === 'submission' && currentProject && <SubmissionPage project={currentProject} />}
               </>

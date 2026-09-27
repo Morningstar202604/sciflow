@@ -3,7 +3,7 @@ import { ToastContext } from '../App';
 import { CheckCircle2, ChevronDown, ChevronUp, Coins, Database, FlaskConical, Gauge, Loader2, Plug, Plus, Power, RefreshCw, Server, Trash2, Wand2, Workflow, Wrench, XCircle } from 'lucide-react';
 import { api } from '../api/client';
 import type { AppSettings, CustomIntent, CustomPromptTool, McpServerInfo, McpToolInfo, ModelProvider, PipelineStepConfig, QualityWeightItem, SelfCheck } from '../types';
-import { Badge, Button, Card, ErrorBox, Input, Modal, SectionTitle, Select, Spinner, Textarea } from '../components/ui';
+import { Badge, Button, Card, CollapsibleCard, ErrorBox, Input, Modal, SectionTitle, Select, Spinner, Textarea, errMsg } from '../components/ui';
 
 interface UsageSummary {
   total: { calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; avg_latency_ms: number; success_rate: number };
@@ -273,7 +273,7 @@ export function SettingsPage() {
       setModeLoaded(true);
                   setSettings(await api.settings.get());
                 } catch (e: any) {
-                  setError(e.message);
+                  setError(errMsg(e));
                 }
               }}
             >
@@ -502,7 +502,7 @@ export function SettingsPage() {
                   setMcpServerForm({ name: '', url: '' });
                   setMcpServers(await api.settings.listMcpServers());
                 } catch (e: any) {
-                  setError(e.message);
+                  setError(errMsg(e));
                 }
               }}
             >
@@ -592,26 +592,18 @@ export function SettingsPage() {
       {/* ===== 自定义中心（默认折叠 · 渐进披露） ===== */}
 
       {/* · 意图识别自定义（可折叠） */}
-      <Card className="p-5 mt-4">
-        <button
-          className="w-full flex items-center justify-between text-left"
-          onClick={() => setOpenSections((o) => ({ ...o, intent: !o.intent }))}
-        >
-          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            <Wand2 size={16} className="text-teal-600" />
-            意图识别自定义
-            <span className="text-[11px] font-normal text-slate-400">
-              {intents.length > 0 ? `已自定义 ${intents.length} 个意图` : '使用系统内置 17 个意图'}
-            </span>
+      <CollapsibleCard
+        icon={<Wand2 size={16} className="text-teal-600" />}
+        title="意图识别自定义"
+        summary={intents.length > 0 ? `已自定义 ${intents.length} 个意图` : '使用系统内置 17 个意图'}
+        right={
+          <span className="text-[11px] text-slate-400">
+            判断模式：{judgmentMode === 'auto' ? '规则优先 + LLM 兜底' : judgmentMode === 'rule_first' ? '规则优先' : judgmentMode === 'llm_first' ? 'LLM 优先' : '仅规则'}
           </span>
-          <span className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-400">
-              判断模式：{judgmentMode === 'auto' ? '规则优先 + LLM 兜底' : judgmentMode === 'rule_first' ? '规则优先' : judgmentMode === 'llm_first' ? 'LLM 优先' : '仅规则'}
-            </span>
-            {openSections.intent ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-          </span>
-        </button>
-        {openSections.intent && (
+        }
+        open={openSections.intent}
+        onToggle={() => setOpenSections((o) => ({ ...o, intent: !o.intent }))}
+      >
           <div className="mt-4 space-y-3">
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 dark:text-slate-400 w-24 shrink-0">意图判断模式</span>
@@ -667,7 +659,7 @@ export function SettingsPage() {
                     setIntents(await api.customization.listIntents());
                     toast('success', '自定义意图已生效');
                   } catch (e: any) {
-                    setError(e.message);
+                    setError(errMsg(e));
                   }
                 }}
               >
@@ -716,25 +708,16 @@ export function SettingsPage() {
               </div>
             )}
           </div>
-        )}
-      </Card>
+      </CollapsibleCard>
 
       {/* · 科研工具提示词自定义（可折叠） */}
-      <Card className="p-5 mt-4">
-        <button
-          className="w-full flex items-center justify-between text-left"
-          onClick={() => setOpenSections((o) => ({ ...o, prompt: !o.prompt }))}
-        >
-          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            <FlaskConical size={16} className="text-teal-600" />
-            科研工具提示词自定义
-            <span className="text-[11px] font-normal text-slate-400">
-              {(() => { const n = promptTools.filter((t) => t.customized).length; return n > 0 ? `${n}/${promptTools.length} 个已自定义` : '全部使用系统默认'; })()}
-            </span>
-          </span>
-          {openSections.prompt ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-        </button>
-        {openSections.prompt && (
+      <CollapsibleCard
+        icon={<FlaskConical size={16} className="text-teal-600" />}
+        title="科研工具提示词自定义"
+        summary={(() => { const n = promptTools.filter((t) => t.customized).length; return n > 0 ? `${n}/${promptTools.length} 个已自定义` : '全部使用系统默认'; })()}
+        open={openSections.prompt}
+        onToggle={() => setOpenSections((o) => ({ ...o, prompt: !o.prompt }))}
+      >
           <div className="mt-4">
             <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
               每个 AI 科研工具（综述/精读/缺口/对比/评审…）默认提示词可被你的自定义覆盖：点击「编辑」写入你的专属提示词（含你的领域规范/输出格式/风格要求），未配置时自动使用系统默认。
@@ -777,25 +760,16 @@ export function SettingsPage() {
               ))}
             </div>
           </div>
-        )}
-      </Card>
+      </CollapsibleCard>
 
       {/* · 流水线步骤自定义（可折叠） */}
-      <Card className="p-5 mt-4">
-        <button
-          className="w-full flex items-center justify-between text-left"
-          onClick={() => setOpenSections((o) => ({ ...o, pipeline: !o.pipeline }))}
-        >
-          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            <Workflow size={16} className="text-teal-600" />
-            流水线步骤自定义
-            <span className="text-[11px] font-normal text-slate-400">
-              {(() => { const off = pipelineSteps.filter((s) => !s.enabled).length; return off > 0 ? `${pipelineSteps.length - off}/${pipelineSteps.length} 步启用（${off} 步已关）` : '8 步全启用（默认）'; })()}
-            </span>
-          </span>
-          {openSections.pipeline ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-        </button>
-        {openSections.pipeline && (
+      <CollapsibleCard
+        icon={<Workflow size={16} className="text-teal-600" />}
+        title="流水线步骤自定义"
+        summary={(() => { const off = pipelineSteps.filter((s) => !s.enabled).length; return off > 0 ? `${pipelineSteps.length - off}/${pipelineSteps.length} 步启用（${off} 步已关）` : '8 步全启用（默认）'; })()}
+        open={openSections.pipeline}
+        onToggle={() => setOpenSections((o) => ({ ...o, pipeline: !o.pipeline }))}
+      >
           <div className="mt-4">
             <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
               全自动流水线的 8 个阶段可自定义启停：关闭的步骤直接跳过（步骤显示「已禁用」）。
@@ -845,25 +819,16 @@ export function SettingsPage() {
               </Button>
             </div>
           </div>
-        )}
-      </Card>
+      </CollapsibleCard>
 
       {/* · 质量评分权重自定义（可折叠） */}
-      <Card className="p-5 mt-4">
-        <button
-          className="w-full flex items-center justify-between text-left"
-          onClick={() => setOpenSections((o) => ({ ...o, weights: !o.weights }))}
-        >
-          <span className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            <Gauge size={16} className="text-teal-600" />
-            质量评分权重自定义
-            <span className="text-[11px] font-normal text-slate-400">
-              {qualityWeights.every((x) => x.weight === 1) ? '7 维等权（默认）' : '已自定义加权'}
-            </span>
-          </span>
-          {openSections.weights ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-        </button>
-        {openSections.weights && (
+      <CollapsibleCard
+        icon={<Gauge size={16} className="text-teal-600" />}
+        title="质量评分权重自定义"
+        summary={qualityWeights.every((x) => x.weight === 1) ? '7 维等权（默认）' : '已自定义加权'}
+        open={openSections.weights}
+        onToggle={() => setOpenSections((o) => ({ ...o, weights: !o.weights }))}
+      >
           <div className="mt-4">
             <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
               论文质量总分 = 各维度得分 × 权重 的加权平均。默认 7 维等权（各 1），可按你的评审偏好加大某维度影响力（如更看重「新颖」）。
@@ -899,7 +864,7 @@ export function SettingsPage() {
                     setQualityWeights(await api.customization.listQualityWeights());
                     toast('success', '评分权重已保存（影响之后的质量评分）');
                   } catch (e: any) {
-                    setError(e.message);
+                    setError(errMsg(e));
                   }
                 }}
               >
@@ -920,8 +885,7 @@ export function SettingsPage() {
               </Button>
             </div>
           </div>
-        )}
-      </Card>
+      </CollapsibleCard>
 
       {/* 提示词编辑弹窗 */}
       {editingPrompt && (
@@ -954,7 +918,7 @@ export function SettingsPage() {
                   setEditingPrompt(null);
                   toast('success', `${editingPrompt.toolLabel} 提示词已保存`);
                 } catch (e: any) {
-                  setError(e.message);
+                  setError(errMsg(e));
                 }
               }}
             >

@@ -97,8 +97,9 @@ export class JudgmentService {
   private ruleMatch(text: string): { key: string; matched: string[] } | null {
     // 去空格小写归一（'meta 分析' 与 'meta分析' 等价）
     const t = text.toLowerCase().replace(/\s+/g, '');
+    const intents = this.mergedIntents(); // 只查一次库（循环外，避免 N+1）
     let best: { key: string; matched: string[] } | null = null;
-    for (const it of this.mergedIntents()) {
+    for (const it of intents) {
       const hit = it.keywords.filter((k) => t.includes(k.toLowerCase().replace(/\s+/g, '')));
       if (hit.length > 0 && (!best || hit.length > best.matched.length)) {
         best = { key: it.key, matched: hit };

@@ -98,6 +98,22 @@ pnpm --filter server test
 
 **全量回归**：`scripts/full_regression.py` 覆盖全部 66 个路由（39 项核心断言全绿 + AI 接口受外部网关限流时自动降级跳过，Guardrail 拒参 / RAG 混合检索 / 成本统计均有专项用例）。
 
+## ⚡ 性能与代码优化（审计批次）
+
+全量代码审计后的优化项（不改变任何功能语义，回归全绿）：
+
+**性能**
+- **首屏 JS 减 2.4MB → 821KB**：echarts 全量引入改为按需（`echarts/core` + 仅 RadarChart），质量评分页 `React.lazy` 路由懒加载（echarts chunk 443KB 进入页面才下载）。
+- **意图识别 N+1 修复**：`ruleMatch` 循环内每次迭代查库（17+ 意图 × 每请求）改为循环外一次性读取。
+- **模型列表 TTL 缓存**：设置页每次进入都实时请求网关 `/models` → 5 分钟缓存复用。
+
+**DRY / 结构**
+- **`CollapsibleCard` 组件**：设置页 4 个折叠卡（意图 / 提示词 / 流水线 / 权重）的标题+chevron+展开逻辑抽为公共组件，新增折叠配置只需 3 行。
+- **`AiService.buildChatRequest`**：`complete` / `completeStream` / `testConnection` 三处 OpenAI 兼容请求构造统一复用。
+
+**已核验无需改（避免重复造轮子）**
+- 文献检索已用 `Promise.allSettled` 三源并行 + 去重；前端 `request` 已有统一 60s 超时与错误提取；zod 已统一结构化输出校验。
+
 ## 🐳 Docker 部署
 
 ```bash

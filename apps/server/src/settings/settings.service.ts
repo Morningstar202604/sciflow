@@ -11,16 +11,26 @@ export interface AppSettings {
 
 const FALLBACK_MODELS = ['agnes-3.0-flash', 'agnes-2.5-flash', 'agnes-2.5-pro', 'agnes-2.0-flash'];
 
+/** 模型列表 TTL 缓存：避免每次进设置页都实时请求网关（5 分钟内复用） */
+const MODELS_TTL_MS = 5 * 60 * 1000;
+
 @Injectable()
 export class SettingsService {
+  private modelsCache: { at: number; models: string[] } | null = null;
+
   constructor(private readonly ai: AiService) {}
 
   async getSettings(): Promise<AppSettings> {
     let models: string[] = [];
-    try {
-      models = await this.ai.listModels();
-    } catch {
-      /* 忽略 */
+    if (this.modelsCache && Date.now() - this.modelsCache.at < MODELS_TTL_MS) {
+      models = this.modelsCache.models;
+    } else {
+      try {
+        models = await this.ai.listModels();
+        this.modelsCache = { at: Date.now(), models };
+      } catch {
+        /* 忽略 */
+      }
     }
     if (models.length === 0) models = FALLBACK_MODELS;
     const cfg = this.ai.config;
