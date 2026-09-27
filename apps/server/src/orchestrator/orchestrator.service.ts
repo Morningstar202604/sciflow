@@ -139,7 +139,7 @@ export class AgentOrchestratorService {
           const { hits, trace } = await this.reactLoop(taskId, topic, plan, qs);
           return {
             output: `检索 ${trace.length} 轮，命中 ${hits.length} 篇`,
-            detail: { queries: trace.filter((t) => t.action === 'search').map((t) => t.query), trace, hits: hits.slice(0, 30).map((h) => ({ title: h.title, source: h.source })) },
+            detail: { queries: trace.filter((t) => t.action === 'search').map((t) => t.query), trace, hits: hits.slice(0, 30).map((h) => ({ title: h.title, authors: h.authors, year: h.year, venue: h.venue, doi: h.doi, url: h.url, abstract: (h.abstract || '').slice(0, 400), source: h.source, citationCount: h.citationCount })) },
           };
         }),
       ),
