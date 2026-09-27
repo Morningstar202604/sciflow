@@ -116,7 +116,7 @@ export class LiteratureService {
 
   /** CrossRef 备用源：OpenAlex 匿名搜索暂停/限流时保证元数据完整的真实文献 */
   private async searchCrossRef(query: string, limit: number): Promise<PaperHit[]> {
-    const url = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=${limit}&select=title,author,issued,container-title,DOI,abstract`;
+    const url = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=${limit}&filter=type:journal-article&select=title,author,issued,container-title,DOI,abstract`;
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`CrossRef ${res.status}`);
     const data = (await res.json()) as any;
