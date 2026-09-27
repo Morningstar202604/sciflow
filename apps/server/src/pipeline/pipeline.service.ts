@@ -430,7 +430,7 @@ export class PipelineService {
     const jsonLike =
       (polishedText.includes('"original"') && polishedText.includes('"polished"')) ||
       polishedText.includes('```json') ||
-      (polishedText.trim().startsWith('{') && polishedText.includes('"reason"'));
+      (polishedText.trim().startsWith('{') && (polishedText.includes('"reason"') || polishedText.includes('"original"') || polishedText.includes('"polished"') || polishedText.includes('"content"')));
     const fallbackText = (jsonLike ? finalDoc.content : polishedText) + tailPart;
     db.update(documents)
       .set({ content: fallbackText, status: 'polished', updatedAt: Date.now() })

@@ -347,27 +347,34 @@ export class AiService {
 
   /** 三段式润色/降重：原文 + 润色文 + 理由（AI 输出缺字段或嵌套时递归回退，防止落库异常） */
   async polish(text: string, mode: 'polish' | 'reduce' = 'polish'): Promise<{ original: string; polished: string; reason: string }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.POLISH(text, mode) }], { temperature: 0.4, maxTokens: 8192, context: 'polish' });
-    let parsed: Partial<{ original: string; polished: string; reason: string }> = {};
-    try {
-      parsed = this.jsonOf<{ original: string; polished: string; reason: string }>(raw);
-    } catch {
-      parsed = { polished: raw };
-    }
-    let polishedText = String(parsed.polished || text || '').trim();
-    // 处理 AI 嵌套输出：polished 字段本身又是 JSON 对象文本（含 original/reason 键）
-    if (polishedText.startsWith('{') && (polishedText.includes('"original"') || polishedText.includes('"reason"'))) {
+    // 分段润色：按 ## 章节切分，逐段调用（长文单次输出必然截断——8192 tokens 不足以覆盖 1.7 万字）
+    const parts = text.split(/(?=^## )/m).filter((s) => s.trim().length > 0);
+    const target = parts.length > 1 ? parts : [text];
+    const polishedParts: string[] = [];
+    const reasons: string[] = [];
+    for (const part of target) {
+      const raw = await this.complete([{ role: 'user', content: prompts.POLISH(part, mode) }], { temperature: 0.4, maxTokens: 8192, context: 'polish' });
+      let parsed: Partial<{ original: string; polished: string; reason: string }> = {};
       try {
-        const nested = this.jsonOf<{ original?: string; polished?: string; reason?: string }>(polishedText);
-        polishedText = String(nested.polished || nested.original || polishedText).trim();
+        parsed = this.jsonOf<{ original: string; polished: string; reason: string }>(raw);
       } catch {
-        /* 保持原样 */
+        parsed = { polished: raw };
       }
+      let piece = String(parsed.polished || part || '').trim();
+      // 处理 AI 嵌套输出：polished 字段本身又是 JSON 对象文本
+      if (piece.startsWith('{') && (piece.includes('"original"') || piece.includes('"reason"') || piece.includes('"polished"'))) {
+        try {
+          const nested = this.jsonOf<{ original?: string; polished?: string; reason?: string }>(piece);
+          piece = String(nested.polished || nested.original || piece).trim();
+        } catch { /* 保持原样 */ }
+      }
+      polishedParts.push(piece);
+      if (parsed.reason) reasons.push(String(parsed.reason).trim());
     }
     return {
-      original: String(parsed.original || text || '').trim(),
-      polished: polishedText,
-      reason: String(parsed.reason || '').trim(),
+      original: text.trim(),
+      polished: polishedParts.join('\n\n'),
+      reason: reasons.join('；') || '分段润色完成',
     };
   }
 
