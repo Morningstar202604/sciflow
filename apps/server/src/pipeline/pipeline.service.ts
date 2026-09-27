@@ -535,33 +535,29 @@ export class PipelineService {
   private renderCitations(projectId: string, content: string, supplementTitles: string[] = []): string {
     if (!content) return content;
     const refs = this.refsForDraft(projectId);
+    // 第一遍：收集被引用的文献（正文与参考文献列表统一顺序编码制 [N]，消除"正文作者-年份 vs 列表数字"矛盾）
     const used = new Set<number>();
-    const replaceRef = (body: string) =>
-      body.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => {
-        const idx = Number(n) - 1;
-        const r = refs[idx];
-        if (!r) return `[文献${n}]`;
-        used.add(idx);
-        const author = (() => {
-          try {
-            const arr = JSON.parse(r.authors || '[]') as string[];
-            return arr[0]?.split(' ').pop() || `文献${n}`;
-          } catch {
-            return `文献${n}`;
-          }
-        })();
-        return `[${author} ${r.year || 'n.d.'}]`;
-      });
-    let out = replaceRef(content);
-    // [补充Ref:M] → Writer Agentic RAG 补检文献（按标题）
+    content.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => {
+      const idx = Number(n) - 1;
+      if (refs[idx]) used.add(idx);
+      return '';
+    });
+    const order = [...used].sort((a, b) => a - b);
+    const numOf = new Map(order.map((idx, k) => [idx, k + 1]));
+    // 第二遍：替换 [Ref:N] → [N]；[补充Ref:M] 追加编号
+    let out = content.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => {
+      const idx = Number(n) - 1;
+      return numOf.has(idx) ? `[${numOf.get(idx)}]` : `[文献${n}]`;
+    });
+    const usedSet = new Set(order);
     out = out.replace(/\[补充Ref:(\d+)\]/g, (_m, n: string) => {
       const idx = Number(n) - 1;
       const title = supplementTitles[idx];
-      return title ? `[${title.slice(0, 32)}…]` : '[补充文献]';
+      return title ? `[补充${usedSet.size + idx + 1}]` : '[补充文献]';
     });
-    // 文末参考文献列表
-    if (used.size) {
-      const list = [...used].sort((a, b) => a - b).map((i, k) => {
+    // 文末参考文献列表（顺序编码制，与正文 [N] 一一对应）
+    if (order.length) {
+      const list = order.map((i, k) => {
         const r = refs[i];
         const authors = (() => {
           try {

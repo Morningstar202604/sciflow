@@ -645,7 +645,7 @@ export class AiService {
   async generateFigures(topic: string, outline: string, content: string): Promise<{ title: string; caption: string; mermaid: string }[]> {
     const custom = this.getCustomPrompt('generateFigures');
     const content2 = custom ? `${custom}\n\n论文主题：${topic}\n\n论文大纲：${outline}\n\n正文开头：\n${content.slice(0, 1200)}` : prompts.GENERATE_FIGURES(topic, outline, content);
-    const raw = await this.complete([{ role: 'user', content: content2 }], { temperature: 0.3, model: 'strong', context: 'generateFigures' });
+    const raw = await this.complete([{ role: 'user', content: content2 }], { temperature: 0.3, model: 'fast', context: 'generateFigures' });
     try {
       const parsed = this.jsonOf<{ figures?: { figureType: string; title: string; caption: string; mermaid: string }[] }>(raw);
       return (parsed.figures || []).slice(0, 3).map((f) => ({
