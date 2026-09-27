@@ -347,7 +347,7 @@ export class AiService {
 
   /** 三段式润色/降重：原文 + 润色文 + 理由（AI 输出缺字段或嵌套时递归回退，防止落库异常） */
   async polish(text: string, mode: 'polish' | 'reduce' = 'polish'): Promise<{ original: string; polished: string; reason: string }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.POLISH(text, mode) }], { temperature: 0.4, context: 'polish' });
+    const raw = await this.complete([{ role: 'user', content: prompts.POLISH(text, mode) }], { temperature: 0.4, maxTokens: 8192, context: 'polish' });
     let parsed: Partial<{ original: string; polished: string; reason: string }> = {};
     try {
       parsed = this.jsonOf<{ original: string; polished: string; reason: string }>(raw);
