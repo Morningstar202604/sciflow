@@ -6,17 +6,20 @@ import {
 import { api } from './api/client';
 import type { Project } from './types';
 import { Button, Input, Modal, Spinner, ErrorBox, ToastViewport, type ToastItem, type ToastKind } from './components/ui';
-import { DashboardPage } from './pages/DashboardPage';
-import { WritingPage } from './pages/WritingPage';
-import { LiteraturePage } from './pages/LiteraturePage';
-import { PipelinePage } from './pages/PipelinePage';
-// 质量评分页懒加载：echarts 仅在进入该页时下载（首屏优化）
+// 路由级代码分割：所有页面懒加载（首屏只加载当前视图，大厂 SPA 标准）
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const WritingPage = lazy(() => import('./pages/WritingPage').then((m) => ({ default: m.WritingPage })));
+const LiteraturePage = lazy(() => import('./pages/LiteraturePage').then((m) => ({ default: m.LiteraturePage })));
+const PipelinePage = lazy(() => import('./pages/PipelinePage').then((m) => ({ default: m.PipelinePage })));
 const QualityPage = lazy(() => import('./pages/QualityPage').then((m) => ({ default: m.QualityPage })));
-import { ChatPage } from './pages/ChatPage';
-import { SubmissionPage } from './pages/SubmissionPage';
-import { KnowledgePage } from './pages/KnowledgePage';
-import { SettingsPage } from './pages/SettingsPage';
-import { MemoryPage } from './pages/MemoryPage';
+const ChatPage = lazy(() => import('./pages/ChatPage').then((m) => ({ default: m.ChatPage })));
+const SubmissionPage = lazy(() => import('./pages/SubmissionPage').then((m) => ({ default: m.SubmissionPage })));
+const KnowledgePage = lazy(() => import('./pages/KnowledgePage').then((m) => ({ default: m.KnowledgePage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const MemoryPage = lazy(() => import('./pages/MemoryPage').then((m) => ({ default: m.MemoryPage })));
+const SuspensePage = ({ children }: { children: ReactNode }) => (
+  <Suspense fallback={<div className="p-10 text-sm text-slate-400 flex items-center gap-2"><Spinner label="页面加载中…" /></div>}>{children}</Suspense>
+);
 
 export type View =
   | 'dashboard'
@@ -369,20 +372,20 @@ function AppInner() {
               </div>
             ) : (
               <>
-                {view === 'settings' && <SettingsPage />}
-                {view === 'dashboard' && currentProject && <DashboardPage project={currentProject} onNavigate={setView} openDoc={(id) => navigate(`/writing?doc=${id}`)} />}
-                {view === 'writing' && currentProject && <WritingPage project={currentProject} initialDocId={selectedDocId} />}
-                {view === 'literature' && currentProject && <LiteraturePage project={currentProject} />}
-                {view === 'knowledge' && currentProject && <KnowledgePage project={currentProject} />}
-                {view === 'memory' && currentProject && <MemoryPage />}
-                {view === 'pipeline' && currentProject && <PipelinePage project={currentProject} />}
+                {view === 'settings' && <SuspensePage><SettingsPage /></SuspensePage>}
+                {view === 'dashboard' && currentProject && <SuspensePage><DashboardPage project={currentProject} onNavigate={setView} openDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage>}
+                {view === 'writing' && currentProject && <SuspensePage><WritingPage project={currentProject} initialDocId={selectedDocId} /></SuspensePage>}
+                {view === 'literature' && currentProject && <SuspensePage><LiteraturePage project={currentProject} /></SuspensePage>}
+                {view === 'knowledge' && currentProject && <SuspensePage><KnowledgePage project={currentProject} /></SuspensePage>}
+                {view === 'memory' && currentProject && <SuspensePage><MemoryPage /></SuspensePage>}
+                {view === 'pipeline' && currentProject && <SuspensePage><PipelinePage project={currentProject} /></SuspensePage>}
                 {view === 'quality' && currentProject && (
                   <Suspense fallback={<div className="p-8 text-sm text-slate-400">加载质量评分…</div>}>
                     <QualityPage project={currentProject} />
                   </Suspense>
                 )}
-                {view === 'chat' && currentProject && <ChatPage project={currentProject} />}
-                {view === 'submission' && currentProject && <SubmissionPage project={currentProject} />}
+                {view === 'chat' && currentProject && <SuspensePage><ChatPage project={currentProject} /></SuspensePage>}
+                {view === 'submission' && currentProject && <SuspensePage><SubmissionPage project={currentProject} /></SuspensePage>}
               </>
             )}
           </main>
