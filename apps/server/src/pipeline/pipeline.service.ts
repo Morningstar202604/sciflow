@@ -414,11 +414,14 @@ export class PipelineService {
       db.update(documents).set({ content: best.content, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
     }
     const finalDoc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
-    // 润色只处理正文主体，图表/参考文献尾部原样保留（此前整体覆盖把图和文献列表洗掉）
+    // 润色只处理正文主体，图表/参考文献尾部原样保留（参考文献被当章节润色会洗掉）
     const content = finalDoc.content ?? '';
+    const refIdx = content.indexOf('\n\n## 参考文献');
     const figIdx = content.indexOf('\n\n## 图表');
-    const bodyPart = figIdx >= 0 ? content.slice(0, figIdx) : content;
-    const tailPart = figIdx >= 0 ? content.slice(figIdx) : '';
+    const cuts = [refIdx, figIdx].filter((i) => i >= 0);
+    const cut = cuts.length ? Math.min(...cuts) : -1;
+    const bodyPart = cut >= 0 ? content.slice(0, cut) : content;
+    const tailPart = cut >= 0 ? content.slice(cut) : '';
     const polished = await this.orchestrator.polisherAgent(taskId, bodyPart);
     db.insert(polishRecords)
       .values({
