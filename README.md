@@ -1,10 +1,24 @@
 # SciFlow · 全自动 AI 科研助手
 
+> **🌐 语言 / Language：[中文](README.md) · [English](README.en.md)**
+
 > **仓库镜像（四平台同步）**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
 > 四仓由 CI 级验证保障：typecheck ×2 · vitest · build ×2 · 密钥校验，全部公开可克隆。
 
 > 对标 2026 主流 Agent 方案（Claude Agent SDK / AutoGen / Deep Research）的科研工作台：输入一个研究主题，由 **Supervisor 编排器** 调度 5 类专业子 Agent（Planner / 并行 Research×3 / Writer / Reviewer / Polisher），完成 **研究规划 → 并行文献调研（ReAct）→ 大纲生成 → 分章起草（Agentic RAG 边写边查）→ 质量门评分（不达标 Reflexion 自动回炉）→ 润色定稿 → 引用格式化** 的全流程，并自动沉淀情景/程序记忆。
+
+## 📸 界面预览
+
+| 工作台 · 项目总览 | 全自动流水线 · 多 Agent 编排 |
+| --- | --- |
+| ![工作台](docs/screenshots/dash.png) | ![流水线](docs/screenshots/pipeline.png) |
+
+| 论文写作 · AI 助手 + 公式渲染 | 质量评分 · 7 维雷达 + 改进建议 |
+| --- | --- |
+| ![论文写作](docs/screenshots/writing.png) | ![质量评分](docs/screenshots/quality.png) |
+
+> 截图来自真实运行界面（本地部署 · 内置 AI 网关实测）。
 
 ## ✨ 功能
 
