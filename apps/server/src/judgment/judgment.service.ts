@@ -195,14 +195,14 @@ export class JudgmentService {
     } catch {
       /* LLM 不可用时降级为通用问答 */
     }
-    return { intent: 'other', label: '通用问答', confidence: 0.5, topic: '', route: '/chat', matchedBy: 'rule' };
+    return { intent: 'qa', label: '科研问答', confidence: 0.5, topic: '', route: '/chat', matchedBy: 'llm' };
   }
 
   private extractTopic(text: string): string {
     // 简单抽取：去掉常见动作词后取首句
     const cleaned = text
       .replace(/^(帮我|请|麻烦|能不能|可以|想请你|我需要你)/, '')
-      .replace(/^(对比|比较|精读|综述|检索|搜索|找|查|润色|翻译|起草|生成|写|评分|分析|解释|介绍)[一下|一遍|一下]*/, '')
+      .replace(/^(对比|比较|精读|综述|检索|搜索|找|查|润色|翻译|起草|生成|写|评分|分析|解释|介绍)(?:一下|一遍|一遍)*/, '')
       .trim();
     return cleaned.split(/[，。？！,?!；;]/)[0].slice(0, 40) || '';
   }

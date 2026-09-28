@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs , pipelineConfigs} from '../db/schema';
 import { AiService } from '../ai/ai.service';
-import { LiteratureService } from '../literature/literature.service';
+import { LiteratureService, PaperHit } from '../literature/literature.service';
 import { ReferencesService } from '../references/references.service';
 import { QualityService } from '../quality/quality.service';
 import { AgentOrchestratorService } from '../orchestrator/orchestrator.service';
@@ -324,12 +324,14 @@ export class PipelineService {
       const reflexion = this.reflexionNote(taskId);
       const procedural = this.proceduralMemory(task.projectId);
       const styleHint = procedural ? `\n写作风格参考（来自记忆库）：${procedural}` : '';
+      // 引用池在起草前固定取一次：prompt 注入与渲染用同一份（避免 Agentic RAG 回填文献后池排序变化导致编号错位）
+      const refPool = this.refsForDraft(task.projectId);
       const writerRes = await this.orchestrator.writerAgent(
         taskId,
         documentId,
         doc.title,
         outline,
-        { refsPrompt: this.referencesForPrompt(task.projectId), styleHint, reflexion },
+        { refsPrompt: this.referencesForPrompt(task.projectId, refPool), styleHint, reflexion },
         { skipAgenticSearch: retry > 0 },
       );
       // 回炉时保留上一版文档的图表章节（必须在写入新正文之前提取，否则被覆盖）
@@ -345,8 +347,8 @@ export class PipelineService {
       if (agenticHits.length > 0) {
         this.references.import(task.projectId, agenticHits);
       }
-      // 引用渲染：占位符 [Ref:N] → 顺序编码制 [N] + 文末参考文献列表
-      const rendered = this.renderCitations(task.projectId, writerRes.content, agenticHits.map((h) => h.title));
+      // 引用渲染：占位符 [Ref:N] → 顺序编码制 [N] + 文末参考文献列表（含补充文献）
+      const rendered = this.renderCitations(task.projectId, writerRes.content, refPool, agenticHits);
       // 自动配图：生成 2-3 个 mermaid 学术图表（仅首次起草，回炉复用省额度）
       let finalContent = rendered + prevFigures;
       if (retry === 0 && this.stepEnabled('figures')) {
@@ -526,9 +528,9 @@ export class PipelineService {
       .slice(0, 20);
   }
 
-  private referencesForPrompt(projectId: string): string {
-    const refs = this.refsForDraft(projectId);
-    return refs
+  private referencesForPrompt(projectId: string, refs?: ReturnType<PipelineService['refsForDraft']>): string {
+    const pool = refs ?? this.refsForDraft(projectId);
+    return pool
       .map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}${r.doi ? `，DOI:${r.doi}` : ''}）`)
       .join('\n');
   }
@@ -536,12 +538,12 @@ export class PipelineService {
   /**
    * 引用渲染：把正文中的 [Ref:N] / [补充Ref:M] 占位符替换为真实文献（作者 年份），
    * 并在文末生成"参考文献"列表（GB/T 7714 顺序编码制）。
-   * 修复：此前成文引用全是占位符，评审判定"引用造假"。
+   * 修复：① 两次取池排序不同导致编号错位——改用调用方传入的同一池；② 补充引用按正文实际引用续编并纳入文末列表。
    */
-  private renderCitations(projectId: string, content: string, supplementTitles: string[] = []): string {
+  private renderCitations(projectId: string, content: string, refPool: ReturnType<PipelineService['refsForDraft']>, supplementHits: PaperHit[] = []): string {
     if (!content) return content;
-    const refs = this.refsForDraft(projectId);
-    // 第一遍：收集被引用的文献（正文与参考文献列表统一顺序编码制 [N]，消除"正文作者-年份 vs 列表数字"矛盾）
+    const refs = refPool;
+    // 第一遍：收集正文被引用的 [Ref:N]（顺序编码制按出现先后统一编号）
     const used = new Set<number>();
     content.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => {
       const idx = Number(n) - 1;
@@ -550,30 +552,44 @@ export class PipelineService {
     });
     const order = [...used].sort((a, b) => a - b);
     const numOf = new Map(order.map((idx, k) => [idx, k + 1]));
-    // 第二遍：替换 [Ref:N] → [N]；[补充Ref:M] 追加编号
+    // 补充引用：收集正文 [补充Ref:M]（全局序号，与 writerAgent 生成顺序一致）
+    const usedSupp = new Set<number>();
+    content.replace(/\[补充Ref:(\d+)\]/g, (_m, n: string) => {
+      const idx = Number(n) - 1;
+      if (supplementHits[idx]) usedSupp.add(idx);
+      return '';
+    });
+    const suppOrder = [...usedSupp].sort((a, b) => a - b);
+    const base = order.length;
+    const suppNum = new Map(suppOrder.map((idx, k) => [idx, base + k + 1]));
+    // 第二遍：替换 [Ref:N] → [N]；[补充Ref:M] → 续编号 [N]
     let out = content.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => {
       const idx = Number(n) - 1;
       return numOf.has(idx) ? `[${numOf.get(idx)}]` : `[文献${n}]`;
     });
-    const usedSet = new Set(order);
     out = out.replace(/\[补充Ref:(\d+)\]/g, (_m, n: string) => {
       const idx = Number(n) - 1;
-      const title = supplementTitles[idx];
-      return title ? `[补充${usedSet.size + idx + 1}]` : '[补充文献]';
+      return suppNum.has(idx) ? `[${suppNum.get(idx)}]` : '[补充文献]';
     });
-    // 文末参考文献列表（顺序编码制，与正文 [N] 一一对应）
-    if (order.length) {
-      const list = order.map((i, k) => {
-        const r = refs[i];
-        const authors = (() => {
-          try {
-            return (JSON.parse(r.authors || '[]') as string[]).join(', ') || '佚名';
-          } catch {
-            return '佚名';
-          }
-        })();
-        return `[${k + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi.replace(/^https?:\/\//, '')}` : ''}`;
-      });
+    // 文末参考文献列表（顺序编码制，正文 [N] 与列表一一对应：正文引用的池文献 + 补充文献）
+    const list: string[] = [];
+    for (const idx of order) {
+      const r = refs[idx];
+      const authors = (() => {
+        try {
+          return (JSON.parse(r.authors || '[]') as string[]).join(', ') || '佚名';
+        } catch {
+          return '佚名';
+        }
+      })();
+      list.push(`[${list.length + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi.replace(/^https?:\/\//, '')}` : ''}`);
+    }
+    for (const idx of suppOrder) {
+      const h = supplementHits[idx];
+      const authors = (h.authors || []).join(', ') || '佚名';
+      list.push(`[${list.length + 1}] ${authors}. ${h.title}[J].${h.venue ? ` ${h.venue},` : ''} ${h.year ? `${h.year}.` : 'n.d.'}${h.doi ? ` https://doi.org/${h.doi.replace(/^https?:\/\//, '')}` : ''}`);
+    }
+    if (list.length) {
       out += `\n\n## 参考文献\n\n${list.join('\n')}`;
     }
     return out;

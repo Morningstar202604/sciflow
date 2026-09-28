@@ -23,30 +23,53 @@ export interface PaperHit {
 export class LiteratureService {
   private readonly logger = new Logger(LiteratureService.name);
 
+  /** 全局并发闸（最多 2 个外部检索并发，避免多路 ReAct/Agentic RAG 同时打爆免费源触发 429 风暴） */
+  private static active = 0;
+  private static readonly MAX_CONCURRENT = 2;
+  private static readonly waiters: (() => void)[] = [];
+
+  private async acquireSlot() {
+    while (LiteratureService.active >= LiteratureService.MAX_CONCURRENT) {
+      await new Promise<void>((resolve) => LiteratureService.waiters.push(resolve));
+    }
+    LiteratureService.active += 1;
+  }
+
+  private releaseSlot() {
+    LiteratureService.active -= 1;
+    const next = LiteratureService.waiters.shift();
+    if (next) next();
+  }
+
   async search(query: string, limit = 8): Promise<PaperHit[]> {
     const q = query.trim();
     if (!q) return [];
 
-    const [openalex, arxiv, s2, crossref] = await Promise.allSettled([
-      this.searchOpenAlex(q, limit),
-      this.searchArxiv(q, limit),
-      this.searchSemanticScholar(q, limit),
-      this.searchCrossRef(q, limit),
-    ]);
-
-    const results: PaperHit[] = [];
+    await this.acquireSlot();
+    let results: PaperHit[] = [];
     const seen = new Set<string>();
-    for (const r of [openalex, arxiv, s2, crossref]) {
-      if (r.status !== 'fulfilled') {
-        this.logger.warn(`检索源失败: ${r.reason?.message || r.reason}`);
-        continue;
+    try {
+      const [openalex, arxiv, s2, crossref] = await Promise.allSettled([
+        this.searchOpenAlex(q, limit),
+        this.searchArxiv(q, limit),
+        this.searchSemanticScholar(q, limit),
+        this.searchCrossRef(q, limit),
+      ]);
+
+      for (const r of [openalex, arxiv, s2, crossref]) {
+        if (r.status !== 'fulfilled') {
+          this.logger.warn(`检索源失败: ${r.reason?.message || r.reason}`);
+          continue;
+        }
+        for (const hit of r.value) {
+          const key = hit.title.trim().toLowerCase();
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          results.push(hit);
+        }
       }
-      for (const hit of r.value) {
-        const key = hit.title.trim().toLowerCase();
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        results.push(hit);
-      }
+    } finally {
+      this.releaseSlot();
     }
     return results.slice(0, limit);
   }
@@ -70,7 +93,7 @@ export class LiteratureService {
   }
 
   private async searchArxiv(query: string, limit: number): Promise<PaperHit[]> {
-    const url = `http://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${limit}`;
+    const url = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${limit}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`arXiv ${res.status}`);
     const xml = await res.text();

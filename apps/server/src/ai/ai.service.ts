@@ -161,8 +161,8 @@ export class AiService {
         AiService.tokens -= 1;
         return;
       }
-      // 等待下一次补充（最长等 30s，避免静默死锁）
-      await new Promise((r) => setTimeout(r, Math.min(refillMs - elapsed + 200, 30_000)));
+      // 等待下一次补充（下限 1s 防止负 delay 忙等空转，上限 30s 避免静默死锁）
+      await new Promise((r) => setTimeout(r, Math.max(1000, Math.min(refillMs - elapsed + 200, 30_000))));
     }
   }
 

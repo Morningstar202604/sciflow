@@ -143,7 +143,7 @@ export function ChatPanel({
           {intent && (
             <div className="px-3 pb-1 shrink-0">
               <div className="text-[11px] bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 rounded-md px-2 py-1.5 flex items-center gap-1">
-                <Sparkles size={11} /> 意图识别：{intent.intent === 'general' ? '通用科研问题' : intent.intent}
+                <Sparkles size={11} /> 意图识别：{intent.label || intent.intent}
               </div>
             </div>
           )}

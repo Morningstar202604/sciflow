@@ -108,8 +108,9 @@ function AppInner() {
     window.setTimeout(() => setToasts((s) => s.filter((t) => t.id !== id)), 2600);
   }, []);
 
-  // 路由化：pathname 决定当前视图（hash 路由，刷新/分享/深链不丢状态）
-  const view = (location.pathname.replace(/^\//, '') || 'dashboard') as View;
+  // 路由化：pathname 决定当前视图（hash 路由，刷新/分享/深链不丢状态）；无效路径兜底工作台
+  const rawView = (location.pathname.replace(/^\//, '') || 'dashboard') as View;
+  const view: View = (['dashboard', 'writing', 'literature', 'pipeline', 'quality', 'chat', 'submission', 'knowledge', 'memory', 'settings'] as View[]).includes(rawView) ? rawView : 'dashboard';
   const selectedDocId = searchParams.get('doc');
   const setView = useCallback(
     (v: View) => {
@@ -454,6 +455,20 @@ function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => 
 
   const filtered = commands.filter((c) => !q.trim() || c.label.toLowerCase().includes(q.trim().toLowerCase()));
   const [active, setActive] = useState(0);
+  // 键盘导航：↑↓ 移动选中，Enter 执行（与底部提示一致）
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive((a) => Math.min(a + 1, Math.max(filtered.length - 1, 0)));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((a) => Math.max(a - 1, 0));
+    } else if (e.key === 'Enter' && filtered[active]) {
+      e.preventDefault();
+      filtered[active].run();
+      onClose();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-slate-900/40 backdrop-blur-sm" onClick={onClose}>
@@ -466,6 +481,7 @@ function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => 
             placeholder="输入命令或页面名称…（Esc 关闭）"
             value={q}
             onChange={(e) => { setQ(e.target.value); setActive(0); }}
+            onKeyDown={onKeyDown}
           />
           <kbd className="text-[10px] text-slate-400 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5">Esc</kbd>
         </div>

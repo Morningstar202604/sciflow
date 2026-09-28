@@ -247,6 +247,8 @@ export class AgentOrchestratorService {
   ): Promise<{ output: string; content: string }> {
     const res = await this.runAgent(taskId, 'writer', 'writer#draft', `章节 ${outline.sections.length} 个：${outline.sections.map((s) => s.title).join(' / ')}`, async () => {
       let content = '';
+      // 补充引用全局序号：Agentic RAG 检索到的文献按全局去重顺序编号（正文 [补充Ref:N] 与文末列表一一对应）
+      let supplementCounter = 0;
       const sectionResults: { title: string; chars: number; agenticRounds: number; supplementalHits: { title: string; authors: string[]; year: number | null; venue: string; doi: string; url: string; abstract: string; source: string; citationCount: number }[] }[] = [];
       const seen = new Set<string>();
       for (const section of outline.sections) {
@@ -258,7 +260,7 @@ export class AgentOrchestratorService {
         for (const h of fresh) seen.add(h.title);
         const extraRefs = fresh
           .slice(0, 4)
-          .map((h, i) => `[补充Ref:${i + 1}] ${h.title}（${(h.authors || []).slice(0, 2).join(', ')}，${h.year || 'n.d.'}，${h.source}）`)
+          .map((h) => `[补充Ref:${++supplementCounter}] ${h.title}（${(h.authors || []).slice(0, 2).join(', ')}，${h.year || 'n.d.'}，${h.source}）`)
           .join('\n');
         const sectionText = await this.ai.draftSection(
           section.title,

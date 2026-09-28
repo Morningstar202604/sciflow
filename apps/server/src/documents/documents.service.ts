@@ -89,22 +89,30 @@ export class DocumentsService {
     return { text };
   }
 
-  /** 三段式润色/降重并记录历史 */
+  /** 三段式润色/降重并记录历史（图表/参考文献尾部原样保留，避免被当章节润色洗掉） */
   async polish(id: string, text: string, mode: 'polish' | 'reduce' = 'polish') {
     const doc = this.get(id);
-    const result = await this.ai.polish(text, mode);
+    const content = String(text ?? '');
+    const refIdx = content.indexOf('\n\n## 参考文献');
+    const figIdx = content.indexOf('\n\n## 图表');
+    const cuts = [refIdx, figIdx].filter((i) => i >= 0);
+    const cut = cuts.length ? Math.min(...cuts) : -1;
+    const bodyPart = cut >= 0 ? content.slice(0, cut) : content;
+    const tailPart = cut >= 0 ? content.slice(cut) : '';
+    const result = await this.ai.polish(bodyPart, mode);
+    const polished = `${String(result.polished ?? '').trim()}\n\n${tailPart}`.trim();
     db.insert(polishRecords)
       .values({
         id: randomUUID(),
         documentId: id,
         type: mode,
         original: result.original,
-        polished: result.polished,
+        polished,
         reason: result.reason,
         createdAt: Date.now(),
       })
       .run();
-    return result;
+    return { ...result, polished };
   }
 
   /** 学术翻译 */
