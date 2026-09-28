@@ -176,10 +176,10 @@ export function PipelinePage({ project }: { project: Project }) {
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 mb-3 text-slate-700 dark:text-slate-200 font-semibold">
-          <Workflow size={16} className="text-teal-600" /> 一键全自动流水线
+          <Workflow size={16} className="brand-gradient-text" /> 一键全自动流水线
         </div>
         <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
-          输入研究主题 → 自动完成 文献调研 → 大纲生成（人工确认）→ 分章起草 → 质量门评分（&lt;80 自动回炉）→ 润色定稿 → 引用格式化
+          输入研究主题 → 多智能体自动完成 文献调研 → 大纲确认 → 分章起草 → 7 维质量门（&lt;80 自动回炉打磨）→ 润色定稿 → 引用格式化
         </div>
         <div className="flex gap-2">
           <Input placeholder="输入研究主题，如：大语言模型在生物医学中的应用" value={topic} onChange={(e) => setTopic(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createTask()} />

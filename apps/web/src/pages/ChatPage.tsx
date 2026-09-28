@@ -100,7 +100,7 @@ export function ChatPage({ project }: { project: Project }) {
     <div className="max-w-3xl mx-auto h-full flex flex-col">
       <Card className="flex-1 flex flex-col min-h-0">
         <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 shrink-0">
-          <MessageSquare size={15} className="text-teal-600" />
+          <MessageSquare size={15} className="brand-gradient-text" />
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">科研问答</span>
           <span className="text-xs text-slate-400 dark:text-slate-500 hidden sm:inline">流式输出 · 多轮对话 · 上下文感知当前项目</span>
           <div className="ml-auto flex items-center gap-1.5 min-w-0">

@@ -106,7 +106,7 @@ export function QualityPage({ project }: { project: Project }) {
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <Gauge size={16} className="text-teal-600" />
+          <Gauge size={16} className="brand-gradient-text" />
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 mr-2">选择文档进行 7 维质量评分</span>
           <Select
             className="w-64"

@@ -458,7 +458,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
         {/* AI 工具面板 */}
         <Card className="w-72 shrink-0 p-3 overflow-y-auto hidden lg:block">
           <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-1.5">
-            <Sparkles size={14} className="text-teal-600" /> AI 工具
+            <Sparkles size={14} className="brand-gradient-text" /> AI 工具
           </div>
 
           {aiBusy && <Spinner label="AI 正在处理…" />}

@@ -39,12 +39,12 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
 
   const stats = [
     { label: '论文草稿', value: docs.length, icon: FileText, tone: 'text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800' },
-    { label: '参考文献', value: refs.length, icon: BookOpen, tone: 'text-teal-700 bg-teal-50' },
+    { label: '参考文献', value: refs.length, icon: BookOpen, tone: 'brand-logo text-white' },
   ];
 
   const entries = [
     { label: '论文写作', desc: '大纲 · 起草 · 润色 · 翻译', icon: BookOpen, view: 'writing' as View },
-    { label: '文献调研', desc: '三源检索 · 综述 · 文献库', icon: FlaskConical, view: 'literature' as View },
+    { label: '文献调研', desc: '多源检索 · 综述 · 文献库', icon: FlaskConical, view: 'literature' as View },
     { label: '全自动流水线', desc: '主题 → 初稿 → 评分 → 定稿', icon: Workflow, view: 'pipeline' as View },
     { label: '质量评分', desc: '7 维雷达评分与改进建议', icon: Gauge, view: 'quality' as View },
   ];
@@ -56,7 +56,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-lg font-semibold text-slate-900 dark:text-slate-100 tracking-tight">{project.name}</div>
-            <div className="text-sm text-slate-400 dark:text-slate-500 mt-1">{project.description || '暂无项目描述'}</div>
+            <div className="text-sm text-slate-400 dark:text-slate-500 mt-1">{project.description || '让科研从想法到成文，一站式完成文献、写作与投稿'}</div>
           </div>
           <div className="flex gap-2 shrink-0">
             {stats.map((s) => (

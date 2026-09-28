@@ -179,6 +179,9 @@ export function LiteraturePage({ project }: { project: Project }) {
 
       {/* 检索区 */}
       <Card className="p-4 mb-4">
+        <div className="flex items-center gap-1.5 mb-2.5 text-slate-700 dark:text-slate-200 font-semibold">
+          <FlaskConical size={15} className="brand-gradient-text" /> 文献调研
+        </div>
         <div className="flex gap-2">
           <Input
             placeholder="输入研究方向，如：graph neural network survey"
@@ -190,7 +193,7 @@ export function LiteraturePage({ project }: { project: Project }) {
             {searching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} 检索
           </Button>
         </div>
-        <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">对接 OpenAlex · arXiv · Semantic Scholar 三源并查（真实文献，含 DOI 可追溯）</div>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">对接 OpenAlex · arXiv · Semantic Scholar · CrossRef 多源并查（真实文献，含 DOI 可追溯）</div>
       </Card>
 
       {/* 检索结果 */}

@@ -70,7 +70,7 @@ export function MemoryPage() {
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200 font-semibold">
-          <Brain size={16} className="text-teal-600" /> 记忆中心
+          <Brain size={16} className="brand-gradient-text" /> 记忆中心
         </div>
         <div className="text-xs text-slate-400 dark:text-slate-500 mt-1 mb-3">
           Agentic Memory：情景记忆自动沉淀每次完成的研究任务；程序记忆保存写作风格指令，起草时自动注入（对标 NotebookLM / Agentic Memory）

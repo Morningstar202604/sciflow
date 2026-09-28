@@ -159,7 +159,7 @@ export function KnowledgePage({ project }: { project: Project }) {
       <Card className="p-5">
         <SectionTitle>
           <span className="flex items-center gap-2">
-            <MessageSquare size={16} className="text-teal-600" /> 基于资料问答
+            <MessageSquare size={16} className="brand-gradient-text" /> 基于资料问答
           </span>
         </SectionTitle>
         <div className="flex gap-2">

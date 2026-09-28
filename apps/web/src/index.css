@@ -6,15 +6,23 @@
 
 :root {
   color-scheme: light;
-  /* ---- SciFlow 品牌 token ---- */
+  /* ---- SciFlow 品牌 token（科研流体：teal → cyan → sky） ---- */
+  --brand-400: #14b8a6;
   --brand-500: #0d9488;
   --brand-600: #0f766e;
-  --brand-grad: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
+  --brand-grad: linear-gradient(135deg, #0d9488 0%, #0891b2 55%, #0284c7 100%);
+  --brand-grad-soft: linear-gradient(135deg, rgba(13, 148, 136, 0.10), rgba(8, 145, 178, 0.08) 55%, rgba(2, 132, 199, 0.06));
+  --brand-glow: 0 8px 30px rgba(13, 148, 136, 0.25), 0 2px 8px rgba(8, 145, 178, 0.20);
+  --card-shadow: 0 1px 2px rgba(15, 118, 110, 0.04), 0 8px 24px -12px rgba(15, 118, 110, 0.10);
   --bg-app: #f4f6fb;
   --ink: #1c2a44;
 }
 .dark {
   color-scheme: dark;
+  --brand-grad: linear-gradient(135deg, #14b8a6 0%, #06b6d4 55%, #0ea5e9 100%);
+  --brand-grad-soft: linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(6, 182, 212, 0.09) 55%, rgba(14, 165, 233, 0.06));
+  --brand-glow: 0 8px 30px rgba(20, 184, 166, 0.20), 0 2px 8px rgba(6, 182, 212, 0.18);
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px -14px rgba(6, 182, 212, 0.14);
   --bg-app: #0b1220;
   --ink: #e2e8f0;
 }
@@ -131,6 +139,74 @@ body {
   background-clip: text;
   color: transparent;
 }
+
+/* 品牌渐变按钮底色（primary Button 用） */
+.brand-btn {
+  background-image: var(--brand-grad);
+  color: #fff;
+  box-shadow: var(--brand-glow);
+  transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+.brand-btn:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 10px 34px rgba(13, 148, 136, 0.32), 0 2px 10px rgba(8, 145, 178, 0.22);
+}
+.brand-btn:active {
+  transform: scale(0.97);
+}
+
+/* 侧边栏/导航活跃项渐变高亮（2026 桌面工具标准） */
+.nav-active {
+  background-image: var(--brand-grad);
+  color: #fff;
+  box-shadow: var(--brand-glow);
+}
+
+/* Logo 徽标：渐变底 + 内发光 */
+.brand-logo {
+  background-image: var(--brand-grad);
+  box-shadow: var(--brand-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  position: relative;
+}
+.brand-logo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(120px 30px at 30% 0%, rgba(255, 255, 255, 0.35), transparent 70%);
+  pointer-events: none;
+}
+
+/* 顶部 header 玻璃质感 */
+.glass-header {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+}
+.dark .glass-header {
+  background: rgba(9, 15, 29, 0.72);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+}
+
+/* 卡片品牌边框辉光（可交互卡 hover 时） */
+.card-glow {
+  border-color: rgba(13, 148, 136, 0.35);
+  box-shadow: var(--card-shadow), 0 0 0 1px rgba(13, 148, 136, 0.06);
+}
+
+/* 品牌分割细线（模块之间用渐变色线分隔，线性感） */
+.brand-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(13, 148, 136, 0.35), rgba(2, 132, 199, 0.35), transparent);
+}
+
+/* 品牌状态呼吸点（流水线 running 用） */
+@keyframes brand-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(13, 148, 136, 0.35); }
+  50% { box-shadow: 0 0 0 4px rgba(13, 148, 136, 0); }
+}
+.brand-breathe { animation: brand-breathe 1.8s ease-in-out infinite; }
 
 /* 键盘快捷键 kbd 统一 */
 kbd {

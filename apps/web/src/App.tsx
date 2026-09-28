@@ -209,17 +209,17 @@ function AppInner() {
       <ToastContext.Provider value={toast}>
         <div className="flex h-full overflow-hidden bg-slate-50 dark:bg-slate-950 dark:text-slate-100">
         {/* ============ 左侧边栏：Logo + 项目区 + 功能导航分组 + 底部设置 ============ */}
-        <aside className="w-56 shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col">
-          {/* Logo（品牌渐变标识） */}
+        <aside className="w-56 shrink-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-r border-slate-200 dark:border-slate-800 flex flex-col">
+          {/* Logo（品牌渐变徽标 + 内发光） */}
           <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-teal-500 to-sky-600 text-white flex items-center justify-center text-[13px] font-bold tracking-tight shadow-sm shadow-teal-600/30">
+            <div className="w-7 h-7 rounded-lg brand-logo text-white flex items-center justify-center text-[13px] font-bold tracking-tight">
               S
             </div>
             <div className="leading-tight">
               <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
                 Sci<span className="brand-gradient-text">Flow</span>
               </div>
-              <div className="text-[10px] text-slate-400 -mt-0.5">全自动 AI 科研助手</div>
+              <div className="text-[10px] text-slate-400 -mt-0.5">让科研从想法到成文</div>
             </div>
           </div>
 
@@ -234,11 +234,11 @@ function AppInner() {
                     <button
                       key={n.key}
                       onClick={() => setView(n.key)}
-                      className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
-                        view === n.key ? 'bg-slate-900 text-white dark:bg-teal-600' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900'
+                      className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-all duration-150 ${
+                        view === n.key ? 'nav-active' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900'
                       }`}
                     >
-                      <Icon size={14} className={view === n.key ? 'text-teal-400' : 'text-slate-400 dark:text-slate-500'} />
+                      <Icon size={14} className={view === n.key ? 'text-white/90' : 'text-slate-400 dark:text-slate-500'} />
                       {n.label}
                     </button>
                   );
@@ -313,11 +313,11 @@ function AppInner() {
           <div className="px-3 py-3 border-t border-slate-200 dark:border-slate-800">
             <button
               onClick={() => setView('settings')}
-              className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
-                view === 'settings' ? 'bg-slate-900 text-white dark:bg-teal-600' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900'
+              className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-all duration-150 ${
+                view === 'settings' ? 'nav-active' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900'
               }`}
             >
-              <Settings size={14} className={view === 'settings' ? 'text-teal-400' : 'text-slate-400 dark:text-slate-500'} />
+              <Settings size={14} className={view === 'settings' ? 'text-white/90' : 'text-slate-400 dark:text-slate-500'} />
               设置
             </button>
             <div className="mt-2 flex items-center gap-1.5 text-[11px] rounded-md px-2.5 py-1 bg-slate-50 dark:bg-slate-800">
@@ -346,8 +346,8 @@ function AppInner() {
 
         {/* ============ 右侧主区 ============ */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* 顶部面包屑：项目名 / 当前页 */}
-          <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-2.5 flex items-center gap-2 shrink-0">
+          {/* 顶部面包屑：项目名 / 当前页（玻璃质感 header） */}
+          <header className="glass-header border-b border-slate-200/60 dark:border-slate-800 px-6 py-2.5 flex items-center gap-2 shrink-0">
             {view === 'settings' ? (
               <span className="text-sm text-slate-700 dark:text-slate-200 font-medium">设置</span>
             ) : currentProject ? (
