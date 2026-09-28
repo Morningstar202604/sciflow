@@ -295,7 +295,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
     return (
       <div className="max-w-2xl mx-auto">
         <Card className="p-6">
-          <Empty text="还没有文档" />
+          <Empty text="这里空空如也——新建一篇论文，或到「全自动流水线」一键生成初稿" hint="大纲生成 / 章节起草 / 润色 / 翻译 / 降重，全流程 AI 辅助" />
           <div className="flex justify-center">
             <Button onClick={createDoc}>
               <Plus size={15} /> 新建文档

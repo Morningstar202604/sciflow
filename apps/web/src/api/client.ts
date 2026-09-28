@@ -4,6 +4,24 @@ import type {
   AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool, PipelineStepConfig, QualityWeightItem,
 } from '../types';
 
+/** 友好错误转译：后端中文业务错误原样保留；英文/状态码/网络错误转为清晰中文提示 */
+const statusText: Record<number, string> = {
+  400: '请求参数有误，请检查后重试',
+  401: '未授权访问，请检查服务配置',
+  403: '没有操作权限',
+  404: '请求的内容不存在或已被删除',
+  409: '操作冲突，请刷新后重试',
+  429: '请求过于频繁，请稍后再试',
+  500: '服务内部错误，请稍后重试',
+  502: '网关异常，请稍后重试',
+  503: '服务暂时不可用，请稍后重试',
+};
+function friendlyError(raw: unknown, status?: number): string {
+  if (typeof raw === 'string' && /[\u4e00-\u9fa5]/.test(raw)) return raw;
+  if (status && statusText[status]) return statusText[status];
+  return status ? `请求失败（${status}），请稍后重试` : '无法连接服务器，请确认服务已启动';
+}
+
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   // 默认 60s 超时兜底：AI 网关限流/卡死时前端不无限等待（可被 opts.signal 覆盖）
   const timeoutMs = opts?.signal ? 0 : 60000;
@@ -16,19 +34,21 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
       ...opts,
     });
     if (!res.ok) {
-      let msg = `请求失败 (${res.status})`;
+      let raw: unknown;
       try {
         const data = await res.json();
-        msg = data.message || msg;
+        raw = data.message ?? data.error;
       } catch {
         /* ignore */
       }
-      throw new Error(msg);
+      throw new Error(friendlyError(raw, res.status));
     }
     return res.json() as Promise<T>;
   } catch (e: any) {
-    if (e?.name === 'AbortError') throw new Error('请求超时（AI 网关响应慢），请稍后重试');
-    throw e;
+    if (e?.name === 'AbortError') throw new Error('请求超时（AI 响应较慢），请稍后重试');
+    // 已转译的友好错误直接透传；其余为 fetch 网络层错误（Failed to fetch / ECONNREFUSED 等英文技术信息）
+    if (e instanceof Error && /^[请求服务网络未授权没有操作]/.test(e.message)) throw e;
+    throw new Error(friendlyError(undefined));
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -250,7 +270,16 @@ export function streamChat(
     body: JSON.stringify({ message, history, projectId, docContext }),
   })
     .then(async (res) => {
-      if (!res.ok || !res.body) throw new Error(`请求失败 (${res.status})`);
+      if (!res.ok || !res.body) {
+        let raw: unknown;
+        try {
+          const data = await res.json();
+          raw = data.message ?? data.error;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(friendlyError(raw, res.status));
+      }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -281,5 +310,5 @@ export function streamChat(
       }
       onDone(full);
     })
-    .catch((e) => onError(e.message || String(e)));
+    .catch((e) => onError(friendlyError(e?.message && /^[请求服务网络未授权没有操作]/.test(e.message) ? e.message : undefined)));
 }
