@@ -41,9 +41,9 @@ function Radar({ scores }: { scores: Record<string, number> }) {
             {
               value: DIMS.map((d) => scores[d.key] ?? 0),
               name: '质量评分',
-              areaStyle: { color: 'rgba(99,102,241,0.25)' },
-              lineStyle: { color: '#6366f1', width: 2 },
-              itemStyle: { color: '#6366f1' },
+              areaStyle: { color: 'rgba(13,148,136,0.22)' },
+              lineStyle: { color: '#0d9488', width: 2 },
+              itemStyle: { color: '#0891b2' },
             },
           ],
         },

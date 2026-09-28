@@ -153,8 +153,8 @@ export function PipelinePage({ project }: { project: Project }) {
   };
 
   const stepTone = (s: PipelineStep) => {
-    if (s.status === 'done') return { bg: 'bg-emerald-500 text-white', icon: <Check size={14} /> };
-    if (s.status === 'running') return { bg: 'bg-teal-500 text-white animate-pulse', icon: <Loader2 size={14} className="animate-spin" /> };
+    if (s.status === 'done') return { bg: 'brand-logo text-white', icon: <Check size={14} /> };
+    if (s.status === 'running') return { bg: 'brand-logo text-white brand-breathe', icon: <Loader2 size={14} className="animate-spin" /> };
     if (s.status === 'awaiting_confirmation') return { bg: 'bg-amber-400 text-white', icon: <CircleDashed size={14} /> };
     if (s.status === 'retry') return { bg: 'bg-rose-100 text-rose-600', icon: <RotateCcw size={14} /> };
     if (s.status === 'failed') return { bg: 'bg-rose-500 text-white', icon: <CircleDashed size={14} /> };
@@ -202,8 +202,10 @@ export function PipelinePage({ project }: { project: Project }) {
                 return (
                   <div
                     key={t.id}
-                    className={`rounded-lg px-3 py-2 cursor-pointer border ${
-                      activeId === t.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 dark:border-slate-800 hover:border-teal-300'
+                    className={`rounded-lg px-3 py-2 cursor-pointer border transition-all duration-150 ${
+                      activeId === t.id
+                        ? 'border-teal-300 dark:border-teal-700 bg-teal-50/80 dark:bg-teal-900/25 border-l-[3px] border-l-teal-500 shadow-[0_2px_12px_-4px_rgba(13,148,136,0.35)]'
+                        : 'border-slate-100 dark:border-slate-800 hover:border-teal-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'
                     }`}
                     onClick={() => setActiveId(t.id)}
                   >
@@ -327,11 +329,11 @@ export function PipelinePage({ project }: { project: Project }) {
                             if (group.length === 0) return null;
                             const labels: Record<string, string> = { planner: '规划 Agent', research: '检索 Agent', writer: '写作 Agent', reviewer: '评审 Agent', polisher: '润色 Agent' };
                             const colors: Record<string, string> = {
-                              planner: 'border-teal-300 bg-teal-50 dark:bg-teal-900/30 dark:border-teal-700',
-                              research: 'border-sky-300 bg-sky-50 dark:bg-sky-900/30 dark:border-sky-700',
-                              writer: 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-700',
-                              reviewer: 'border-amber-300 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700',
-                              polisher: 'border-rose-300 bg-rose-50 dark:bg-rose-900/30 dark:border-rose-700',
+                              planner: 'border-teal-300 bg-teal-50 dark:bg-teal-900/30 dark:border-teal-700 border-l-[3px] border-l-teal-500',
+                              research: 'border-sky-300 bg-sky-50 dark:bg-sky-900/30 dark:border-sky-700 border-l-[3px] border-l-sky-500',
+                              writer: 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-700 border-l-[3px] border-l-emerald-500',
+                              reviewer: 'border-amber-300 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700 border-l-[3px] border-l-amber-500',
+                              polisher: 'border-rose-300 bg-rose-50 dark:bg-rose-900/30 dark:border-rose-700 border-l-[3px] border-l-rose-500',
                             };
                             const allDone = group.every((a) => a.status === 'done');
                             const anyFail = group.some((a) => a.status === 'failed');
@@ -365,14 +367,16 @@ export function PipelinePage({ project }: { project: Project }) {
                   </Card>
                 )}
 
-                {/* 步骤时间线 */}
-                <div className="space-y-1.5 mb-4">
+                {/* 步骤时间线（品牌渐变徽章 + 纵向连接线，链条式阅读） */}
+                <div className="space-y-0 mb-4">
                   {active.steps.map((s, i) => {
                     const tone = stepTone(s);
+                    const isLast = i === active.steps.length - 1;
                     return (
-                      <div key={s.key} className="flex items-start gap-2">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${tone.bg}`}>{tone.icon}</div>
-                        <div className="flex-1 min-w-0 pt-0.5">
+                      <div key={s.key} className="flex items-start gap-2.5 relative">
+                        {!isLast && <span className="absolute left-[11px] top-7 bottom-0 w-px bg-gradient-to-b from-teal-300/70 to-slate-200 dark:from-teal-700/60 dark:to-slate-700" />}
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10 ${tone.bg}`}>{tone.icon}</div>
+                        <div className="flex-1 min-w-0 pt-0.5 pb-4">
                           <div className="flex items-center gap-2">
                             <span className={`text-sm ${s.status === 'pending' ? 'text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200'}`}>{STEP_LABELS[s.key] || s.label}</span>
                             {AGENT_MAP[s.key] && <Badge tone={AGENT_MAP[s.key].tone}>{AGENT_MAP[s.key].role}</Badge>}
@@ -382,7 +386,6 @@ export function PipelinePage({ project }: { project: Project }) {
                             <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2 break-all">{s.output}</div>
                           )}
                         </div>
-                        {i < active.steps.length - 1 && <ChevronRight size={13} className="hidden" />}
                       </div>
                     );
                   })}

@@ -274,11 +274,11 @@ function AppInner() {
               <div
                 key={p.id}
                 onClick={() => setCurrentProjectId(p.id)}
-                className={`group relative rounded-md px-3 py-2 cursor-pointer text-sm transition-colors ${
-                  currentProjectId === p.id ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900'
+                className={`group relative rounded-md px-3 py-2 cursor-pointer text-sm transition-all duration-150 ${
+                  currentProjectId === p.id ? 'bg-teal-50/80 text-teal-900 dark:bg-teal-900/25 dark:text-teal-100' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900'
                 }`}
               >
-                {currentProjectId === p.id && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded bg-teal-600" />}
+                {currentProjectId === p.id && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-4 rounded-full brand-logo" />}
                 <div className="flex items-center justify-between gap-1">
                   <span className="truncate">{p.name}</span>
                   <span className="hidden group-hover:flex items-center gap-1">
@@ -492,7 +492,7 @@ function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => 
               key={c.id}
               onMouseEnter={() => setActive(i)}
               onClick={() => { c.run(); onClose(); }}
-              className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm ${i === active ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300'}`}
+              className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm transition-colors ${i === active ? 'bg-teal-50 dark:bg-teal-900/25 text-teal-900 dark:text-teal-100 border-l-2 border-l-teal-500' : 'text-slate-600 dark:text-slate-300'}`}
             >
               <span>{c.label}</span>
               <span className="text-[11px] text-slate-400">{c.group}</span>

@@ -422,8 +422,8 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                   key={m}
                   onClick={() => setEditorMode(m)}
                   title={m === 'edit' ? '编辑' : m === 'preview' ? '预览' : '分栏'}
-                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors ${
-                    editorMode === m ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-all duration-150 ${
+                    editorMode === m ? 'bg-teal-600 text-white shadow-sm shadow-teal-600/25' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
                   }`}
                 >
                   {m === 'edit' ? <Pencil size={11} /> : m === 'preview' ? <Eye size={11} /> : <FileText size={11} />}

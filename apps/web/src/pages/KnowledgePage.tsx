@@ -92,7 +92,7 @@ export function KnowledgePage({ project }: { project: Project }) {
         </SectionTitle>
         <div
           className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
-            dragging ? 'border-teal-500 bg-teal-50' : 'border-slate-300 dark:border-slate-700 hover:border-teal-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+            dragging ? 'border-teal-500 bg-teal-50/80 border-dashed' : 'border-slate-300 dark:border-slate-700 hover:border-teal-400 hover:bg-slate-50 dark:hover:bg-slate-800'
           }`}
           onClick={() => fileRef.current?.click()}
           onDragOver={(e) => {

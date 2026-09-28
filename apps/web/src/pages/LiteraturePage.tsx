@@ -207,7 +207,7 @@ export function LiteraturePage({ project }: { project: Project }) {
           </div>
           <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
             {hits.map((h, i) => (
-              <div key={i} className="flex items-start gap-3 border border-slate-100 dark:border-slate-800 rounded-lg p-3 hover:border-teal-200">
+              <div key={i} className="flex items-start gap-3 border border-slate-100 dark:border-slate-800 rounded-lg p-3 hover:border-teal-300 hover:shadow-[0_2px_10px_-4px_rgba(13,148,136,0.18)] transition-all duration-150">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{h.title}</div>
                   <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
