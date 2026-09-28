@@ -315,6 +315,8 @@ export class PipelineService {
     let retry = 0;
     const maxRetry = MAX_RETRY;
     let report: { totalScore: number; feedback: string } | undefined;
+    // 最优轮次快照：回炉可能使分数波动，最终定稿取所有轮次中最高分版本
+    let best: { score: number; content: string } = { score: -1, content: '' };
 
     while (true) {
       // ④ Supervisor：Writer Agent 分章起草（注入 Reflexion + 程序记忆）
@@ -371,6 +373,8 @@ export class PipelineService {
       const latestDoc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
       const review = await this.orchestrator.reviewerAgent(taskId, documentId, doc.title, latestDoc.content ?? '', task.topic, this.reflexionLogs(taskId));
       report = review.report;
+      const scored = Number(report.totalScore);
+      if (scored > best.score) best = { score: scored, content: latestDoc.content ?? '' };
       await this.advance(taskId, 'quality-gate', 'done', `总分 ${report.totalScore}/100`);
 
       if (report.totalScore < QUALITY_THRESHOLD && retry < maxRetry) {
@@ -406,6 +410,9 @@ export class PipelineService {
       db.update(documents).set({ status: 'polished', updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
     } else {
     await this.advance(taskId, 'polish', 'running');
+    if (best.score >= 0 && best.content) {
+      db.update(documents).set({ content: best.content, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
+    }
     const finalDoc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
     // 润色只处理正文主体，图表/参考文献尾部原样保留（此前整体覆盖把图和文献列表洗掉）
     const content = finalDoc.content ?? '';
