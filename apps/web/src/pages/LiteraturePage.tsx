@@ -229,13 +229,13 @@ export function LiteraturePage({ project }: { project: Project }) {
         </Card>
       )}
 
-      {/* 工具 Tab + 文献库 */}
-      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800">
+      {/* 工具 Tab + 文献库（移动端横向滚动） */}
+      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {TOOLS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTool(t.key)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px ${
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px whitespace-nowrap ${
               tool === t.key ? 'border-teal-600 text-teal-700 font-medium' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800'
             }`}
           >

@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { BookOpen, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Languages, ListTree, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { BookOpen, Bot, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Languages, ListTree, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import { ChatPanel } from './ChatPanel';
 import { useContext } from 'react';
@@ -25,7 +25,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [polishResult, setPolishResult] = useState<{ original: string; polished: string; reason: string } | null>(null);
   const [polishMode, setPolishMode] = useState<'polish' | 'reduce'>('polish');
   const [translateTarget, setTranslateTarget] = useState<'zh' | 'en'>('zh');
-  const [editorMode, setEditorMode] = useState<'edit' | 'preview' | 'split'>('split');
+  const [editorMode, setEditorMode] = useState<'edit' | 'preview' | 'split'>(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? 'edit' : 'split'));
   const toast = useContext(ToastContext);
   const [refs, setRefs] = useState<Reference[]>([]);
   const [citations, setCitations] = useState<CitationRow[]>([]);
@@ -42,6 +42,8 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [newDocTitle, setNewDocTitle] = useState('');
   const [creatingDoc, setCreatingDoc] = useState(false);
   const [deletingDoc, setDeletingDoc] = useState<Doc | null>(null);
+  /** 移动端工具面板切换：大纲 / AI 助手 / AI 工具 三者互斥，打开时编辑器全宽让位 */
+  const [mobilePanel, setMobilePanel] = useState<'outline' | 'chat' | 'tools' | null>(null);
 
   const loadDocs = useCallback(async () => {
     const list = await api.documents.list(project.id);
@@ -78,19 +80,47 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     }
   }, [docId]);
 
+  // 立即保存（防抖自动保存与 ⌘S 共用；manual=true 时给出用户可见反馈）
+  const saveNow = useCallback(
+    async (manual = false) => {
+      if (!docId || content === doc?.content) return;
+      const updated = await api.documents.update(docId, { content });
+      setDoc(updated);
+      setSavedAt(Date.now());
+      if (manual) toast('success', '文档已保存');
+    },
+    [docId, content, doc?.content, toast],
+  );
+
   // 防抖自动保存
   useEffect(() => {
     if (!docId || content === doc?.content) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      const updated = await api.documents.update(docId, { content });
-      setDoc(updated);
-      setSavedAt(Date.now());
+    saveTimer.current = setTimeout(() => {
+      saveNow();
     }, 1200);
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [content, docId, doc?.content]);
+  }, [content, docId, doc?.content, saveNow]);
+
+  // 写作页快捷键：⌘S 立即保存 / ⌘B 切换大纲栏
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || !docId) return;
+      const k = e.key.toLowerCase();
+      if (k === 's') {
+        e.preventDefault(); // 阻止浏览器"保存网页"对话框
+        saveNow(true);
+      } else if (k === 'b') {
+        e.preventDefault(); // 阻止浏览器书签栏
+        setShowOutlinePanel((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [docId, saveNow]);
 
   const run = async (fn: () => Promise<unknown>) => {
     setError('');
@@ -381,16 +411,43 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
       <ErrorBox message={error} />
 
+      {/* 移动端工具面板切换（md+ 隐藏；三面板互斥，收起后编辑器全宽） */}
+      <div className="flex items-center gap-1.5 mb-3 md:hidden shrink-0 overflow-x-auto pb-0.5 -mt-0.5">
+        {([['outline', '大纲', ListTree], ['chat', 'AI 助手', Bot], ['tools', 'AI 工具', Sparkles]] as const).map(([key, label, Icon]) => (
+          <button
+            key={key}
+            onClick={() => setMobilePanel((m) => (m === key ? null : key))}
+            className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs whitespace-nowrap transition-all duration-150 ${
+              mobilePanel === key ? 'brand-btn text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-teal-300'
+            }`}
+          >
+            <Icon size={12} /> {label}
+          </button>
+        ))}
+        {mobilePanel && (
+          <button className="ml-auto text-[11px] text-slate-400 dark:text-slate-500 underline shrink-0" onClick={() => setMobilePanel(null)}>
+            收起面板
+          </button>
+        )}
+      </div>
+
       <div className="flex-1 flex gap-4 min-h-0">
-        {/* 大纲栏 */}
-        <Card className={`w-60 shrink-0 p-3 overflow-y-auto flex flex-col ${showOutlinePanel ? '' : 'hidden md:flex'}`}>
+        {/* 大纲栏（桌面常驻可折叠；移动端经切换条独占全宽） */}
+        <Card className={`w-full md:w-60 shrink-0 p-3 overflow-y-auto flex flex-col ${showOutlinePanel || mobilePanel === 'outline' ? '' : 'hidden md:flex'}`}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
               <ListTree size={14} /> 大纲
             </span>
-            <Button variant="ghost" className="px-2 py-0.5 text-xs" onClick={() => setShowOutlinePanel((v) => !v)}>
-              {showOutlinePanel ? '隐藏' : '显示'}
-            </Button>
+            <div className="flex items-center gap-1">
+              {mobilePanel === 'outline' && (
+                <Button variant="ghost" className="px-2 py-0.5 text-xs md:hidden" onClick={() => setMobilePanel(null)}>
+                  收起
+                </Button>
+              )}
+              <Button variant="ghost" className="hidden md:inline-flex px-2 py-0.5 text-xs" onClick={() => setShowOutlinePanel((v) => !v)}>
+                {showOutlinePanel ? '隐藏' : '显示'}
+              </Button>
+            </div>
           </div>
           {!outline ? (
             <div className="text-xs text-slate-400 dark:text-slate-500">暂无大纲。输入主题生成：</div>
@@ -427,22 +484,24 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           </div>
         </Card>
 
-        {/* 内联 AI 写作助手：问答全程贯通当前文档，快捷润色/翻译/摘要 */}
-        <ChatPanel
-          project={project}
-          doc={doc}
-          onDocUpdated={async (patch) => {
-            if (!doc) return;
-            try {
-              await api.documents.update(doc.id, patch);
-              setDoc((prev) => (prev ? { ...prev, ...patch } : prev));
-            } catch {
-              toast('error', '保存到文档失败');
-            }
-          }}
-        />
-        {/* 编辑器 */}
-        <Card className="flex-1 flex flex-col min-w-0">
+        {/* 内联 AI 写作助手（桌面常驻可折叠；移动端经切换条独占全宽） */}
+        <div className={`${mobilePanel === 'chat' ? 'flex w-full' : 'hidden'} md:flex md:w-auto shrink-0 min-w-0`}>
+          <ChatPanel
+            project={project}
+            doc={doc}
+            onDocUpdated={async (patch) => {
+              if (!doc) return;
+              try {
+                await api.documents.update(doc.id, patch);
+                setDoc((prev) => (prev ? { ...prev, ...patch } : prev));
+              } catch {
+                toast('error', '保存到文档失败');
+              }
+            }}
+          />
+        </div>
+        {/* 编辑器（移动端打开任一工具面板时让位隐藏） */}
+        <Card className={`flex-1 min-w-0 ${mobilePanel ? 'hidden md:flex' : 'flex'} flex-col`}>
           <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800 shrink-0">
             <input
               className="font-medium text-slate-800 dark:text-slate-100 outline-none flex-1 bg-transparent"
@@ -498,10 +557,17 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           </div>
         </Card>
 
-        {/* AI 工具面板 */}
-        <Card className="w-72 shrink-0 p-3 overflow-y-auto hidden lg:block">
-          <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-1.5">
-            <Sparkles size={14} className="brand-gradient-text" /> AI 工具
+        {/* AI 工具面板（桌面 lg+ 常驻；移动端经切换条独占全宽） */}
+        <Card className={`${mobilePanel === 'tools' ? 'flex flex-col w-full' : 'hidden'} lg:flex lg:w-72 shrink-0 p-3 overflow-y-auto`}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+              <Sparkles size={14} className="brand-gradient-text" /> AI 工具
+            </div>
+            {mobilePanel === 'tools' && (
+              <Button variant="ghost" className="px-2 py-0.5 text-xs md:hidden" onClick={() => setMobilePanel(null)}>
+                收起
+              </Button>
+            )}
           </div>
 
           {aiBusy && <Spinner label="AI 正在处理…" />}

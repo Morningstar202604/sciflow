@@ -53,12 +53,12 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
     <div className="max-w-5xl mx-auto">
       {/* 项目总览（大厂式：白底 + 数据统计，去渐变去重色） */}
       <Card className="p-6 mb-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
             <div className="text-lg font-semibold text-slate-900 dark:text-slate-100 tracking-tight">{project.name}</div>
             <div className="text-sm text-slate-400 dark:text-slate-500 mt-1">{project.description || '让科研从想法到成文，一站式完成文献、写作与投稿'}</div>
           </div>
-          <div className="flex gap-2 shrink-0">
+          <div className="flex gap-2 shrink-0 flex-wrap">
             {stats.map((s) => (
               <div key={s.label} className="card-lift flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-2">
                 <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${s.tone}`}>

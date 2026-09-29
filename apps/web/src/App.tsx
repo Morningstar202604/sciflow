@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, useCallback, useContext, useEffect, useMemo, useState, createContext, type ReactNode } from 'react';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  BookOpen, Brain, FlaskConical, LayoutDashboard, MessageSquare, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
+  BookOpen, Brain, FlaskConical, LayoutDashboard, Menu, MessageSquare, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
@@ -99,6 +99,7 @@ function AppInner() {
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [projectQuery, setProjectQuery] = useState('');
   const [commandOpen, setCommandOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // 移动端抽屉侧栏
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('sciflow-theme') as 'light' | 'dark') || 'light');
 
   // ---- 全局 Toast 反馈 ----
@@ -115,6 +116,7 @@ function AppInner() {
   const selectedDocId = searchParams.get('doc');
   const setView = useCallback(
     (v: View) => {
+      setSidebarOpen(false); // 移动端切换页面后自动收起抽屉
       navigate(`/${v}`);
     },
     [navigate],
@@ -151,14 +153,22 @@ function AppInner() {
     loadProjects();
   }, [loadProjects]);
 
-  // Cmd+K / Ctrl+K 全局命令面板快捷键
+  // 全局快捷键：⌘K 命令面板 / ⌘N 新建项目 / Esc 关闭
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      const mod = e.metaKey || e.ctrlKey;
+      const k = e.key.toLowerCase();
+      if (mod && k === 'k') {
         e.preventDefault();
         setCommandOpen((s) => !s);
+      } else if (mod && k === 'n') {
+        e.preventDefault(); // 阻止浏览器新窗口
+        setCommandOpen(false);
+        setShowNewProject(true);
+      } else if (e.key === 'Escape') {
+        setCommandOpen(false);
+        setSidebarOpen(false);
       }
-      if (e.key === 'Escape') setCommandOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -210,8 +220,12 @@ function AppInner() {
     <ThemeContext.Provider value={{ theme, toggle: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')) }}>
       <ToastContext.Provider value={toast}>
         <div className="flex h-full overflow-hidden bg-slate-50 dark:bg-slate-950 dark:text-slate-100">
-        {/* ============ 左侧边栏：Logo + 项目区 + 功能导航分组 + 底部设置 ============ */}
-        <aside className="w-56 shrink-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-r border-slate-200 dark:border-slate-800 flex flex-col">
+        {/* 移动端抽屉遮罩（md+ 隐藏） */}
+        {sidebarOpen && <div className="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm md:hidden" onClick={() => setSidebarOpen(false)} />}
+        {/* ============ 左侧边栏：Logo + 项目区 + 功能导航分组 + 底部设置（移动端抽屉 / 桌面常驻） ============ */}
+        <aside className={`fixed inset-y-0 left-0 z-40 w-56 shrink-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-r border-slate-200 dark:border-slate-800 flex flex-col transition-transform duration-200 ease-out md:static md:translate-x-0 md:shadow-none ${
+          sidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
+        }`}>
           {/* Logo（品牌渐变徽标 + 内发光） */}
           <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg brand-logo text-white flex items-center justify-center text-[13px] font-bold tracking-tight">
@@ -275,7 +289,7 @@ function AppInner() {
             {filteredProjects.map((p) => (
               <div
                 key={p.id}
-                onClick={() => setCurrentProjectId(p.id)}
+                onClick={() => { setCurrentProjectId(p.id); setSidebarOpen(false); }}
                 className={`group relative rounded-md px-3 py-2 cursor-pointer text-sm transition-all duration-150 ${
                   currentProjectId === p.id ? 'bg-teal-50/80 text-teal-900 dark:bg-teal-900/25 dark:text-teal-100' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900'
                 }`}
@@ -349,7 +363,16 @@ function AppInner() {
         {/* ============ 右侧主区 ============ */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* 顶部面包屑：项目名 / 当前页（玻璃质感 header） */}
-          <header className="glass-header border-b border-slate-200/60 dark:border-slate-800 px-6 py-2.5 flex items-center gap-2 shrink-0">
+          <header className="glass-header border-b border-slate-200/60 dark:border-slate-800 px-4 md:px-6 py-2.5 flex items-center gap-2 shrink-0">
+            {/* 移动端抽屉开关 */}
+            <button
+              className="md:hidden p-1.5 -ml-1.5 rounded-md text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="打开导航菜单"
+              title="打开导航"
+            >
+              <Menu size={18} />
+            </button>
             {view === 'settings' ? (
               <span className="text-sm text-slate-700 dark:text-slate-200 font-medium">设置</span>
             ) : currentProject ? (
@@ -370,7 +393,7 @@ function AppInner() {
             </div>
           </header>
 
-          <main key={view} className="flex-1 overflow-y-auto p-6 page-in relative z-[1]">
+          <main key={view} className="flex-1 overflow-y-auto p-4 md:p-6 page-in relative z-[1]">
             {error && (
               <div className="mb-4">
                 <ErrorBox message={error} />
@@ -515,6 +538,8 @@ function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => 
         <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 flex items-center gap-3">
           <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">↑↓</kbd> 选择</span>
           <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">Enter</kbd> 执行</span>
+          <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">⌘N</kbd> 新建项目</span>
+          <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">⌘S</kbd> 写作页保存</span>
           <span className="ml-auto flex items-center gap-1"><Monitor size={11} /> SciFlow Command</span>
         </div>
       </div>
