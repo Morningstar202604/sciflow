@@ -1,5 +1,5 @@
 import { ReactNode, useEffect } from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, Info, Loader2, Sparkles, X, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, Loader2, Sparkles, X, XCircle } from 'lucide-react';
 
 const btnBase =
   'inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none whitespace-nowrap active:scale-[0.97] select-none';
@@ -208,6 +208,49 @@ export function SectionTitle({ children, extra }: { children: ReactNode; extra?:
 export function ErrorBox({ message }: { message: string }) {
   if (!message) return null;
   return <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-3 flex items-center gap-2"><XCircle size={14} className="shrink-0" />{message}</div>;
+}
+
+/** 危险/普通确认弹窗：替代原生 window.confirm，与设计系统一致的二次确认（含 loading 态） */
+export function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirmText = '确认',
+  cancelText = '取消',
+  danger = false,
+  loading = false,
+  onConfirm,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  description?: string;
+  confirmText?: string;
+  cancelText?: string;
+  danger?: boolean;
+  loading?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <Modal open={open} title={title} onClose={onClose} width="max-w-md">
+      <div className="flex items-start gap-3">
+        <span className={`w-9 h-9 rounded-lg shrink-0 flex items-center justify-center ${danger ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-500' : 'bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400'}`}>
+          <AlertTriangle size={18} />
+        </span>
+        {description && <div className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed pt-1.5">{description}</div>}
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose} disabled={loading}>
+          {cancelText}
+        </Button>
+        <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm} loading={loading}>
+          {confirmText}
+        </Button>
+      </div>
+    </Modal>
+  );
 }
 
 export function jsonText<T>(raw: string, fallback: T): T {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Brain, History, Lightbulb, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { MemoryItem } from '../types';
-import { Badge, Button, Card, Empty, ErrorBox, Input, Spinner, Textarea } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Spinner, Textarea } from '../components/ui';
 
 /** 记忆中心（Phase 2：Agentic Memory）
  * - 情景记忆 episodic：流水线完成时自动沉淀（主题/结构/评分），供后续任务参考
@@ -18,6 +18,7 @@ export function MemoryPage() {
   const [newContent, setNewContent] = useState('');
   const [newKeywords, setNewKeywords] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<MemoryItem | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -56,10 +57,20 @@ export function MemoryPage() {
     }
   };
 
-  const remove = async (id: string) => {
-    if (!window.confirm('删除这条记忆？')) return;
-    await api.memory.remove(id);
-    refresh();
+  const remove = (item: MemoryItem) => {
+    setDeleting(item);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    try {
+      await api.memory.remove(deleting.id);
+      setDeleting(null);
+      refresh();
+    } catch (e: any) {
+      setError(e.message);
+      setDeleting(null);
+    }
   };
 
   const typeTone = (t: string) => (t === 'procedural' ? 'teal' : 'blue') as 'teal' | 'blue';
@@ -147,13 +158,24 @@ export function MemoryPage() {
                 </div>
                 <div className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap break-all">{m.content}</div>
               </div>
-              <button className="text-slate-300 hover:text-rose-500 shrink-0" title="删除" onClick={() => remove(m.id)}>
+              <button className="text-slate-300 hover:text-rose-500 shrink-0" title="删除" onClick={() => remove(m)}>
                 <Trash2 size={15} />
               </button>
             </Card>
           ))}
         </div>
       )}
+
+      {/* 删除记忆确认弹窗 */}
+      <ConfirmDialog
+        open={!!deleting}
+        title="删除记忆"
+        description={deleting ? `确定要删除这条${deleting.type === 'procedural' ? '程序记忆' : '情景记忆'}吗？删除后无法恢复。` : undefined}
+        confirmText="删除"
+        danger
+        onConfirm={confirmDelete}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

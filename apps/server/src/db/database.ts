@@ -113,7 +113,9 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
   id TEXT PRIMARY KEY,
   doc_id TEXT NOT NULL,
   content TEXT NOT NULL,
-  seq INTEGER DEFAULT 0
+  seq INTEGER DEFAULT 0,
+  context TEXT DEFAULT '',
+  vector TEXT DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS reflexion_log (
@@ -205,6 +207,21 @@ CREATE TABLE IF NOT EXISTS custom_prompt (
   enabled INTEGER DEFAULT 1,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS llm_call_log (
+  id TEXT PRIMARY KEY,
+  caller TEXT DEFAULT 'general',
+  model TEXT DEFAULT '',
+  prompt_tokens INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  total_tokens INTEGER DEFAULT 0,
+  latency_ms INTEGER DEFAULT 0,
+  success INTEGER DEFAULT 1,
+  error TEXT DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_caller ON llm_call_log(caller);
+CREATE INDEX IF NOT EXISTS idx_llm_created ON llm_call_log(created_at);
 `);
 
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */
@@ -216,6 +233,9 @@ function ensureColumn(table: string, column: string, ddl: string) {
   }
 }
 ensureColumn('pipeline_task', 'trace', "TEXT DEFAULT '[]'");
+// 知识库 Contextual Retrieval 升级：旧库补齐 context/vector 列（RAG 混合检索依赖）
+ensureColumn('knowledge_chunk', 'context', "TEXT DEFAULT ''");
+ensureColumn('knowledge_chunk', 'vector', "TEXT DEFAULT '[]'");
 
 export const db: BetterSQLite3Database<typeof schema> = drizzle(sqlite, { schema });
 export { sqlite, DB_PATH };

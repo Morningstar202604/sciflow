@@ -9,7 +9,7 @@ import { ChatPanel } from './ChatPanel';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { CitationRow, Doc, Outline, Project, Reference, ResearchDesignResult, SimulatedReviewResult } from '../types';
-import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, Textarea, jsonText } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Select, Spinner, Textarea, jsonText } from '../components/ui';
 
 export function WritingPage({ project, initialDocId }: { project: Project; initialDocId: string | null }) {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -38,6 +38,10 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [designIdea, setDesignIdea] = useState('');
   const [reviewResult, setReviewResult] = useState<SimulatedReviewResult | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showNewDoc, setShowNewDoc] = useState(false);
+  const [newDocTitle, setNewDocTitle] = useState('');
+  const [creatingDoc, setCreatingDoc] = useState(false);
+  const [deletingDoc, setDeletingDoc] = useState<Doc | null>(null);
 
   const loadDocs = useCallback(async () => {
     const list = await api.documents.list(project.id);
@@ -101,18 +105,36 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   };
 
   const createDoc = async () => {
-    const title = window.prompt('新文档标题', '');
+    const title = newDocTitle.trim();
     if (!title) return;
-    const d = await api.documents.create(project.id, title.trim());
-    setDocs((s) => [...s, d]);
-    setDocId(d.id);
+    setCreatingDoc(true);
+    setError('');
+    try {
+      const d = await api.documents.create(project.id, title);
+      setDocs((s) => [...s, d]);
+      setDocId(d.id);
+      setNewDocTitle('');
+      setShowNewDoc(false);
+      toast('success', `文档「${d.title}」已创建`);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setCreatingDoc(false);
+    }
   };
 
-  const removeDoc = async (id: string) => {
-    if (!window.confirm('删除该文档？')) return;
-    await api.documents.remove(id);
-    setDocs((s) => s.filter((d) => d.id !== id));
-    if (docId === id) setDocId(null);
+  const confirmDeleteDoc = async () => {
+    if (!deletingDoc) return;
+    try {
+      await api.documents.remove(deletingDoc.id);
+      setDocs((s) => s.filter((d) => d.id !== deletingDoc.id));
+      if (docId === deletingDoc.id) setDocId(null);
+      toast('info', `文档「${deletingDoc.title}」已删除`);
+      setDeletingDoc(null);
+    } catch (e: any) {
+      setError(e.message);
+      setDeletingDoc(null);
+    }
   };
 
   const generateOutline = () =>
@@ -291,17 +313,38 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
     }
   };
 
+  const newDocDialog = (
+    <Modal open={showNewDoc} title="新建论文文档" onClose={() => setShowNewDoc(false)} width="max-w-md">
+      <Input
+        placeholder="文档标题，如：图神经网络在药物发现中的研究综述"
+        value={newDocTitle}
+        onChange={(e) => setNewDocTitle(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && createDoc()}
+        autoFocus
+      />
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={() => setShowNewDoc(false)}>
+          取消
+        </Button>
+        <Button onClick={createDoc} disabled={creatingDoc || !newDocTitle.trim()}>
+          {creatingDoc ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} 创建
+        </Button>
+      </div>
+    </Modal>
+  );
+
   if (!doc) {
     return (
       <div className="max-w-2xl mx-auto">
         <Card className="p-6">
           <Empty text="这里空空如也——新建一篇论文，或到「全自动流水线」一键生成初稿" hint="大纲生成 / 章节起草 / 润色 / 翻译 / 降重，全流程 AI 辅助" />
           <div className="flex justify-center">
-            <Button onClick={createDoc}>
+            <Button onClick={() => setShowNewDoc(true)}>
               <Plus size={15} /> 新建文档
             </Button>
           </div>
         </Card>
+        {newDocDialog}
       </div>
     );
   }
@@ -324,14 +367,14 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
               className="opacity-60 hover:opacity-100"
               onClick={(e) => {
                 e.stopPropagation();
-                removeDoc(d.id);
+                setDeletingDoc(d);
               }}
             >
               <Trash2 size={12} />
             </button>
           </div>
         ))}
-        <Button variant="outline" onClick={createDoc} className="px-2.5 py-1">
+        <Button variant="outline" onClick={() => setShowNewDoc(true)} className="px-2.5 py-1">
           <Plus size={14} />
         </Button>
       </div>
@@ -723,6 +766,20 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           )}
         </Card>
       </div>
+
+      {/* 新建文档弹窗（空态与主界面共用） */}
+      {newDocDialog}
+
+      {/* 删除文档确认弹窗 */}
+      <ConfirmDialog
+        open={!!deletingDoc}
+        title="删除文档"
+        description={`确定要删除「${deletingDoc?.title ?? ''}」吗？文档内容及其润色/翻译历史将一并删除，且无法恢复。`}
+        confirmText="删除"
+        danger
+        onConfirm={confirmDeleteDoc}
+        onClose={() => setDeletingDoc(null)}
+      />
     </div>
   );
 }

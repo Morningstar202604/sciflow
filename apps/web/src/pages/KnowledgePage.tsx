@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { KnowledgeDoc, Project } from '../types';
-import { Button, Card, Empty, ErrorBox, Input, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
+import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -28,6 +28,7 @@ export function KnowledgePage({ project }: { project: Project }) {
   const toast = useContext(ToastContext);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [deleting, setDeleting] = useState<KnowledgeDoc | null>(null);
 
   const load = async () => {
     try {
@@ -72,11 +73,22 @@ export function KnowledgePage({ project }: { project: Project }) {
     }
   };
 
-  const remove = async (id: string) => {
-    if (!window.confirm('删除该资料及其分块？')) return;
-    await api.knowledge.remove(id);
-    setAnswer(null);
-    load();
+  const remove = (doc: KnowledgeDoc) => {
+    setDeleting(doc);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    try {
+      await api.knowledge.remove(deleting.id);
+      setDeleting(null);
+      setAnswer(null);
+      load();
+      toast('info', `「${deleting.name}」已删除`);
+    } catch (e: any) {
+      setError(e.message);
+      setDeleting(null);
+    }
   };
 
   return (
@@ -145,7 +157,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                       <span className="ml-2">{d.chunkCount} 个分块</span>
                     </div>
                   </div>
-                  <button onClick={() => remove(d.id)} className="text-slate-400 dark:text-slate-500 hover:text-rose-500" title="删除">
+                  <button onClick={() => remove(d)} className="text-slate-400 dark:text-slate-500 hover:text-rose-500" title="删除">
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -192,6 +204,17 @@ export function KnowledgePage({ project }: { project: Project }) {
           </div>
         )}
       </Card>
+
+      {/* 删除资料确认弹窗 */}
+      <ConfirmDialog
+        open={!!deleting}
+        title="删除资料"
+        description={deleting ? `确定要删除「${deleting.name}」及其全部 ${deleting.chunkCount} 个内容分块吗？删除后无法恢复。` : undefined}
+        confirmText="删除"
+        danger
+        onConfirm={confirmDelete}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

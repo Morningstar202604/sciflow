@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
-import { Button, Input, Modal, Spinner, ErrorBox, ToastViewport, type ToastItem, type ToastKind } from './components/ui';
+import { Button, Input, Modal, Spinner, ErrorBox, ToastViewport, ConfirmDialog, type ToastItem, type ToastKind } from './components/ui';
 // 路由级代码分割：所有页面懒加载（首屏只加载当前视图，大厂 SPA 标准）
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const WritingPage = lazy(() => import('./pages/WritingPage').then((m) => ({ default: m.WritingPage })));
@@ -96,6 +96,7 @@ function AppInner() {
   const [newName, setNewName] = useState('');
   const [renaming, setRenaming] = useState<Project | null>(null);
   const [renameText, setRenameText] = useState('');
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [projectQuery, setProjectQuery] = useState('');
   const [commandOpen, setCommandOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('sciflow-theme') as 'light' | 'dark') || 'light');
@@ -182,12 +183,13 @@ function AppInner() {
     toast('success', '项目已重命名');
   };
 
-  const removeProject = async (id: string) => {
-    if (!window.confirm('删除项目将同时删除其下所有文档、文献与流水线记录，确认？')) return;
-    await api.projects.remove(id);
-    setProjects((s) => s.filter((p) => p.id !== id));
-    if (currentProjectId === id) setCurrentProjectId(null);
+  const confirmDeleteProject = async () => {
+    if (!deletingProject) return;
+    await api.projects.remove(deletingProject.id);
+    setProjects((s) => s.filter((p) => p.id !== deletingProject.id));
+    if (currentProjectId === deletingProject.id) setCurrentProjectId(null);
     toast('info', '项目已删除');
+    setDeletingProject(null);
   };
 
   const currentProject = useMemo(() => projects.find((p) => p.id === currentProjectId) ?? null, [projects, currentProjectId]);
@@ -298,7 +300,7 @@ function AppInner() {
                       title="删除"
                       onClick={(e) => {
                         e.stopPropagation();
-                        removeProject(p.id);
+                        setDeletingProject(p);
                       }}
                     >
                       <Trash2 size={12} />
@@ -434,6 +436,17 @@ function AppInner() {
             </Button>
           </div>
         </Modal>
+
+        {/* 删除项目确认弹窗（危险操作二次确认） */}
+        <ConfirmDialog
+          open={!!deletingProject}
+          title="删除研究项目"
+          description={`确定要删除「${deletingProject?.name ?? ''}」吗？项目下的所有文档、文献与流水线记录将被一并删除，且无法恢复。`}
+          confirmText="删除"
+          danger
+          onConfirm={confirmDeleteProject}
+          onClose={() => setDeletingProject(null)}
+        />
         </div>
       </ToastContext.Provider>
     </ThemeContext.Provider>
