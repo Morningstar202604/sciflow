@@ -1,10 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
-// echarts 按需引入（仅雷达图），打包体积 1.1MB → ~200KB
-import * as echarts from 'echarts/core';
-import { RadarChart } from 'echarts/charts';
-import { TooltipComponent } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-echarts.use([RadarChart, TooltipComponent, CanvasRenderer]);
+import { useEffect, useState } from 'react';
 import { Gauge, Loader2, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, QualityReport } from '../types';
@@ -20,44 +14,50 @@ const DIMS = [
   { key: 'format', label: '格式' },
 ];
 
+/** 自绘 SVG 雷达图（替代 ECharts，去掉 ~200KB 打包体积） */
 function Radar({ scores }: { scores: Record<string, number> }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const W = 300, H = 250, CX = W / 2, CY = 112, R = 82;
+  const n = DIMS.length;
+  const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
+  const pt = (i: number, v: number) => {
+    const r = (v / 100) * R;
+    return [CX + r * Math.cos(angle(i)), CY + r * Math.sin(angle(i))] as const;
+  };
+  const poly = (v: number) => Array.from({ length: n }, (_, i) => pt(i, v).join(',')).join(' ');
+  const value = (i: number) => Math.round(scores[DIMS[i].key] ?? 0);
 
-  useEffect(() => {
-    if (!ref.current) return;
-    const chart = echarts.init(ref.current);
-    chart.setOption({
-      tooltip: {},
-      radar: {
-        indicator: DIMS.map((d) => ({ name: d.label, max: 100 })),
-        radius: '65%',
-        splitArea: { areaStyle: { color: ['#f7f9fc', '#eef2f8'] } },
-        axisName: { color: '#475569', fontSize: 11 },
-      },
-      series: [
-        {
-          type: 'radar',
-          data: [
-            {
-              value: DIMS.map((d) => scores[d.key] ?? 0),
-              name: '质量评分',
-              areaStyle: { color: 'rgba(13,148,136,0.22)' },
-              lineStyle: { color: '#0d9488', width: 2 },
-              itemStyle: { color: '#0891b2' },
-            },
-          ],
-        },
-      ],
-    });
-    const onResize = () => chart.resize();
-    window.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      chart.dispose();
-    };
-  }, [scores]);
-
-  return <div ref={ref} className="w-full h-64" />;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="7 维质量评分雷达图">
+      {/* 网格：4 级同心多边形 */}
+      {[25, 50, 75, 100].map((lv) => (
+        <polygon key={lv} points={poly(lv)} fill="none" stroke="#e2e8f0" strokeWidth="1" className="dark:stroke-slate-700" />
+      ))}
+      {/* 轴线 */}
+      {DIMS.map((_, i) => (
+        <line key={i} x1={CX} y1={CY} x2={pt(i, 100)[0]} y2={pt(i, 100)[1]} stroke="#e2e8f0" strokeWidth="1" className="dark:stroke-slate-700" />
+      ))}
+      {/* 数据多边形 */}
+      <polygon points={poly(100)} fill="rgba(13,148,136,0.22)" stroke="#0d9488" strokeWidth="2" />
+      {/* 顶点 + 数值标签 */}
+      {DIMS.map((d, i) => {
+        const [x, y] = pt(i, value(i));
+        const [lx, ly] = pt(i, 118);
+        return (
+          <g key={d.key}>
+            <circle cx={x} cy={y} r="3.5" fill="#0891b2" stroke="#fff" strokeWidth="1.5">
+              <title>{`${d.label}：${value(i)}/100`}</title>
+            </circle>
+            <text x={lx} y={ly} textAnchor="middle" fontSize="10" fill="#475569" className="dark:fill-slate-300" fontWeight={600}>
+              {d.label}
+            </text>
+            <text x={lx} y={ly + 11} textAnchor="middle" fontSize="10" fill="#0d9488" fontWeight={700}>
+              {value(i)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
 }
 
 export function QualityPage({ project }: { project: Project }) {
@@ -77,7 +77,14 @@ export function QualityPage({ project }: { project: Project }) {
   }, [project.id]);
 
   useEffect(() => {
-    if (docId) api.quality.history(docId).then(setHistory).catch(() => setHistory([]));
+    if (docId)
+      api.quality
+        .history(docId)
+        .then((h) => {
+          setHistory(h);
+          if (h.length) setSelectedHist({ ...h[0], scoresObj: jsonText<Record<string, number>>(h[0].scores, {}) });
+        })
+        .catch(() => setHistory([]));
   }, [docId]);
 
   const doReview = async () => {

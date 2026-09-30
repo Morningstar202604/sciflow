@@ -22,12 +22,12 @@ interface CompleteOptions {
 }
 
 /**
- * 统一 AI 服务：OpenAI 兼容协议（支持 OpenAI / DeepSeek / 通义千问 / 豆包 等）
- * 通过环境变量切换：AI_BASE_URL / AI_API_KEY / AI_MODEL
+ * 统一 AI 服务：OpenAI 兼容协议（国内厂商：豆包火山方舟 / DeepSeek / 通义千问 / 智谱 / Kimi 等）
+ * 通过环境变量切换：AI_BASE_URL / AI_API_KEY / AI_MODEL（默认豆包火山方舟）
  */
 @Injectable()
 export class AiService {
-  private baseUrl = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+  private baseUrl = (process.env.AI_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
   private apiKey = process.env.AI_API_KEY || '';
   /** fast 档：轻量快速模型（默认） */
   private fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
@@ -71,7 +71,7 @@ export class AiService {
 
   /** 回退到环境变量配置（删除激活中的厂商时调用，避免内存残留失效厂商） */
   resetToEnv() {
-    this.baseUrl = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    this.baseUrl = (process.env.AI_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
     this.apiKey = process.env.AI_API_KEY || '';
     this.fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
     this.strongModel = process.env.AI_MODEL_STRONG || this.fastModel;

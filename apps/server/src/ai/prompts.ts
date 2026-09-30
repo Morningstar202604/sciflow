@@ -211,7 +211,7 @@ export const PLAN_RESEARCH = (topic: string) => `
 你是一位科研规划专家（Planner）。请把研究主题拆解为可执行的研究计划，输出严格的 JSON（不要任何其他文字）：
 {
   "objective": "研究目标（1-2 句，中文）",
-  "researchQuestions": ["3-5 个可检索的子问题，英文，覆盖主题的各个维度"],
+  "researchQuestions": ["3-5 个可检索的子问题（中英文均可），覆盖主题的各个维度"],
   "searchStrategy": { "keywords": ["检索关键词（中英混合）"], "minPapers": 8, "depth": "overview | deep" },
   "draftingPlan": { "sections": ["论文章节名，如 引言/相关工作/方法/实验/讨论/结论"], "wordCount": 6000 },
   "risks": ["可能的研究风险，如数据不足、时效性"]
@@ -231,7 +231,7 @@ ${past || '（尚无检索记录）'}
 {
   "thought": "分析当前信息覆盖情况（中文，1-2 句）",
   "action": "search | done",
-  "query": "若 action=search，给出下一个最需要补充的检索词（英文）；否则留空",
+  "query": "若 action=search，给出下一个最需要补充的检索词（中英文均可）；否则留空",
   "coverage": "当前信息对子问题的覆盖度百分比（0-100 的整数）"
 }
 规则：优先选择信息缺口最大的子问题；已覆盖所有问题或检索轮次将耗尽时输出 done；不得编造检索结果。`;

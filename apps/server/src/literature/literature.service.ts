@@ -1,6 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { sql } from 'drizzle-orm';
+import { db } from '../db/database';
+import { references } from '../db/schema';
 
 export interface PaperHit {
+  id?: string;
   title: string;
   authors: string[];
   year: number | null;
@@ -8,164 +12,49 @@ export interface PaperHit {
   doi: string;
   url: string;
   abstract: string;
-  source: 'openalex' | 'arxiv' | 'semantic-scholar';
+  source: 'manual';
   citationCount: number;
 }
 
 /**
- * 文献检索服务：真实对接 3 个免费学术 API
- * - OpenAlex（无需 key）
- * - arXiv（无需 key）
- * - Semantic Scholar（免费、限流）
- * 多源并查 + 失败降级，保证返回的文献真实存在、可追溯
+ * 文献检索服务（本地文献库版）
+ * - 已移除全部国外在线源（OpenAlex / arXiv / Semantic Scholar / CrossRef），零外部网络依赖
+ * - search() 在本地文献库（references 表）内按 标题/作者/摘要 做模糊检索，
+ *   供流水线 ReAct / Agentic RAG / MCP / 前端复用；projectId 可选限定项目范围
  */
 @Injectable()
 export class LiteratureService {
-  private readonly logger = new Logger(LiteratureService.name);
-
-  /** 全局并发闸（最多 2 个外部检索并发，避免多路 ReAct/Agentic RAG 同时打爆免费源触发 429 风暴） */
-  private static active = 0;
-  private static readonly MAX_CONCURRENT = 2;
-  private static readonly waiters: (() => void)[] = [];
-
-  private async acquireSlot() {
-    while (LiteratureService.active >= LiteratureService.MAX_CONCURRENT) {
-      await new Promise<void>((resolve) => LiteratureService.waiters.push(resolve));
-    }
-    LiteratureService.active += 1;
-  }
-
-  private releaseSlot() {
-    LiteratureService.active -= 1;
-    const next = LiteratureService.waiters.shift();
-    if (next) next();
-  }
-
-  async search(query: string, limit = 8): Promise<PaperHit[]> {
+  async search(query: string, limit = 8, projectId?: string): Promise<PaperHit[]> {
     const q = query.trim();
     if (!q) return [];
+    const q2 = `%${q}%`;
+    const cond = sql`${references.title} LIKE ${q2} OR COALESCE(${references.authors}, '') LIKE ${q2} OR COALESCE(${references.abstract}, '') LIKE ${q2}`;
+    const rows = db
+      .select()
+      .from(references)
+      .where(projectId ? sql`${references.projectId} = ${projectId} AND (${cond})` : cond)
+      .all();
+    return rows.slice(0, limit).map((r) => ({
+      id: r.id,
+      title: r.title,
+      authors: this.parseAuthors(r.authors),
+      year: r.year,
+      venue: r.venue ?? '',
+      doi: r.doi ?? '',
+      url: r.url || (r.doi ? `https://doi.org/${r.doi}` : ''),
+      abstract: r.abstract ?? '',
+      source: 'manual' as const,
+      citationCount: r.citationCount ?? 0,
+    }));
+  }
 
-    await this.acquireSlot();
-    let results: PaperHit[] = [];
-    const seen = new Set<string>();
+  private parseAuthors(json: string | null): string[] {
+    if (!json) return [];
     try {
-      const [openalex, arxiv, s2, crossref] = await Promise.allSettled([
-        this.searchOpenAlex(q, limit),
-        this.searchArxiv(q, limit),
-        this.searchSemanticScholar(q, limit),
-        this.searchCrossRef(q, limit),
-      ]);
-
-      for (const r of [openalex, arxiv, s2, crossref]) {
-        if (r.status !== 'fulfilled') {
-          this.logger.warn(`检索源失败: ${r.reason?.message || r.reason}`);
-          continue;
-        }
-        for (const hit of r.value) {
-          const key = hit.title.trim().toLowerCase();
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          results.push(hit);
-        }
-      }
-    } finally {
-      this.releaseSlot();
+      const arr = JSON.parse(json);
+      return Array.isArray(arr) ? arr.map(String) : [];
+    } catch {
+      return json ? [json] : [];
     }
-    return results.slice(0, limit);
-  }
-
-  private async searchOpenAlex(query: string, limit: number): Promise<PaperHit[]> {
-    const url = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=${limit}&mailto=sciflow@example.com`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) throw new Error(`OpenAlex ${res.status}`);
-    const data = (await res.json()) as any;
-    return (data.results || []).map((w: any) => ({
-      title: w.title || '(untitled)',
-      authors: (w.authorships || []).slice(0, 8).map((a: any) => a.author?.display_name || ''),
-      year: w.publication_year ?? null,
-      venue: w.primary_location?.source?.display_name || '',
-      doi: w.doi || '',
-      url: w.doi || '',
-      abstract: w.abstract_inverted_index ? this.invertedIndexToText(w.abstract_inverted_index) : '',
-      source: 'openalex' as const,
-      citationCount: w.cited_by_count || 0,
-    }));
-  }
-
-  private async searchArxiv(query: string, limit: number): Promise<PaperHit[]> {
-    const url = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${limit}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) throw new Error(`arXiv ${res.status}`);
-    const xml = await res.text();
-    const entries = xml.match(/<entry>[\s\S]*?<\/entry>/g) || [];
-    return entries.slice(0, limit).map((e) => {
-      const title = this.xmlTag(e, 'title').replace(/\s+/g, ' ').trim();
-      const authors = [...e.matchAll(/<author>[\s\S]*?<name>([^<]+)<\/name>[\s\S]*?<\/author>/g)].map((m) => m[1].trim());
-      const id = this.xmlTag(e, 'id');
-      const summary = this.xmlTag(e, 'summary').replace(/\s+/g, ' ').trim();
-      return {
-        title,
-        authors,
-        year: Number(this.xmlTag(e, 'published').slice(0, 4)) || null,
-        venue: 'arXiv',
-        doi: '',
-        url: id,
-        abstract: summary,
-        source: 'arxiv' as const,
-        citationCount: 0,
-      };
-    });
-  }
-
-  private async searchSemanticScholar(query: string, limit: number): Promise<PaperHit[]> {
-    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(
-      query,
-    )}&limit=${limit}&fields=title,authors,year,venue,externalIds,abstract,url,citationCount`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) throw new Error(`SemanticScholar ${res.status}`);
-    const data = (await res.json()) as any;
-    return (data.data || []).map((p: any) => ({
-      title: p.title || '(untitled)',
-      authors: (p.authors || []).slice(0, 8).map((a: any) => a.name || ''),
-      year: p.year ?? null,
-      venue: p.venue || '',
-      doi: p.externalIds?.DOI || '',
-      url: p.url || p.externalIds?.ArXiv || '',
-      abstract: p.abstract || '',
-      source: 'semantic-scholar' as const,
-      citationCount: p.citationCount || 0,
-    }));
-  }
-
-  /** CrossRef 备用源：OpenAlex 匿名搜索暂停/限流时保证元数据完整的真实文献 */
-  private async searchCrossRef(query: string, limit: number): Promise<PaperHit[]> {
-    const url = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=${limit}&filter=type:journal-article&select=title,author,issued,container-title,DOI,abstract`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) throw new Error(`CrossRef ${res.status}`);
-    const data = (await res.json()) as any;
-    return (data.message?.items || []).map((it: any) => ({
-      title: (it.title || ['(untitled)'])[0],
-      authors: (it.author || []).slice(0, 8).map((a: any) => [a.given, a.family].filter(Boolean).join(' ').trim()),
-      year: it.issued?.['date-parts']?.[0]?.[0] ?? null,
-      venue: (it['container-title'] || [''])[0] || '',
-      doi: it.DOI || '',
-      url: `https://doi.org/${it.DOI}`,
-      abstract: (it.abstract || '').replace(/<[^>]+>/g, '').slice(0, 600) || '',
-      source: 'crossref' as const,
-      citationCount: it['is-referenced-by-count'] || 0,
-    }));
-  }
-
-  private invertedIndexToText(index: Record<string, number[]>): string {
-    const words: string[] = [];
-    for (const [word, positions] of Object.entries(index)) {
-      for (const pos of positions) words[pos] = word;
-    }
-    return words.filter(Boolean).join(' ').slice(0, 600);
-  }
-
-  private xmlTag(xml: string, tag: string): string {
-    const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
-    return m ? m[1] : '';
   }
 }

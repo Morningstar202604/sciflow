@@ -6,10 +6,10 @@ import { PaperHit } from '../literature/literature.service';
 export class ReferencesController {
   constructor(private readonly references: ReferencesService) {}
 
-  /** 真实检索文献（不自动入库） */
+  /** 文献库内检索（不自动入库；projectId 可选，用于限定当前项目） */
   @Post('search')
-  search(@Body() body: { query: string; limit?: number }) {
-    return this.references.search(body.query, body.limit || 8);
+  search(@Body() body: { query: string; limit?: number; projectId?: string }) {
+    return this.references.search(body.query, body.limit || 8, body.projectId);
   }
 
   @Get()

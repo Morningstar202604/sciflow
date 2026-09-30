@@ -1,5 +1,5 @@
 import type {
-  Project, Doc, Reference, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
+  Project, Doc, Reference, ReferenceInput, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
   AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool, PipelineStepConfig, QualityWeightItem,
 } from '../types';
@@ -140,12 +140,12 @@ export const api = {
   },
 
   references: {
-    search: (query: string, limit = 8) =>
-      request<Reference[]>(`/api/references/search`, { method: 'POST', body: JSON.stringify({ query, limit }) }),
+    search: (query: string, limit = 8, projectId?: string) =>
+      request<Reference[]>(`/api/references/search`, { method: 'POST', body: JSON.stringify({ query, limit, projectId }) }),
     list: (projectId: string) => request<Reference[]>(`/api/references?projectId=${projectId}`),
-    create: (projectId: string, hit: Partial<Reference> & { title: string }) =>
+    create: (projectId: string, hit: ReferenceInput) =>
       request<Reference>('/api/references', { method: 'POST', body: JSON.stringify({ projectId, hit }) }),
-    importMany: (projectId: string, hits: (Partial<Reference> & { title: string })[]) =>
+    importMany: (projectId: string, hits: ReferenceInput[]) =>
       request<Reference[]>('/api/references/import', { method: 'POST', body: JSON.stringify({ projectId, hits }) }),
     remove: (id: string) => request<{ ok: boolean }>(`/api/references/${id}`, { method: 'DELETE' }),
     summarize: (projectId: string, topic: string) =>

@@ -34,7 +34,7 @@ export class McpService {
     this.tools = [
       {
         name: 'literature.search',
-        description: '检索学术文献（多源：Semantic Scholar / arXiv / OpenAlex），返回论文列表含标题、摘要、年份、DOI',
+        description: '检索本地文献库（标题/作者/摘要模糊匹配），返回论文列表含标题、摘要、年份、DOI',
         inputSchema: {
           type: 'object',
           properties: {

@@ -45,6 +45,19 @@ export interface Reference {
   createdAt: number;
 }
 
+/** 文献录入入参（authors 兼容数组与 JSON 字符串两种形态） */
+export type ReferenceInput = {
+  title: string;
+  authors?: string[] | string;
+  year?: number | null;
+  venue?: string;
+  doi?: string;
+  url?: string;
+  abstract?: string;
+  source?: string;
+  citationCount?: number;
+};
+
 export interface CitationRow {
   id: string;
   documentId: string;

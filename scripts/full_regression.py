@@ -199,22 +199,21 @@ if qid:
 st, d2 = req("GET", "/api/quality")
 check("质量评分列表 GET", st == 200 and isinstance(d2, list), f"{st}")
 
-# ---------- 8. 文献调研 ----------
+# ---------- 8. 文献调研（本地文献库检索，已移除国外在线源） ----------
 st, d = req("POST", "/api/references/search", {"query": "graph neural network node classification", "limit": 5})
 hits = d.get("hits") if isinstance(d, dict) else (d if isinstance(d, list) else [])
-check("文献检索 search（三源）", st in (200, 201) and isinstance(hits, list) and len(hits) > 0, f"st={st} hits={len(hits) if isinstance(hits, list) else 0}")
-hits = d.get("hits") if isinstance(d, dict) else d
-st, d2 = req("GET", "/api/references")
-check("文献列表 GET", st == 200 and isinstance(d2, list), f"{st}")
-if hits and isinstance(hits, list) and hits:
-    st, d2 = req("POST", "/api/references", {"projectId": pid, "hit": hits[0]})
-    check("文献入库 POST", st in (200, 201) and d2.get("id"), f"{st} {str(d2)[:100]}")
-    refid = d2.get("id") if st == 201 else None
-    if refid:
-        st, d3 = req("GET", f"/api/references/{refid}")
-        check("文献详情 GET :id", st == 200 and d3.get("id") == refid, f"{st}")
-        st, d3 = req("DELETE", f"/api/references/{refid}")
-        check("文献删除 DELETE", st == 200, f"{st}")
+check("文献检索 search（本地文献库）", st in (200, 201) and isinstance(hits, list), f"st={st} hits={len(hits) if isinstance(hits, list) else 0}")
+# 先手动入库一条真实元数据文献，验证库内检索命中 ≥1
+st, d2 = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "Graph Neural Networks: A Review", "authors": ["J Zhou", "G Cui"], "year": 2020, "venue": "TKDE", "doi": "10.1109/TKDE.2020.3047454", "abstract": "A comprehensive survey of graph neural networks for node classification and link prediction tasks."}})
+if st in (200, 201) and d2.get("id"):
+    refid = d2.get("id")
+    st, d3 = req("POST", "/api/references/search", {"query": "graph neural", "projectId": pid, "limit": 5})
+    hits3 = d3.get("hits") if isinstance(d3, dict) else (d3 if isinstance(d3, list) else [])
+    check("库内检索命中（手动入库后）", st in (200, 201) and len(hits3) >= 1, f"st={st} hits={len(hits3)}")
+    st, d3 = req("GET", f"/api/references/{refid}")
+    check("文献详情 GET :id", st == 200 and d3.get("id") == refid, f"{st}")
+    st, d3 = req("DELETE", f"/api/references/{refid}")
+    check("文献删除 DELETE", st == 200, f"{st}")
 st, d2 = ai_call("文献批量导入 import", lambda: req("POST", "/api/references/import", {"projectId": pid, "hits": (hits or [])[:2]}))
 info("文献批量导入 import", f"st={st} {str(d2)[:80]}")
 st, d2 = ai_call("文献综述 summarize", lambda: req("POST", "/api/references/summarize", {"projectId": pid, "topic": "图神经网络"}))

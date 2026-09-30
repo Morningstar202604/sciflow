@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { DeepDiveResult, EvidenceResult, ExtractedPaper, GapResult, PaperComparisonResult, Project, Reference } from '../types';
-import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, jsonText } from '../components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, Textarea, jsonText } from '../components/ui';
 
 type Tool = 'summary' | 'extract' | 'evidence' | 'deepdive' | 'gap' | 'compare';
 
@@ -36,6 +36,15 @@ export function LiteraturePage({ project }: { project: Project }) {
   const [gapTopic, setGapTopic] = useState('');
   const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
   const [comparison, setComparison] = useState<PaperComparisonResult | null>(null);
+  // 手动添加文献表单
+  const [showAdd, setShowAdd] = useState(false);
+  const [addTitle, setAddTitle] = useState('');
+  const [addAuthors, setAddAuthors] = useState('');
+  const [addYear, setAddYear] = useState('');
+  const [addVenue, setAddVenue] = useState('');
+  const [addDoi, setAddDoi] = useState('');
+  const [addAbstract, setAddAbstract] = useState('');
+  const [adding, setAdding] = useState(false);
   const toast = useContext(ToastContext);
 
   useEffect(() => {
@@ -47,12 +56,39 @@ export function LiteraturePage({ project }: { project: Project }) {
     setSearching(true);
     setError('');
     try {
-      const results = await api.references.search(query.trim(), 8);
+      const results = await api.references.search(query.trim(), 8, project.id);
       setHits(results);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setSearching(false);
+    }
+  };
+
+  const addManual = async () => {
+    if (!addTitle.trim()) {
+      setError('文献标题必填');
+      return;
+    }
+    setAdding(true);
+    setError('');
+    try {
+      const r = await api.references.create(project.id, {
+        title: addTitle.trim(),
+        authors: addAuthors.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+        year: addYear ? Number(addYear) : undefined,
+        venue: addVenue.trim(),
+        doi: addDoi.trim(),
+        abstract: addAbstract.trim(),
+      });
+      toast('success', '文献已加入文献库');
+      setRefs((s) => (s.some((x) => x.id === r.id) ? s : [r, ...s]));
+      setAddTitle(''); setAddAuthors(''); setAddYear(''); setAddVenue(''); setAddDoi(''); setAddAbstract('');
+      setShowAdd(false);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -177,14 +213,15 @@ export function LiteraturePage({ project }: { project: Project }) {
     <div className="max-w-6xl mx-auto">
       <ErrorBox message={error} />
 
-      {/* 检索区 */}
+      {/* 检索区（本地文献库，已移除国外在线源） */}
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 mb-2.5 text-slate-700 dark:text-slate-200 font-semibold">
           <FlaskConical size={15} className="brand-gradient-text" /> 文献调研
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Input
-            placeholder="输入研究方向，如：graph neural network survey"
+            className="flex-1 min-w-52"
+            placeholder="在文献库中检索标题 / 作者 / 摘要，如：图神经网络"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && search()}
@@ -192,8 +229,31 @@ export function LiteraturePage({ project }: { project: Project }) {
           <Button onClick={search} disabled={searching || !query.trim()}>
             {searching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} 检索
           </Button>
+          <Button variant="outline" onClick={() => setShowAdd((v) => !v)}>
+            <Plus size={15} /> 手动添加文献
+          </Button>
         </div>
-        <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">对接 OpenAlex · arXiv · Semantic Scholar · CrossRef 多源并查（真实文献，含 DOI 可追溯）</div>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">本地文献库检索（已移除国外在线源，零外部网络依赖），或手动录入文献元数据</div>
+
+        {/* 手动添加表单 */}
+        {showAdd && (
+          <div className="mt-3 p-3 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-900/10 space-y-2">
+            <div className="grid md:grid-cols-2 gap-2">
+              <Input placeholder="标题 *" value={addTitle} onChange={(e) => setAddTitle(e.target.value)} />
+              <Input placeholder="作者（逗号分隔）" value={addAuthors} onChange={(e) => setAddAuthors(e.target.value)} />
+              <Input placeholder="年份（可选）" value={addYear} onChange={(e) => setAddYear(e.target.value)} />
+              <Input placeholder="期刊 / 会议（可选）" value={addVenue} onChange={(e) => setAddVenue(e.target.value)} />
+              <Input placeholder="DOI（可选）" value={addDoi} onChange={(e) => setAddDoi(e.target.value)} />
+            </div>
+            <Textarea rows={2} placeholder="摘要（可选）" value={addAbstract} onChange={(e) => setAddAbstract(e.target.value)} />
+            <div className="flex gap-2">
+              <Button onClick={addManual} disabled={adding || !addTitle.trim()}>
+                {adding ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} 保存到文献库
+              </Button>
+              <Button variant="ghost" onClick={() => setShowAdd(false)}>取消</Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* 检索结果 */}
@@ -257,7 +317,7 @@ export function LiteraturePage({ project }: { project: Project }) {
             )}
           </div>
           {refs.length === 0 ? (
-            <Empty text="文献库为空：检索后导入，或到全自动流水线自动收集" />
+            <Empty text="文献库为空：点击「手动添加文献」录入，或先上传资料到知识库" />
           ) : (
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
               {refs.map((r) => (

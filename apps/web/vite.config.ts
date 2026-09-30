@@ -14,11 +14,10 @@ export default defineConfig({
     },
   },
   build: {
-    // 代码分割：echarts（重）与 React 框架拆为独立 vendor chunk，优化首屏与缓存
+    // 代码分割：React 框架与图标库拆为独立 vendor chunk，优化首屏与缓存
     rollupOptions: {
       output: {
         manualChunks: {
-          // echarts 按需引入后不再整包打包（QualityPage 仅雷达图）
           react: ['react', 'react-dom', 'react-dom/client'],
           ui: ['lucide-react'],
         },

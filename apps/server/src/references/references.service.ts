@@ -13,9 +13,9 @@ export class ReferencesService {
     private readonly ai: AiService,
   ) {}
 
-  /** 真实检索（多源） */
-  search(query: string, limit = 8) {
-    return this.literature.search(query, limit);
+  /** 本地文献库检索（projectId 可选限定项目范围） */
+  search(query: string, limit = 8, projectId?: string) {
+    return this.literature.search(query, limit, projectId);
   }
 
   list(projectId: string) {

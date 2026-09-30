@@ -25,7 +25,7 @@
 | Module | Capabilities |
 | --- | --- |
 | **Paper Writing** | Outline-first generation, section drafting, 3-stage academic polishing (original + polished + reasoning), Chinese↔English translation, de-duplication rewriting, autosave & version history |
-| **Literature Survey** | Real multi-source search (OpenAlex / arXiv / Semantic Scholar / CrossRef), reference library, AI structured review (every claim bound to real literature, anti-hallucination) |
+| **Literature Survey** | Local reference library (manual add / project import / in-library search), AI structured review (every claim bound to real literature, anti-hallucination) |
 | **Fully Automatic Pipeline** | Supervisor orchestration: **Planner** research plan (objective / sub-questions / search strategy / sections / risks) → **Research×3 parallel ReAct** (think→act→observe self-directed retrieval) → outline generation (**human confirmation point**) → **Writer section drafting** (Agentic RAG per-chapter lookups) → **Reviewer 7-dim quality gate (<80 triggers Reflexion + rewrite)** → **Polisher** → citation formatting → done (episodic memory auto-extracted) |
 | **Agent Orchestration View** | Visualize each sub-agent's status / duration / summary on the pipeline page (`/api/pipeline/:id/agents`) |
 | **MCP Toolbench** | 13 AI capabilities exposed as 11 standard MCP tools (2026-07 spec), individually invocable from Settings |
@@ -40,9 +40,10 @@
 ```
 apps/
 ├── server/  NestJS 11 · TypeScript · Drizzle ORM · SQLite (better-sqlite3)
-│            · Native fetch against OpenAI-compatible endpoints (OpenAI/DeepSeek/Qwen/Doubao/Agnes)
-│            · 11 tables: Project / Document / Reference / Citation / QualityReport / PipelineTask / PolishRecord
-│                     / KnowledgeDoc / KnowledgeChunk / ReflexionLog / MemoryLog / AgentRun
+│            · Native fetch against domestic OpenAI-compatible endpoints (Doubao Volcano Ark / DeepSeek / Qwen / Zhipu / Kimi)
+│            · 18 tables: Project / Document / Reference / Citation / QualityReport / PipelineTask / PolishRecord
+│                     / KnowledgeDoc / KnowledgeChunk / ReflexionLog / MemoryLog / AgentRun / ModelProvider
+│                     / McpServer / CustomIntent / PipelineConfig / AppSetting / CustomPrompt / LlmCallLog
 │            · orchestrator/  Supervisor orchestrator (5 sub-agent types + parallel dispatch + trajectory logging)
 │            · mcp/           MCP tool protocol (11 tools, list/call/info endpoints)
 │            · Global token-bucket rate limiting (AI_RPM_CAP configurable, 429-safe on free tiers)
@@ -61,7 +62,7 @@ pnpm install
 
 # 2. Configure AI (copy .env.example to .env and fill in your API key)
 cp apps/server/.env.example apps/server/.env
-#    Supports OpenAI / DeepSeek / Qwen / Doubao (Volcano Ark) etc. OpenAI-compatible endpoints
+#    Default: Doubao (Volcano Ark). Also works with DeepSeek / Qwen / Zhipu / Kimi etc. domestic OpenAI-compatible endpoints
 
 # 3. Build & run (backend :3000 + frontend :5173)
 pnpm build
@@ -78,9 +79,9 @@ pnpm dev
 
 | Variable | Description | Example |
 | --- | --- | --- |
-| `AI_BASE_URL` | OpenAI-compatible endpoint | `https://api.openai.com/v1` / `https://api.deepseek.com/v1` |
+| `AI_BASE_URL` | OpenAI-compatible endpoint (default Doubao Volcano Ark) | `https://ark.cn-beijing.volces.com/api/v3` / `https://api.deepseek.com/v1` |
 | `AI_API_KEY` | API key | `sk-...` |
-| `AI_MODEL` | Model name | `gpt-4o-mini` / `deepseek-chat` |
+| `AI_MODEL` | Model name | `agnes-3.0-flash` / `deepseek-chat` |
 | `AI_MODEL_FAST` | Fast-tier model (Q&A / polish / translate) | `agnes-3.0-flash` |
 | `AI_MODEL_STRONG` | Strong-tier model (planning / long-text / review) | falls back to fast if unset |
 | `AI_RPM_CAP` | Max AI calls per minute (token bucket, 429-safe) | `8` |
@@ -138,7 +139,7 @@ A 3S-level survey task (GNN × drug discovery) ran fully automatically with a st
 - **Citations made real**: after drafting, `[Ref:N]` placeholders render to `[author year]` + a GB/T 7714 reference list at the end (placeholders previously judged as "fabricated citations").
 - **Academic-integrity constraints**: drafting prompts hard-forbid fabricating experimental data / performance numbers; experimental conclusions must come from the given literature and be cited (fixes "fabricated QM9 metrics in survey").
 - **Reference-pool cleansing**: drafting only uses literature with complete metadata (authors + year); numbering matches rendering; title-only hits from Agentic RAG lookups no longer pollute the library.
-- **Multi-source degradation**: OpenAlex / arXiv / Semantic Scholar / **CrossRef** parallel with per-source 429/pause auto-degradation, keeping citations real and traceable.
+- **Local literature search**: removed overseas online sources (OpenAlex / arXiv / Semantic Scholar / CrossRef); zero external network dependency, search runs against the local reference library.
 - **Strict quality gate**: total score < 80 triggers Reflexion → rewrite (up to 3 rounds); 7-dimension scores + feedback are queryable.
 
 > Field-test trajectory: first round 46/100 (citation placeholders + fabricated experiments) → 7 root causes located & fixed → final validation round had 47/47 references with complete metadata and a normal full survey. The reviewer is designed as a "strict peer review" standard — deliberately strict.
@@ -185,7 +186,7 @@ sciflow/
 │   │       ├── app.module.ts      # module assembly
 │   │       ├── db/                # Drizzle schema + SQLite connection & migration
 │   │       ├── ai/                # unified LLM service + research prompt templates
-│   │       ├── literature/        # multi-source literature search
+│   │       ├── literature/        # local reference-library search (overseas sources removed)
 │   │       ├── projects/          # project management
 │   │       ├── documents/         # documents, polishing, translation, citations, versions
 │   │       ├── references/        # reference library & reviews

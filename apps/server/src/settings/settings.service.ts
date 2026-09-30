@@ -41,7 +41,7 @@ export class SettingsService {
         database: DB_PATH,
         port: Number(process.env.PORT || 3000),
       },
-      sources: { literature: ['OpenAlex', 'arXiv', 'Semantic Scholar'] },
+      sources: { literature: ['本地文献库（手动添加 / 项目导入）'] },
     };
   }
 

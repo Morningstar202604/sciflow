@@ -35,7 +35,7 @@ export const references = sqliteTable('reference', {
   doi: text('doi').default(''),
   url: text('url').default(''),
   abstract: text('abstract').default(''),
-  source: text('source').default('manual'), // semantic-scholar | arxiv | openalex | pubmed | manual
+  source: text('source').default('manual'), // manual（本地文献库，已移除国外在线源）
   tags: text('tags').default('[]'), // JSON: string[]
   citationCount: integer('citation_count').default(0),
   createdAt: integer('created_at').notNull(),

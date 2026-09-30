@@ -1,0 +1,882 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SciFlow 全项目文件树状图（97 文件逐行通读）</title>
+<style>
+  body { margin:0; padding:0; background:#f4f6fb; color:#1c2a44; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { width:100%; box-sizing:border-box; padding:20px; max-width:1280px; margin:0 auto; }
+  .h1 { font-size:22px; font-weight:700; margin:0 0 4px; }
+  .sub { font-size:13px; color:#64748b; margin:0 0 14px; }
+  .stats { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+  .stat { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 14px; font-size:13px; }
+  .stat b { color:#0f766e; font-size:18px; display:block; }
+  .legend { display:flex; flex-wrap:wrap; gap:8px; font-size:12px; margin-bottom:14px; }
+  .lg { display:flex; align-items:center; gap:6px; padding:3px 8px; border-radius:6px; background:#fff; border:1px solid #e2e8f0; }
+  .dot { width:10px; height:10px; border-radius:3px; display:inline-block; }
+  .tree { font-size:13.5px; line-height:1.55; }
+  details.group { border:1px solid #e2e8f0; border-radius:12px; background:#fff; margin-bottom:12px; overflow:hidden; }
+  details.group > summary { cursor:pointer; list-style:none; padding:10px 14px; font-weight:700; font-size:14.5px; display:flex; align-items:center; gap:8px; background:linear-gradient(135deg,#f0fdfa,#eff6ff); }
+  details.group > summary::-webkit-details-marker { display:none; }
+  details.group > summary .cnt { font-weight:400; font-size:12px; color:#64748b; }
+  .group-body { padding:8px 10px 10px; }
+  details.file { border-left:3px solid #cbd5e1; margin:4px 0 4px 6px; background:#fafcff; border-radius:8px; padding:6px 10px; }
+  details.file > summary { cursor:pointer; list-style:none; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; }
+  details.file > summary::-webkit-details-marker { display:none; }
+  .ln { display:inline-block; min-width:38px; text-align:center; border-radius:5px; padding:1px 5px; margin-right:8px; font-size:11px; font-weight:600; }
+  .svc .ln { background:#ccfbf1; color:#0f766e; }
+  .ctl .ln { background:#e0f2fe; color:#0369a1; }
+  .mod .ln { background:#f1f5f9; color:#475569; }
+  .page .ln { background:#fde68a; color:#92400e; }
+  .core .ln { background:#fee2e2; color:#b91c1c; }
+  .cfg .ln { background:#e2e8f0; color:#334155; }
+  .role { display:inline-block; border-radius:5px; padding:1px 6px; font-size:10.5px; margin-left:8px; font-family:inherit; }
+  .r-svc { background:#f0fdfa; color:#0f766e; } .r-ctl { background:#eff6ff; color:#1d4ed8; } .r-mod { background:#f8fafc; color:#475569; }
+  .r-page { background:#fffbeb; color:#b45309; } .r-cfg { background:#f1f5f9; color:#334155; } .r-core { background:#fef2f2; color:#b91c1c; } .r-doc { background:#f8fafc; color:#475569; }
+  .notes { margin:6px 0 2px 44px; color:#475569; font-size:12.5px; }
+  .notes li { margin:2px 0; }
+  .notes b { color:#0f766e; font-weight:600; }
+  .kbd { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .foot { margin-top:16px; font-size:12px; color:#64748b; border-top:1px solid #e2e8f0; padding-top:10px; }
+  @media (max-width:640px){ .wrap{padding:12px;} details.file{margin-left:0;} .notes{margin-left:8px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="h1">🌳 SciFlow 全项目文件树状图</div>
+  <div class="sub">monorepo：<b>apps/server</b>（NestJS 11 + SQLite/Drizzle）· <b>apps/web</b>（React 19 + Vite + Tailwind v4）· 配置/脚本/文档。共 97 个实质文件已逐行通读，另 3 个为运行时产物（不计入）。</div>
+  <div class="stats">
+    <div class="stat"><b>97</b>实质文件</div>
+    <div class="stat"><b>≈12.8k</b>业务源码行（不含 lock / 数据库）</div>
+    <div class="stat"><b>51</b>server 源码文件</div>
+    <div class="stat"><b>17</b>web 源码文件</div>
+    <div class="stat"><b>29</b>配置 / 脚本 / 文档</div>
+  </div>
+  <div class="legend">
+    <span class="lg"><span class="dot" style="background:#0f766e"></span>服务层 service（业务逻辑）</span>
+    <span class="lg"><span class="dot" style="background:#0369a1"></span>控制器 controller（HTTP 路由）</span>
+    <span class="lg"><span class="dot" style="background:#475569"></span>模块 module / 配置</span>
+    <span class="lg"><span class="dot" style="background:#b45309"></span>前端页面 page</span>
+    <span class="lg"><span class="dot" style="background:#b91c1c"></span>核心引擎（AI/流水线/编排）</span>
+    <span class="lg"><span class="dot" style="background:#334155"></span>根 / 部署 / CI / 文档</span>
+  </div>
+
+  <div class="tree">
+
+    <!-- ==================== I. SERVER 源码 ==================== -->
+    <details class="group" open>
+      <summary>Ⅰ. apps/server/src · NestJS 后端源码 <span class="cnt">51 文件 · ≈5.9k 行</span></summary>
+      <div class="group-body">
+
+        <details class="group" open>
+          <summary>入口 · 启动 · 健康 <span class="cnt">3 文件</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">28</span>main.ts<span class="role r-core">启动入口</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：Nest 应用引导 + 进程级兜底 + 优雅关闭 + 中断流水线恢复。</li>
+                <li><b>兜底</b>：unhandledRejection / uncaughtException 记日志不退出（长任务服务常驻）。</li>
+                <li><b>优雅关闭</b>：SIGTERM/SIGINT 先关 HTTP 再退（DB 为 WAL 模式不丢数据）。</li>
+                <li><b>全局前缀</b>：setGlobalPrefix('api')，所有路由挂 /api 下。</li>
+                <li><b>CORS</b>：白名单默认 http://localhost:5173（可 CORS_ORIGIN 覆盖）。</li>
+                <li><b>启动后</b>：resumeInterrupted() 恢复上次中断的流水线任务。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">41</span>app.module.ts<span class="role r-mod">根模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：聚合 16 个功能模块 + 全局控制器。</li>
+                <li><b>模块清单</b>：Projects/Documents/Literature/Knowledge/Quality/References/Research/Pipeline/Orchestrator/Judgment/Chat/Memory/MCP/Settings(+Customization)/Submission/Usage + Ai 核心模块。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">16</span>health.controller.ts<span class="role r-ctl">健康检查</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：GET /api/health → {status:'ok', time, ai: AI 配置}（前端据此显示"AI 已连接/未配置"）。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>db · 数据层 <span class="cnt">2 文件 · ≈0.5k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">241</span>db/database.ts<span class="role r-core">建表 + 连接</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：better-sqlite3 同步驱动 + WAL 模式 + 全部 18 表 DDL + 索引 + ensureColumn 轻量迁移。</li>
+                <li><b>18 表</b>：project/document/reference/citation/quality_report/pipeline_task/polish_record/knowledge_doc/knowledge_chunk/reflexion_log/memory_log/agent_run/model_provider/mcp_server/custom_intent/pipeline_config/app_setting/custom_prompt/llm_call_log。</li>
+                <li><b>已修复</b>：knowledge_chunk 缺 context/vector 列、llm_call_log 建表缺失均已补。</li>
+                <li><b>导出</b>：db（drizzle 实例）、sqlite（原生句柄）、DB_PATH。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">233</span>db/schema.ts<span class="role r-mod">ORM 表定义</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：Drizzle 表对象与 TS 类型导出（列注释标注各 JSON 字段结构：scores/outline/trace/versions 等）。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>ai · AI 统一网关 <span class="cnt">3 文件 · ≈1.2k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">746</span>ai/ai.service.ts<span class="role r-core">AI 网关（最大核心）</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：全部 LLM 调用的统一出口：多厂商切换、fast/strong 双档、令牌桶限流、429 退避、token 成本落库、zod 结构化校验。</li>
+                <li><b>方法族</b>：complete / stream / chat(+Context) / knowledgeQa / summarizeLiterature / extractPaperTable / evidenceSynthesis / deepDivePaper / researchGap / designReview 等 13 个科研任务封装。</li>
+                <li><b>Phase1 Planner</b>：researchPlan() 生成研究计划（目标/子问题/检索策略/章节/风险）。</li>
+                <li><b>ReAct</b>：reactLoop() think→act→observe 循环；Reflexion 反思重写；记忆抽取 saveEpisodicMemory。</li>
+                <li><b>限流</b>：RPM 令牌桶（AI_RPM_CAP 默认 5/60s），429 指数退避；每次调用写 llm_call_log（caller 维度成本审计）。</li>
+                <li><b>校验</b>：safeParse（zod）+ jsonOf（从模型输出清洗出 JSON）。</li>
+                <li><b>厂商</b>：switchProvider / resetToEnv / getCustomPrompt（自定义提示词兜底）。</li>
+              </ul>
+            </details>
+            <details class="file core" open>
+              <summary><span class="ln">425</span>ai/prompts.ts<span class="role r-core">全部提示词模板</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：集中管理全部 prompt 函数（设计参考：GPT-Academic / STORM / Agent Laboratory）。</li>
+                <li><b>枚举</b>：PLANNER / REACT / REFLEXION / DRAFT_SECTION / REVIEWER(7 维) / POLISH / CITATION / LITERATURE 检索与综述 / EVIDENCE / DEEP_DIVE / RESEARCH_GAP / PAPER_COMPARISON / DESIGN_REVIEW / SIMULATED_REVIEW / ABSTRACT / TRANSLATE / COVER_LETTER / JOURNAL / REPLY_REVIEW / MEMORY_EXTRACT。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">8</span>ai/ai.module.ts<span class="role r-mod">AI 模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：提供/导出 AiService（全局可注入）。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>orchestrator · Supervisor 多 Agent 编排 <span class="cnt">2 文件 · ≈0.45k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">436</span>orchestrator/orchestrator.service.ts<span class="role r-core">编排引擎</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：Supervisor 调度 5 类子 Agent 完成流水线：Planner 规划 → 3 路并行 Research（ReAct）→ Writer（Agentic RAG 边写边查）→ Reviewer（7 维评审）→ Polisher（润色）。</li>
+                <li><b>观测</b>：每个子 Agent 执行单元写 agent_run 表（agentType/input/output/error/durationMs）。</li>
+                <li><b>记忆</b>：完成后抽取情景记忆沉淀到 memory_log。</li>
+                <li><b>可断点</b>：步骤输出以 JSON 存回 pipeline_task，失败可续跑。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">12</span>orchestrator/orchestrator.module.ts<span class="role r-mod">编排模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai/Literature/Quality 模块，导出编排服务。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>pipeline · 全自动流水线状态机 <span class="cnt">3 文件 · ≈0.7k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">648</span>pipeline/pipeline.service.ts<span class="role r-core">流水线引擎</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：8 步状态机 topic-verify → literature → outline → drafting → quality-gate → polish → citation-format → complete。</li>
+                <li><b>HITL</b>：大纲生成后状态转 awaiting_confirmation，人工确认后继续（confirmOutline 可带编辑后大纲）。</li>
+                <li><b>回炉</b>：质量门 &lt;80 触发 Reflexion 反思并回炉重写（MAX_RETRY=2）。</li>
+                <li><b>Checkpoint</b>：步骤输出持久化；启动时 resumeInterrupted 续跑（有 documentId 从 drafting 续，无则标 interrupted）。</li>
+                <li><b>引用</b>：GB/T 7714 渲染 + 配图占位 + 情景记忆沉淀。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">39</span>pipeline/pipeline.controller.ts<span class="role r-ctl">流水线路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST 创建 / GET 列表·详情 / POST :id/confirm-outline 大纲确认 / DELETE / GET :id/agents 子 Agent 轨迹。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">16</span>pipeline/pipeline.module.ts<span class="role r-mod">流水线模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai/Literature/Documents/Orchestrator 等依赖。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>documents · 文档与写作工具 <span class="cnt">4 文件 · ≈0.6k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">420</span>documents/documents.service.ts<span class="role r-core">文档服务</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：文档 CRUD + 版本历史（MAX_VERSIONS=20）+ outline/section/abstract/polish/translate 全写作工具。</li>
+                <li><b>引用</b>：addCitation / listCitations / exportCitations（formatCitation 支持 APA/IEEE/Vancouver/BibTeX/GB-T 7714）。</li>
+                <li><b>导出</b>：exportMarkdown（标题+大纲+正文+引用）/ exportDocx（docx 库生成 .docx）。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">96</span>documents/documents.controller.ts<span class="role r-ctl">文档路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：CRUD + :id/outline·section·abstract·polish·translate + polish-records + citations CRUD/导出 + export / export-docx。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">47</span>documents/documents.service.spec.ts<span class="role r-ctl">单测（唯一）</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：vitest 单测 formatCitation 的 APA/IEEE/Vancouver/BibTeX/GB-T 五种格式（5/5 通过）。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">12</span>documents/documents.module.ts<span class="role r-mod">文档模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai 模块并导出服务。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>literature · 文献多源检索 <span class="cnt">2 文件 · ≈0.18k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">171</span>literature/literature.service.ts<span class="role r-core">文献检索</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：真实对接 4 个免费学术 API：OpenAlex / arXiv / Semantic Scholar / CrossRef（无需 key）。</li>
+                <li><b>并发闸</b>：全局最多 2 个外部检索并发（防 429 风暴），全部 15s 超时 + allSettled 失败降级。</li>
+                <li><b>去重</b>：按标题归一化去重；OpenAlex 摘要 inverted index 还原。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">8</span>literature/literature.module.ts<span class="role r-mod">文献模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：提供/导出 LiteratureService。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>knowledge · 知识库 RAG <span class="cnt">3 文件 · ≈0.23k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">185</span>knowledge/knowledge.service.ts<span class="role r-core">RAG 引擎</span></summary>
+              <ul class="notes">
+                <li><b>上传</b>：text/pdf/markdown，PDF 走 pdf-parse；分块 800 字/块；每块存 TF 向量（vector）+ 文档上下文前缀（context，Contextual Retrieval）。</li>
+                <li><b>检索</b>：混合评分 = BM25×1.0 + TF 向量余弦×1.2（tokenize：英文按词 + 中文 bigram，零依赖）。</li>
+                <li><b>问答</b>：query() 检索 top5 + LLM 基于资料作答（NotebookLM 式，答案严格来自资料）。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">30</span>knowledge/knowledge.controller.ts<span class="role r-ctl">知识库路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST upload / GET 列表 / POST query（RAG 问答）/ DELETE :id。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">12</span>knowledge/knowledge.module.ts<span class="role r-mod">知识库模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai 模块。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>judgment · 意图判断层（Jev 式 System One） <span class="cnt">3 文件 · ≈0.24k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">214</span>judgment/judgment.service.ts<span class="role r-core">意图识别</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：一句话 → 科研动作 + 置信度 + 路由；规则优先毫秒级命中，未命中才走 LLM（zod 校验）。</li>
+                <li><b>17 内置意图</b>：检索文献/综述/提取/证据/精读/缺口/对比/大纲/起草/润色/翻译/摘要/设计诊断/评审/流水线/质量/问答。</li>
+                <li><b>4 模式</b>：auto / rule_first / llm_first / rule_only（app_setting.judgment_mode）。</li>
+                <li><b>可扩展</b>：mergedIntents 合并自定义意图（custom_intent 表覆盖系统默认）。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">13</span>judgment/judgment.controller.ts<span class="role r-ctl">判断路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST /api/judgment/intent {message, context}。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">12</span>judgment/judgment.module.ts<span class="role r-mod">判断模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai 模块。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>quality · 7 维质量评分 <span class="cnt">3 文件 · ≈74 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">40</span>quality/quality.service.ts<span class="role r-core">评分服务</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：review() 调用 ai.reviewPaper（7 维 0-100，借鉴 ARS 质量关卡）并落库；history()/get() 读取；内容 &lt;50 字拒绝。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">22</span>quality/quality.controller.ts<span class="role r-ctl">评分路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST 评分 / GET ?documentId 历史 / GET :id 详情。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">12</span>quality/quality.module.ts<span class="role r-mod">评分模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai 模块。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>references · 文献库与 AI 文献工具 <span class="cnt">3 文件 · ≈0.21k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">129</span>references/references.service.ts<span class="role r-core">文献库服务</span></summary>
+              <ul class="notes">
+                <li><b>CRUD</b>：list/get/create/import/remove；空元数据守卫（无作者且无年份不入库，防 [Unknown n.d.]）；按标题去重。</li>
+                <li><b>AI 工具</b>：summarize 综述 / extract 结构化提取 / deepDive 精读 / gap 研究缺口 / evidence 证据综合——全部只基于库内真实文献（防幻觉）。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">69</span>references/references.controller.ts<span class="role r-ctl">文献路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST search / CRUD / import / summarize / extract / deep-dive / gap / evidence。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">13</span>references/references.module.ts<span class="role r-mod">文献模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai + Literature 模块。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>research · 科研增强（诊断/对比/模拟审稿） <span class="cnt">3 文件 · ≈0.17k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">123</span>research/research.service.ts<span class="role r-core">科研工具</span></summary>
+              <ul class="notes">
+                <li><b>designReview</b>：研究想法诊断（新颖性/可行性评分 + 方法/风险/下一步，zod 校验）。</li>
+                <li><b>comparePapers</b>：多文献横向对比表（研究问题/方法/结论/局限）。</li>
+                <li><b>simulatedReview</b>：3 位审稿人 + 主编综合决定（strengths/concerns/suggestion/verdict）。</li>
+                <li><b>自定义</b>：均支持 getCustomPrompt 覆盖默认提示词。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">34</span>research/research.controller.ts<span class="role r-ctl">科研路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST design-review / comparison / review。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">12</span>research/research.module.ts<span class="role r-mod">科研模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai 模块。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>mcp · MCP 工具协议化 <span class="cnt">3 文件 · ≈0.38k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">314</span>mcp/mcp.service.ts<span class="role r-core">MCP 服务</span></summary>
+              <ul class="notes">
+                <li><b>11 内置工具</b>：literature.search/summarize、knowledge.query、outline.generate、writing.draft/polish/translate/review、references.extract/evidence、chat.answer。</li>
+                <li><b>Guardrail</b>：buildArgSchema 按 inputSchema 动态生成 zod 校验（缺参/类型错直接拒绝，不进 AI 链路）。</li>
+                <li><b>外部服务器</b>：discover GET /tools、call POST /call；第三方返回打 untrustedContentHint 标记（防 AIjacking 间接提示注入）。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">48</span>mcp/mcp.controller.ts<span class="role r-ctl">MCP 路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：GET info / tools、POST call、GET external、POST external/discover、POST external/:id/call。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">14</span>mcp/mcp.module.ts<span class="role r-mod">MCP 模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai/Literature/Knowledge/References 模块。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>settings · 设置 / 模型厂商 / 自定义中心 <span class="cnt">6 文件 · ≈0.51k 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">134</span>settings/settings.service.ts<span class="role r-core">设置服务</span></summary>
+              <ul class="notes">
+                <li><b>getSettings</b>：AI 配置 + 模型列表（TTL 5 分钟缓存，失败回落内置列表）+ 环境 + 文献源。</li>
+                <li><b>selfCheck / testModel</b>：数据库读写 + AI 连通性自检。</li>
+                <li><b>模型厂商</b>：LiteLLM 式多厂商 CRUD/激活切换（激活即影响全部调用，删除激活厂商回退环境变量）。</li>
+                <li><b>外部 MCP</b>：mcp_server 表 CRUD。</li>
+              </ul>
+            </details>
+            <details class="file core" open>
+              <summary><span class="ln">207</span>settings/customization.service.ts<span class="role r-core">自定义中心</span></summary>
+              <ul class="notes">
+                <li><b>意图</b>：自定义意图 CRUD/启停/恢复（key 校验小写字母数字下划线）。</li>
+                <li><b>流水线步骤</b>：8 步启停（topic-verify/complete 骨架不可禁用），getPipelineStepMap 供引擎读。</li>
+                <li><b>质量权重</b>：7 维权重 (0,5] 校验；getQualityWeightsMap 供评分引擎。</li>
+                <li><b>判断模式</b>：auto/rule_first/llm_first/rule_only。</li>
+                <li><b>13 个工具提示词</b>：自定义覆盖系统默认（upsert/delete/reset）。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">62</span>settings/settings.controller.ts<span class="role r-ctl">设置路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：GET /、GET check、POST test、providers CRUD + activate、mcp-servers CRUD。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">87</span>settings/customization.controller.ts<span class="role r-ctl">自定义路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：intents、pipeline-steps、quality-weights、judgment-mode、prompts 全套 CRUD。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">11</span>settings/settings.module.ts · <span class="ln">10</span>customization.module.ts<span class="role r-mod">设置模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：各自提供/导出服务并注册控制器。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>memory · 记忆中心（Agentic Memory） <span class="cnt">3 文件 · ≈94 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">56</span>memory/memory.service.ts<span class="role r-core">记忆服务</span></summary>
+              <ul class="notes">
+                <li><b>类型</b>：episodic 情景记忆（流水线完成自动沉淀）+ procedural 程序记忆（写作风格指令，起草时注入）。</li>
+                <li><b>接口</b>：add（keywords 限 10）/ list（type+projectId+关键词 like 过滤）/ remove。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">28</span>memory/memory.controller.ts<span class="role r-ctl">记忆路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST 新增 / GET ?type&q 列表 / DELETE :id。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">10</span>memory/memory.module.ts<span class="role r-mod">记忆模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：注册控制器与服务。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>chat · 科研问答 <span class="cnt">3 文件 · ≈119 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">52</span>chat/chat.service.ts<span class="role r-core">问答服务</span></summary>
+              <ul class="notes">
+                <li><b>上下文组装</b>：项目记忆（前 4 条）+ 当前论文上下文（2500 字）+ 知识库 RAG 检索 top3（NotebookLM 式注入）。</li>
+                <li><b>接口</b>：answer（一次性）/ stream（流式 ReadableStream）。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">54</span>chat/chat.controller.ts<span class="role r-ctl">问答路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST / 一次性、POST /stream SSE 流式（解析上游 data: 行，透传 delta，[DONE] 收尾，错误以 SSE 事件返回）。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">13</span>chat/chat.module.ts<span class="role r-mod">问答模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai/Memory/Knowledge 模块。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>projects · 项目管理 <span class="cnt">3 文件 · ≈96 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">54</span>projects/projects.service.ts<span class="role r-core">项目服务</span></summary>
+              <ul class="notes">
+                <li><b>CRUD</b>：list/get/create/update/remove。</li>
+                <li><b>级联删除</b>：先删任务下的 agent_run + reflexion_log，再删文档/文献/流水线任务/项目本体。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">32</span>projects/projects.controller.ts<span class="role r-ctl">项目路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：标准 CRUD。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">10</span>projects/projects.module.ts<span class="role r-mod">项目模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：注册控制器与服务。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>submission · 投稿辅助 <span class="cnt">3 文件 · ≈58 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">25</span>submission/submission.service.ts<span class="role r-core">投稿服务</span></summary>
+              <ul class="notes">
+                <li><b>接口</b>：recommendJournals 期刊推荐 / coverLetter 投稿信 / replyReview 审稿意见回复（全部薄封装 AiService）。</li>
+              </ul>
+            </details>
+            <details class="file ctl" open>
+              <summary><span class="ln">22</span>submission/submission.controller.ts<span class="role r-ctl">投稿路由</span></summary>
+              <ul class="notes">
+                <li><b>端点</b>：POST journals / cover-letter / reply-review。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">11</span>submission/submission.module.ts<span class="role r-mod">投稿模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：导入 Ai 模块。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>usage · LLM 成本统计 <span class="cnt">2 文件 · ≈66 行</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">61</span>usage/usage.controller.ts<span class="role r-core">成本仪表盘</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：GET /api/usage/summary → 总量 + 按 caller 分组 + 近 14 天分布（读 llm_call_log；表不存在时返回零值）。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">5</span>usage/usage.module.ts<span class="role r-mod">用量模块</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：仅注册控制器（无服务依赖）。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+      </div>
+    </details>
+
+    <!-- ==================== II. SERVER 配置 ==================== -->
+    <details class="group" open>
+      <summary>Ⅱ. apps/server 配置 <span class="cnt">5 文件 · ≈103 行</span></summary>
+      <div class="group-body">
+        <details class="file cfg" open>
+          <summary><span class="ln">35</span>package.json<span class="role r-cfg">server 包定义</span></summary>
+          <ul class="notes">
+                <li><b>脚本</b>：dev（node --watch）、build（tsc）、start、db:push（drizzle-kit）、db:studio、typecheck、test（vitest）。</li>
+                <li><b>依赖</b>：NestJS 11 + better-sqlite3 + drizzle-orm + zod + pdf-parse + docx。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">25</span>tsconfig.json<span class="role r-cfg">TS 编译配置</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：CommonJS + ES2022 + strict + 装饰器（Nest 必需）+ incremental。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">4</span>tsconfig.build.json · <span class="ln">9</span>vitest.config.ts<span class="role r-cfg">构建/测试配置</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：build 排除 spec；vitest 只跑 src/**/*.spec.ts（避免扫到 dist 里编译产物）。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">30</span>.env.example<span class="role r-cfg">环境变量样例</span></summary>
+          <ul class="notes">
+                <li><b>变量</b>：PORT、DATABASE_PATH、AI_BASE_URL / AI_API_KEY / AI_MODEL[_FAST|_STRONG]、AI_RPM_CAP=8、CORS_ORIGIN。</li>
+                <li><b>厂商</b>：OpenAI / DeepSeek / 通义 / 豆包（火山方舟）OpenAI 兼容协议。</li>
+              </ul>
+        </details>
+      </div>
+    </details>
+
+    <!-- ==================== III. WEB 源码 ==================== -->
+    <details class="group" open>
+      <summary>Ⅲ. apps/web/src · React 前端源码 <span class="cnt">17 文件 · ≈5.7k 行</span></summary>
+      <div class="group-body">
+
+        <details class="group" open>
+          <summary>入口 · 全局 · 样式 <span class="cnt">3 文件</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">593</span>App.tsx<span class="role r-core">应用外壳（最大前端核心）</span></summary>
+              <ul class="notes">
+                <li><b>路由</b>：HashRouter + 视图状态（view = pathname），10 个页面 lazy 代码分割；?doc= 深链写作页。</li>
+                <li><b>侧栏</b>：Logo + 3 组功能导航（研究工具/自动化/辅助）+ 项目区（搜索/新建/重命名/删除）+ 设置 + AI 状态灯；移动端抽屉（汉堡+遮罩+滑入动画）。</li>
+                <li><b>全局快捷键</b>：⌘K 命令面板 / ⌘N 新建项目 / Esc 关闭。</li>
+                <li><b>命令面板</b>：CommandPalette 搜索跳转 + ↑↓/Enter 键盘导航。</li>
+                <li><b>上下文</b>：ThemeContext（暗色）+ ToastContext（全局提示）；ConfirmDialog 删除项目；错误边界 ErrorBoundary。</li>
+                <li><b>启动</b>：health 探测 AI 状态；loadProjects 失败自动重试 4 次×2s。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">10</span>main.tsx<span class="role r-mod">React 入口</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：StrictMode + createRoot 挂载 App。</li>
+              </ul>
+            </details>
+            <details class="file cfg" open>
+              <summary><span class="ln">214</span>index.css<span class="role r-cfg">全局样式/品牌 token</span></summary>
+              <ul class="notes">
+                <li><b>品牌</b>：teal→cyan→sky 渐变 token（--brand-grad）、亮/暗双色板（.dark 类驱动）。</li>
+                <li><b>动效</b>：pulse-dot / page-in / modal-in / toast-in/out / shimmer / brand-breathe。</li>
+                <li><b>组件类</b>：brand-btn / nav-active / brand-logo / glass-header / card-lift / brand-divider。</li>
+                <li><b>背景</b>：#root::before 淡网格 + 品牌光晕氛围层。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>基础设施 <span class="cnt">3 文件</span></summary>
+          <div class="group-body">
+            <details class="file core" open>
+              <summary><span class="ln">314</span>api/client.ts<span class="role r-core">API 客户端</span></summary>
+              <ul class="notes">
+                <li><b>request</b>：60s 超时兜底 + 友好错误转译（中文业务错误原样、状态码映射、网络错误统一文案）。</li>
+                <li><b>api</b>：全部 14 个后端模块的方法封装（projects/documents/customization/judgment/research/references/knowledge/settings/usage/mcpExternal/memory/mcp/quality/pipeline/chat/submission）。</li>
+                <li><b>streamChat</b>：SSE 流式问答（fetch reader + data: 行解析 + delta 累加 + [DONE]）。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">291</span>types.ts<span class="role r-mod">全局类型定义</span></summary>
+              <ul class="notes">
+                <li><b>要点</b>：全部后端实体的 TS 接口（Project/Doc/Reference/CitationRow/QualityReport/PipelineTask/AgentRun/KnowledgeDoc/MemoryItem…）与 AI 结果类型（DeepDiveResult/GapResult/EvidenceResult/ResearchDesignResult…）。</li>
+              </ul>
+            </details>
+            <details class="file core" open>
+              <summary><span class="ln">297</span>components/ui.tsx<span class="role r-core">组件库</span></summary>
+              <ul class="notes">
+                <li><b>基础件</b>：Button（5 variant）/ Card / Input / Textarea / Select / Badge / Spinner / Skeleton / Empty / Modal（Esc 关闭）。</li>
+                <li><b>业务件</b>：CollapsibleCard / SectionTitle / ErrorBox / ConfirmDialog（危险确认+loading 态，替代 window.confirm）/ ToastViewport / jsonText / errMsg。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+        <details class="group" open>
+          <summary>页面 pages <span class="cnt">11 文件</span></summary>
+          <div class="group-body">
+            <details class="file page" open>
+              <summary><span class="ln">851</span>WritingPage.tsx<span class="role r-page">论文写作（最大页面）</span></summary>
+              <ul class="notes">
+                <li><b>布局</b>：文档标签栏 + 大纲栏（可折叠）+ 编辑器（edit/split/preview 三模式 + Markdown/KaTeX 渲染）+ AI 工具面板；移动端三面板互斥切换。</li>
+                <li><b>保存</b>：防抖自动保存（1.2s）+ ⌘S 立即保存（saveNow）+ ⌘B 大纲栏。</li>
+                <li><b>AI 工具</b>：大纲生成/章节起草（点大纲即写）/润色/降重/翻译/摘要+关键词/研究设计诊断/模拟同行评审/引用管理（5 种导出格式）。</li>
+                <li><b>导出</b>：Markdown / LaTeX（前端拼 tex）/ Word(.docx)（后端 base64 → Blob 下载）。</li>
+                <li><b>弹窗</b>：newDocDialog 变量双分支共用（空态/主界面）+ ConfirmDialog 删除文档。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">931</span>SettingsPage.tsx<span class="role r-page">设置（最长页面）</span></summary>
+              <ul class="notes">
+                <li><b>区块</b>：AI 配置总览 / LLM 用量成本（4 卡 + 按任务类型占比条 + 14 天趋势柱）/ 模型路由 / 厂商管理（添加/激活/删除）/ 环境自检 / 模型测试 / MCP 工具台（逐工具传参调用）/ 外部 MCP 服务器（探测/调用）。</li>
+                <li><b>自定义中心</b>（渐进披露折叠卡）：意图识别自定义（模式切换+意图 CRUD）/ 13 工具提示词编辑 / 流水线 8 步启停 / 质量权重 (0,5] 校验保存。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">532</span>LiteraturePage.tsx<span class="role r-page">文献调研</span></summary>
+              <ul class="notes">
+                <li><b>流程</b>：多源检索（结果卡：来源 badge/DOI/被引）→ 单条/全部导入 → 文献库（勾选可对比）→ 6 工具 Tab：综述 / 结构化提取（对比表）/ 证据综合（立场 badge+计数）/ 单篇精读 / 研究缺口 / 多文献对比。</li>
+                <li><b>移动端</b>：Tab 横向滚动。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">469</span>PipelinePage.tsx<span class="role r-page">全自动流水线</span></summary>
+              <ul class="notes">
+                <li><b>展示</b>：任务列表（状态 badge+当前步）+ 详情：Planner 研究计划（目标/子问题/章节/风险）/ ReAct 轨迹（think→act→observe 步骤）/ Supervisor 5 类 Agent 分组执行链（状态灯+耗时）/ 8 步渐变时间线（回炉徽章）。</li>
+                <li><b>交互</b>：3s 轮询运行中任务 + Agent 轨迹；大纲确认 Modal（HITL，可编辑章节/删除/添加）。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">220</span>KnowledgePage.tsx<span class="role r-page">知识库</span></summary>
+              <ul class="notes">
+                <li><b>上传</b>：点击/拖拽 PDF/TXT/MD（FileReader base64 或文本）；列表显示类型 badge + 分块数。</li>
+                <li><b>问答</b>：RAG 问答 + 来源依据（docName + 匹配分 + 片段）；ConfirmDialog 删除。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">197</span>ChatPanel.tsx<span class="role r-page">内联写作助手</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：写作页右侧 AI 助手：流式问答（自动注入当前文档上下文）+ 意图识别展示 + 三个快捷动作（润色全文/翻译全文/生成摘要，结果直接回写文档）。</li>
+                <li><b>移动端</b>：经切换条独占全宽（w-full）。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">190</span>ChatPage.tsx<span class="role r-page">科研问答</span></summary>
+              <ul class="notes">
+                <li><b>交互</b>：SSE 流式多轮气泡（打字光标）+ 并行意图识别（置信度/规则或 AI 判别/主题）+ 可跳转路由 + 关联论文下拉（问答结合大纲正文）。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">181</span>MemoryPage.tsx<span class="role r-page">记忆中心</span></summary>
+              <ul class="notes">
+                <li><b>要点</b>：类型 Tab（全部/情景/程序）+ 关键词搜索 + 新增写作指令卡片 + 列表（类型 badge/时间/关键词 chips）+ ConfirmDialog 删除。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">168</span>QualityPage.tsx<span class="role r-page">质量评分</span></summary>
+              <ul class="notes">
+                <li><b>要点</b>：ECharts 雷达图（按需引入 RadarChart，打包 1.1MB→~200KB）+ 总分 badge + 改进建议 + 历史评分对比列表。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">150</span>DashboardPage.tsx<span class="role r-page">工作台</span></summary>
+              <ul class="notes">
+                <li><b>要点</b>：项目总览（统计卡）+ 4 功能入口网格 + 论文草稿列表（状态 badge/版本/大纲章数/字数）+ 快捷新建草稿。移动端 2×2 网格。</li>
+              </ul>
+            </details>
+            <details class="file page" open>
+              <summary><span class="ln">132</span>SubmissionPage.tsx<span class="role r-page">投稿辅助</span></summary>
+              <ul class="notes">
+                <li><b>要点</b>：3 Tab（期刊推荐/Cover Letter/审稿回复）+ 从项目文档自动带入标题摘要 + 结果卡展示。</li>
+              </ul>
+            </details>
+          </div>
+        </details>
+
+      </div>
+    </details>
+
+    <!-- ==================== IV. WEB 配置 ==================== -->
+    <details class="group" open>
+      <summary>Ⅳ. apps/web 配置与资源 <span class="cnt">8 文件 · ≈142 行</span></summary>
+      <div class="group-body">
+        <details class="file cfg" open>
+          <summary><span class="ln">16</span>index.html<span class="role r-cfg">HTML 入口</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：zh-CN + viewport + favicon + theme-color #0d9488 + 标题"SciFlow · 全自动 AI 科研助手"。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">29</span>vite.config.ts<span class="role r-cfg">Vite 配置</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：react+tailwind 插件；dev 端口 5173 + /api 代理到 3000；build manualChunks 拆 react/ui（echarts 按需）vendor。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">20</span>tsconfig.json · <span class="ln">36</span>package.json<span class="role r-cfg">TS/包配置</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：bundler 模块解析 + react-jsx；依赖 React19/Vite6/Tailwind4/ECharts6/lucide/react-markdown/KaTeX/router 7。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">21</span>nginx.conf<span class="role r-cfg">生产 Nginx 配置</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：SPA try_files 回退 + /api/ 反代到 server:3000，读写超时 300s。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">10×2</span>public/favicon.svg · apple-touch-icon.svg<span class="role r-cfg">品牌图标</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：SVG 渐变 S 徽标。</li>
+              </ul>
+        </details>
+      </div>
+    </details>
+
+    <!-- ==================== V. 根/部署/CI/文档 ==================== -->
+    <details class="group" open>
+      <summary>Ⅴ. 根配置 · 部署 · CI · 脚本 · 文档 <span class="cnt">12 文件</span></summary>
+      <div class="group-body">
+        <details class="file cfg" open>
+          <summary><span class="ln">22</span>package.json<span class="role r-cfg">monorepo 根</span></summary>
+          <ul class="notes">
+                <li><b>脚本</b>：dev（concurrently 双端）、build（-r 递归）、start、db:push/studio；engines node≥20；packageManager pnpm@11.7.0。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">8</span>pnpm-workspace.yaml<span class="role r-cfg">workspace</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：packages apps/*；allowBuilds better-sqlite3/esbuild；esbuild overrides ^0.25。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">4440</span>pnpm-lock.yaml<span class="role r-cfg">依赖锁文件</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：锁定全依赖树（非手工阅读范围，CI 用 --frozen-lockfile）。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">28</span>Dockerfile<span class="role r-cfg">容器化</span></summary>
+          <ul class="notes">
+                <li><b>三阶段</b>：build（corepack pnpm@9 + 双端编译）→ server 运行时（node:22-alpine，EXPOSE 3000）→ web（nginx 静态 + 反代，EXPOSE 80）；.env 不打包。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">30</span>docker-compose.yml<span class="role r-cfg">编排</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：server(:3000) + web(:8080)；SQLite 数据卷持久化；AI 环境变量注入（AI_API_KEY 必填校验）；AI_RPM_CAP 默认 8。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open">
+          <summary><span class="ln">54</span>.github/workflows/ci.yml<span class="role r-cfg">CI</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：push/PR 触发；Node22 + pnpm action + frozen-lockfile；typecheck×2 + vitest + build×2 + .env 不被跟踪校验。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open">
+          <summary><span class="ln">32</span>.gitignore · <span class="ln">21</span>LICENSE<span class="role r-cfg">忽略与许可</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：node_modules/dist/.env/*.db/日志等；MIT 许可。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">218</span>README.md · README.en.md<span class="role r-doc">项目文档</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：功能表（写作/文献/流水线/MCP/记忆/质量/问答/投稿）、技术栈、快速开始、AI 配置、Docker 部署、安全说明、目录结构、设计参考（STORM/Agent Laboratory/GPT-Academic 等）。</li>
+              </ul>
+        </details>
+        <details class="file core" open>
+          <summary><span class="ln">251</span>scripts/full_regression.py<span class="role r-core">全量回归脚本</span></summary>
+          <ul class="notes">
+                <li><b>覆盖</b>：66 个路由（健康/项目/文档/知识 RAG/MCP guardrail/流水线/记忆/质量/文献/投稿/问答/设置/用量）；AI 类接口 429 退避重试 + 连续超时跳过标记；34 项通过（AI 未配置环境项外）。</li>
+              </ul>
+        </details>
+        <details class="file cfg" open>
+          <summary><span class="ln">4×png</span>docs/screenshots/*.png<span class="role r-doc">界面截图</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：工作台 / 流水线 / 质量 / 写作 4 张 README 展示图。</li>
+              </ul>
+        </details>
+      </div>
+    </details>
+
+    <!-- ==================== VI. 运行时产物 ==================== -->
+    <details class="group" open>
+      <summary>Ⅵ. 运行时产物（不计入源码分析） <span class="cnt">3 个</span></summary>
+      <div class="group-body">
+        <details class="file mod" open>
+          <summary><span class="ln">—</span>apps/server/data/sciflow.db-wal / db-shm<span class="role r-mod">SQLite WAL 运行文件</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：运行时自动生成（已 gitignore），非源码；db 本体 18 表。</li>
+              </ul>
+        </details>
+        <details class="file mod" open>
+          <summary><span class="ln">0</span>apps/web/tsconfig.tsbuildinfo<span class="role r-mod">TS 增量构建缓存</span></summary>
+          <ul class="notes">
+                <li><b>要点</b>：tsc -b 产物，0 行，非源码。</li>
+              </ul>
+        </details>
+      </div>
+    </details>
+
+  </div>
+
+  <div class="foot">SciFlow · 全项目 97 个实质文件逐行通读结论：数据流 项目→文档→引用→文献、流水线任务→Agent 轨迹→反思日志→记忆 全部闭环；后端核心 = ai.service（AI 网关）+ pipeline（状态机）+ orchestrator（编排）；前端核心 = App 外壳 + WritingPage + SettingsPage；无第三方重量级前端框架，全部原生 React + Tailwind。点击任何分组/文件标题可折叠。</div>
+</div>
+</body>
+</html>

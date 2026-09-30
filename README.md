@@ -25,7 +25,7 @@
 | 模块 | 能力 |
 | --- | --- |
 | **论文写作** | 大纲生成（outline-first）、章节起草、三段式学术润色（原文+润色文+理由）、中英互译、降重改写、自动保存与多版本历史 |
-| **文献调研** | OpenAlex / arXiv / Semantic Scholar 三源真实检索、文献库管理、AI 结构化综述（每处观点绑定真实文献，防幻觉） |
+| **文献调研** | 本地文献库管理（手动添加 / 项目导入 / 库内检索）、AI 结构化综述（每处观点绑定真实文献，防幻觉） |
 | **全自动流水线** | Supervisor 多 Agent 编排：**Planner** 研究计划（目标/子问题/检索策略/章节/风险）→ **Research×3 并行 ReAct**（think→act→observe 自主补检）→ 大纲生成（**人工确认点**）→ **Writer 分章起草**（Agentic RAG 每章补检）→ **Reviewer 7 维质量门（<80 触发 Reflexion 反思并回炉重写）** → **Polisher 润色** → 引用格式化 → 完成（自动沉淀情景记忆） |
 | **Agent 编排视图** | 流水线页可视化每个子 Agent 的执行状态/耗时/摘要（`/api/pipeline/:id/agents`） |
 | **MCP 工具台** | 13 个 AI 能力协议化为 11 个标准 MCP 工具（2026-07 规范），设置页可逐个可视化调用 |
@@ -40,9 +40,10 @@
 ```
 apps/
 ├── server/  NestJS 11 · TypeScript · Drizzle ORM · SQLite（better-sqlite3）
-│            · 原生 fetch 对接 OpenAI 兼容协议（OpenAI/DeepSeek/通义/豆包/Agnes）
-│            · 11 表：Project / Document / Reference / Citation / QualityReport / PipelineTask / PolishRecord
-│                     / KnowledgeDoc / KnowledgeChunk / ReflexionLog / MemoryLog / AgentRun
+│            · 原生 fetch 对接国内 OpenAI 兼容协议（豆包火山方舟/DeepSeek/通义/智谱/Kimi）
+│            · 18 表：Project / Document / Reference / Citation / QualityReport / PipelineTask / PolishRecord
+│                     / KnowledgeDoc / KnowledgeChunk / ReflexionLog / MemoryLog / AgentRun / ModelProvider
+│                     / McpServer / CustomIntent / PipelineConfig / AppSetting / CustomPrompt / LlmCallLog
 │            · orchestrator/  Supervisor 编排器（五类子 Agent + 并行调度 + 轨迹记录）
 │            · mcp/           MCP 工具协议化（11 个工具，list/call/info 端点）
 │            · 全局令牌桶限流（AI_RPM_CAP 可配，稳定适配免费版 429）
@@ -61,7 +62,7 @@ pnpm install
 
 # 2. 配置 AI（复制 .env.example 为 .env 并填写你的 API Key）
 cp apps/server/.env.example apps/server/.env
-#    支持 OpenAI / DeepSeek / 通义千问 / 豆包（火山方舟）等 OpenAI 兼容接口
+#    默认豆包（火山方舟），也可用 DeepSeek / 通义千问 / 智谱 / Kimi 等国内 OpenAI 兼容接口
 
 # 3. 编译并启动（后端 :3000 + 前端 :5173）
 pnpm build
@@ -78,9 +79,9 @@ pnpm dev
 
 | 变量 | 说明 | 示例 |
 | --- | --- | --- |
-| `AI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.openai.com/v1` / `https://api.deepseek.com/v1` |
+| `AI_BASE_URL` | OpenAI 兼容接口地址（默认豆包·火山方舟） | `https://ark.cn-beijing.volces.com/api/v3` / `https://api.deepseek.com/v1` |
 | `AI_API_KEY` | API 密钥 | `sk-...` |
-| `AI_MODEL` | 模型名 | `gpt-4o-mini` / `deepseek-chat` |
+| `AI_MODEL` | 模型名 | `agnes-3.0-flash` / `deepseek-chat` |
 | `AI_MODEL_FAST` | fast 档模型（问答/润色/翻译） | `agnes-3.0-flash` |
 | `AI_MODEL_STRONG` | strong 档模型（规划/长文/评审） | 未配置则回落 fast |
 | `AI_RPM_CAP` | 每分钟最大 AI 调用数（令牌桶防 429） | `8` |
@@ -139,7 +140,7 @@ pnpm --filter server test
 - **引用真实化**：成文后自动把 `[Ref:N]` 占位符渲染为 `[作者 年份]` + 文末 GB/T 7714 参考文献列表（此前占位符被评审判定"引用造假"）。
 - **学术诚信约束**：起草 Prompt 硬性禁止虚构实验数据/性能数值，实验结论必须来自给定文献并标注（修复"综述虚构 QM9 指标"）。
 - **引用池净化**：起草只使用元数据完整（作者+年份）的文献，编号与渲染一致；无出处纯标题（Agentic RAG 补检）不再污染文献库。
-- **多源检索降级**：OpenAlex / arXiv / Semantic Scholar / **CrossRef** 四路并行，单源 429/暂停自动降级，保证真实可追溯文献。
+- **文献检索本地化**：已移除国外在线源（OpenAlex / arXiv / Semantic Scholar / CrossRef），零外部网络依赖，检索改走本地文献库。
 - **严格评分门**：总分 < 80 自动 Reflexion 反思落库 → 回炉重写（最多 3 轮），7 维（文献/逻辑/引用/语言/创新/图表/格式）评分 + 反馈可查。
 
 > 实测轨迹：首轮 46/100（引用占位符+虚构实验）→ 定位并修复 7 类根因 → 终验轮文献 47/47 元数据完整、综述正常成文。评分器按"苛刻同行评审"标准设计，宁严勿松。
@@ -183,9 +184,9 @@ sciflow/
 │   │   └── src/
 │   │       ├── main.ts            # 入口（CORS、全局前缀 /api）
 │   │       ├── app.module.ts      # 模块装配
-│   │       ├── db/                # Drizzle schema（7 表）+ SQLite 连接与建表
+│   │       ├── db/                # Drizzle schema（18 表）+ SQLite 连接与建表
 │   │       ├── ai/                # 统一 LLM 服务 + 科研 Prompt 模板库
-│   │       ├── literature/        # 三源文献检索（OpenAlex/arXiv/Semantic Scholar）
+│   │       ├── literature/        # 本地文献库检索（已移除国外在线源）
 │   │       ├── projects/          # 项目管理
 │   │       ├── documents/         # 文档、润色、翻译、引用、版本历史
 │   │       ├── references/        # 文献库与综述
