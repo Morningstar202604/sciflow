@@ -5,6 +5,7 @@ import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { AgentRun, Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Input, Modal, Spinner, Textarea, jsonText } from '../components/ui';
+import { HBar, ProgressRing, Sparkline } from '../components/charts';
 
 const STEP_LABELS: Record<string, string> = {
   'topic-verify': '① 主题验证',
@@ -236,6 +237,23 @@ export function PipelinePage({ project }: { project: Project }) {
                   <Badge tone={statusText[active.status]?.tone || 'blue'}>{statusText[active.status]?.text || active.status}</Badge>
                 </div>
 
+                {/* 进度环：8 步中已完成占比，label=当前步骤 */}
+                {(() => {
+                  const doneCount = active.steps.filter((s) => s.status === 'done').length;
+                  const totalSteps = active.steps.length || 8;
+                  return (
+                    <div className="flex items-center gap-3 mb-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 px-3 py-2">
+                      <ProgressRing
+                        value={(doneCount / totalSteps) * 100}
+                        size={56}
+                        thickness={6}
+                        label={STEP_LABELS[active.currentStep] || active.currentStep}
+                        sub={`${doneCount}/${totalSteps} 步已完成`}
+                      />
+                    </div>
+                  );
+                })()}
+
                 {active.lastError && <div className="text-xs text-rose-600 bg-rose-50 rounded p-2 mb-3">{active.lastError}</div>}
 
                 {/* 研究计划（Phase 1a：Planner）+ ReAct 轨迹（Phase 1b） */}
@@ -284,6 +302,16 @@ export function PipelinePage({ project }: { project: Project }) {
                     </div>
                     {showTrace && (
                       <div className="space-y-1.5">
+                        {(() => {
+                          const foundSeries = activeTrace.filter((t) => t.action === 'search').map((t) => t.found);
+                          return foundSeries.length > 1 ? (
+                            <div className="flex items-center gap-2 mb-2 rounded bg-white/60 dark:bg-slate-900/40 px-2 py-1.5">
+                              <span className="text-[11px] text-blue-600 dark:text-blue-400 shrink-0">检索命中收敛</span>
+                              <Sparkline data={foundSeries} width={110} height={26} stroke="#3b82f6" />
+                              <span className="text-[11px] text-slate-400 dark:text-slate-500 ml-auto shrink-0">{foundSeries.join(' → ')}</span>
+                            </div>
+                          ) : null;
+                        })()}
                         {activeTrace.map((t, i) => (
                           <div key={i} className="flex items-start gap-2 text-xs">
                             <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 text-[10px]">
@@ -322,6 +350,26 @@ export function PipelinePage({ project }: { project: Project }) {
                         <div className="flex items-center gap-1.5 mb-2 text-teal-600 dark:text-teal-400">
                           <Activity size={12} /> 规划 → 并行检索 → 写作 → 评审 → 润色（每格一个子 Agent 执行单元）
                         </div>
+                        {/* 各 Agent 角色耗时汇总 HBar（value=总耗时秒，sub=实例数，hint=单实例明细） */}
+                        {(() => {
+                          const labels: Record<string, string> = { planner: '规划', research: '检索', writer: '写作', reviewer: '评审', polisher: '润色' };
+                          const items = (['planner', 'research', 'writer', 'reviewer', 'polisher'] as const)
+                            .map((type) => {
+                              const group = agents.filter((a) => a.agentType === type);
+                              if (!group.length) return null;
+                              const totalSec = group.reduce((s, a) => s + (a.durationMs || 0), 0) / 1000;
+                              const hint = group.map((a) => `${a.agentName} ${(a.durationMs / 1000).toFixed(1)}s`).join('；');
+                              return { label: `${labels[type]} Agent`, value: Math.round(totalSec * 10) / 10, sub: `${group.length}实例`, hint };
+                            })
+                            .filter(Boolean) as { label: string; value: number; sub: string; hint: string }[];
+                          if (!items.length) return null;
+                          return (
+                            <div className="mb-3 rounded bg-white/60 dark:bg-slate-900/40 p-2">
+                              <div className="text-[11px] font-medium text-teal-700 dark:text-teal-400 mb-1.5">各角色耗时汇总（秒，悬停看单实例）</div>
+                              <HBar items={items} barHeight={6} />
+                            </div>
+                          );
+                        })()}
                         {/* 按角色分组的执行链（2026 Supervisor-Worker 编排视图） */}
                         <div className="space-y-2">
                           {['planner', 'research', 'writer', 'reviewer', 'polisher'].map((type) => {

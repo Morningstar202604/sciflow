@@ -3,6 +3,7 @@ import { Brain, History, Lightbulb, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { MemoryItem } from '../types';
 import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Spinner, Textarea } from '../components/ui';
+import { ChartEmpty, Donut, LineChart } from '../components/charts';
 
 /** 记忆中心（Phase 2：Agentic Memory）
  * - 情景记忆 episodic：流水线完成时自动沉淀（主题/结构/评分），供后续任务参考
@@ -10,6 +11,7 @@ import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Spinner, Te
  */
 export function MemoryPage() {
   const [items, setItems] = useState<MemoryItem[]>([]);
+  const [allItems, setAllItems] = useState<MemoryItem[]>([]);
   const [type, setType] = useState<'episodic' | 'procedural' | ''>('');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
@@ -19,6 +21,15 @@ export function MemoryPage() {
   const [newKeywords, setNewKeywords] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<MemoryItem | null>(null);
+
+  /** 拉取全量记忆用于概览统计（不随筛选变化） */
+  const loadOverview = useCallback(async () => {
+    try {
+      setAllItems(await api.memory.list('', ''));
+    } catch {
+      /* 概览统计失败不阻断列表 */
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -34,7 +45,8 @@ export function MemoryPage() {
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+    loadOverview();
+  }, [refresh, loadOverview]);
 
   const addMemory = async () => {
     if (!newContent.trim()) return;
@@ -50,6 +62,7 @@ export function MemoryPage() {
       setNewKeywords('');
       setShowAdd(false);
       refresh();
+      loadOverview();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -67,6 +80,7 @@ export function MemoryPage() {
       await api.memory.remove(deleting.id);
       setDeleting(null);
       refresh();
+      loadOverview();
     } catch (e: any) {
       setError(e.message);
       setDeleting(null);
@@ -74,6 +88,30 @@ export function MemoryPage() {
   };
 
   const typeTone = (t: string) => (t === 'procedural' ? 'teal' : 'blue') as 'teal' | 'blue';
+
+  /* ---- 概览派生（基于全量 allItems，不随筛选变化） ---- */
+  const epiCount = allItems.filter((m) => m.type === 'episodic').length;
+  const procCount = allItems.length - epiCount;
+
+  // 按天聚合计数 → 记忆增长趋势
+  const dayMap = new Map<string, number>();
+  for (const m of allItems) {
+    const d = new Date(m.createdAt);
+    const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    dayMap.set(key, (dayMap.get(key) || 0) + 1);
+  }
+  const growth = [...dayMap.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, v]) => {
+      const [, mo, da] = key.split('-');
+      return { label: `${Number(mo)}/${Number(da)}`, value: v };
+    });
+
+  // 关键词频次 Top 12
+  const kwMap = new Map<string, number>();
+  for (const m of allItems) for (const k of m.keywords || []) kwMap.set(k, (kwMap.get(k) || 0) + 1);
+  const topKws = [...kwMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const maxKw = topKws.length ? topKws[0][1] : 1;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -109,6 +147,61 @@ export function MemoryPage() {
           </Button>
         </div>
       </Card>
+
+      {/* 记忆概览：类型占比 + 增长趋势 + 高频关键词 */}
+      {allItems.length > 0 && (
+        <Card className="p-4 mb-4">
+          <div className="grid md:grid-cols-2 gap-4 mb-3">
+            <div>
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">记忆类型占比</div>
+              <Donut
+                size={110}
+                centerValue={String(allItems.length)}
+                centerLabel="总记忆"
+                segments={[
+                  { label: '情景记忆', value: epiCount, color: '#0ea5e9' },
+                  { label: '程序记忆', value: procCount, color: 'var(--brand-500)' },
+                ]}
+              />
+            </div>
+            <div>
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">记忆增长（按天新增条数）</div>
+              {growth.length >= 2 ? (
+                <LineChart points={growth} height={120} />
+              ) : (
+                <ChartEmpty title="数据点不足" hint="再积累几天记忆后展示增长曲线" />
+              )}
+            </div>
+          </div>
+          {topKws.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">高频关键词（点击筛选）</div>
+              <div className="flex flex-wrap gap-1.5">
+                {topKws.map(([kw, n]) => {
+                  const t = n / maxKw;
+                  const active = q === kw;
+                  return (
+                    <button
+                      key={kw}
+                      onClick={() => setQ(active ? '' : kw)}
+                      title={`${kw} · 出现 ${n} 次`}
+                      className={`rounded-full px-2.5 py-1 transition-colors border ${
+                        active
+                          ? 'border-teal-400 bg-teal-50 dark:bg-teal-500/15 text-teal-700 dark:text-teal-300'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-teal-300'
+                      }`}
+                      style={{ fontSize: `${11 + t * 4}px`, opacity: 0.55 + t * 0.45, fontWeight: t > 0.7 ? 600 : 400 }}
+                    >
+                      {kw}
+                      <span className="ml-1 text-[10px] text-slate-400">{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {showAdd && (
         <Card className="p-4 mb-4 border-teal-200 bg-teal-50/50 card-lift">

@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
-import { BookOpenCheck, Download, FlaskConical, GitCompareArrows, Lightbulb, ListChecks, Loader2, Plus, Search, Table2, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { BookOpenCheck, ClipboardList, Download, Filter, FlaskConical, GitCompareArrows, Lightbulb, ListChecks, Loader2, Plus, Search, Table2, Trash2, X } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { DeepDiveResult, EvidenceResult, ExtractedPaper, GapResult, PaperComparisonResult, Project, Reference } from '../types';
-import { Badge, Button, Card, Empty, ErrorBox, Input, Select, Spinner, Textarea, jsonText } from '../components/ui';
+import type { DeepDiveResult, EvidenceResult, ExtractedPaper, ExtractionField, ExtractionTableResult, GapResult, PaperComparisonResult, Project, Reference, ScreeningItem } from '../types';
+import { Badge, Button, Card, CollapsibleCard, Empty, ErrorBox, Input, Select, Spinner, Textarea, jsonText } from '../components/ui';
+import { ChartEmpty, Donut, HBar, SegBar } from '../components/charts';
 
 type Tool = 'summary' | 'extract' | 'evidence' | 'deepdive' | 'gap' | 'compare';
 
@@ -16,6 +17,14 @@ const TOOLS: { key: Tool; label: string; icon: typeof ListChecks; hint: string }
   { key: 'gap', label: '研究缺口', icon: Lightbulb, hint: '科研选题定位' },
   { key: 'compare', label: '文献对比', icon: Table2, hint: '多篇横向对比表' },
 ];
+
+type ScreenStatus = 'pending' | 'included' | 'excluded' | 'uncertain';
+const SCREEN_META: Record<ScreenStatus, { label: string; tone: 'slate' | 'green' | 'amber' | 'red' }> = {
+  pending: { label: '待筛', tone: 'slate' },
+  included: { label: '纳入', tone: 'green' },
+  excluded: { label: '排除', tone: 'red' },
+  uncertain: { label: '不确定', tone: 'amber' },
+};
 
 export function LiteraturePage({ project }: { project: Project }) {
   const [query, setQuery] = useState('');
@@ -45,10 +54,32 @@ export function LiteraturePage({ project }: { project: Project }) {
   const [addDoi, setAddDoi] = useState('');
   const [addAbstract, setAddAbstract] = useState('');
   const [adding, setAdding] = useState(false);
+
+  // —— 系统综述：筛选队列 ——
+  const [screenItems, setScreenItems] = useState<ScreeningItem[]>([]);
+  const [showScreen, setShowScreen] = useState(false);
+  const [screenFilter, setScreenFilter] = useState<'all' | ScreenStatus>('all');
+  const [screenSelected, setScreenSelected] = useState<Set<string>>(new Set());
+  const [screenBusy, setScreenBusy] = useState(false);
+  // —— 系统综述：编码抽取表 ——
+  const [extFields, setExtFields] = useState<ExtractionField[]>([]);
+  const [extTable, setExtTable] = useState<ExtractionTableResult | null>(null);
+  const [showExtraction, setShowExtraction] = useState(false);
+  const [extLoading, setExtLoading] = useState(false);
+  const [extError, setExtError] = useState('');
+  const [newFieldKey, setNewFieldKey] = useState('');
+  const [newFieldLabel, setNewFieldLabel] = useState('');
+  const [newFieldKind, setNewFieldKind] = useState<'text' | 'select'>('text');
+  const [newFieldOptions, setNewFieldOptions] = useState('');
   const toast = useContext(ToastContext);
 
   useEffect(() => {
     api.references.list(project.id).then(setRefs).catch((e) => setError(e.message));
+  }, [project.id]);
+
+  // 加载筛选队列（后端未就绪时优雅降级为空数组）
+  useEffect(() => {
+    api.references.screenList(project.id).then(setScreenItems).catch(() => setScreenItems([]));
   }, [project.id]);
 
   const search = async () => {
@@ -206,8 +237,168 @@ export function LiteraturePage({ project }: { project: Project }) {
     }
   };
 
+  /* ================= 系统综述：筛选 ================= */
+  const screenMap = useMemo(() => new Map(screenItems.map((s) => [s.referenceId, s])), [screenItems]);
+
+  const refreshScreen = async () => {
+    try {
+      setScreenItems(await api.references.screenList(project.id));
+    } catch {
+      /* 静默降级 */
+    }
+  };
+
+  const doScreen = async (refId: string, status: ScreenStatus, reason = '') => {
+    try {
+      await api.references.screen(project.id, refId, status, reason);
+      refreshScreen();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const doScreenBulk = async (status: ScreenStatus) => {
+    if (screenSelected.size === 0) return;
+    setScreenBusy(true);
+    try {
+      await api.references.screenBulk(project.id, [...screenSelected], status);
+      refreshScreen();
+      toast('success', `已批量${SCREEN_META[status].label} ${screenSelected.size} 篇`);
+      setScreenSelected(new Set());
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setScreenBusy(false);
+    }
+  };
+
+  const filteredScreenItems = useMemo(
+    () => (screenFilter === 'all' ? screenItems : screenItems.filter((s) => s.status === screenFilter)),
+    [screenItems, screenFilter],
+  );
+  const allFilteredSelected = filteredScreenItems.length > 0 && filteredScreenItems.every((s) => screenSelected.has(s.referenceId));
+
+  /* ================= 系统综述：编码抽取表 ================= */
+  const loadExtraction = async () => {
+    setExtLoading(true);
+    setExtError('');
+    try {
+      const [fields, table] = await Promise.all([
+        api.references.extractionFields(project.id),
+        api.references.extractionTable(project.id),
+      ]);
+      setExtFields(fields);
+      setExtTable(table);
+    } catch (e: any) {
+      setExtError(e.message);
+      setExtFields([]);
+      setExtTable(null);
+    } finally {
+      setExtLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showExtraction) loadExtraction();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showExtraction, project.id]);
+
+  const addField = async () => {
+    if (!newFieldKey.trim() || !newFieldLabel.trim()) {
+      setExtError('字段 key 与显示名必填');
+      return;
+    }
+    try {
+      const opts = newFieldKind === 'select' ? newFieldOptions.split(/[,，]/).map((s) => s.trim()).filter(Boolean) : [];
+      await api.references.addExtractionField(project.id, newFieldKey.trim(), newFieldLabel.trim(), newFieldKind, opts);
+      setNewFieldKey(''); setNewFieldLabel(''); setNewFieldOptions('');
+      loadExtraction();
+      toast('success', '抽取字段已添加');
+    } catch (e: any) {
+      setExtError(e.message);
+    }
+  };
+
+  const removeField = async (id: string) => {
+    try {
+      await api.references.removeExtractionField(id);
+      loadExtraction();
+      toast('info', '字段已删除');
+    } catch (e: any) {
+      setExtError(e.message);
+    }
+  };
+
+  const saveExtValue = async (fieldId: string, referenceId: string, value: string) => {
+    try {
+      await api.references.setExtractionValue(fieldId, referenceId, value);
+    } catch (e: any) {
+      setExtError(e.message);
+    }
+  };
+
+  /* ================= 可视化聚合 ================= */
   const authors = (a: string) => jsonText<string[]>(a, []).join(', ') || '佚名';
   const stanceTone = (s: string) => (s.includes('支持') && !s.includes('部分') ? 'green' : s.includes('矛盾') ? 'red' : s.includes('部分') ? 'amber' : 'slate');
+
+  // 证据综合：共识度 SegBar（按 stance 归类计数）
+  const consensus = useMemo(() => {
+    if (!evidence) return [];
+    const buckets = { support: 0, partial: 0, conflict: 0, neutral: 0 };
+    evidence.stances.forEach((s) => {
+      if (s.stance.includes('支持') && !s.stance.includes('部分')) buckets.support += s.count;
+      else if (s.stance.includes('矛盾')) buckets.conflict += s.count;
+      else if (s.stance.includes('部分')) buckets.partial += s.count;
+      else buckets.neutral += s.count;
+    });
+    return [
+      { label: '支持', value: buckets.support, color: '#10b981', hint: `证据支持该论断的文献 ${buckets.support} 篇` },
+      { label: '部分支持', value: buckets.partial, color: '#f59e0b', hint: `部分支持 / 有条件支持 ${buckets.partial} 篇` },
+      { label: '矛盾', value: buckets.conflict, color: '#f87171', hint: `文献结论相互矛盾 ${buckets.conflict} 篇` },
+      { label: '中立/不足', value: buckets.neutral, color: '#94a3b8', hint: `证据不足或中立 ${buckets.neutral} 篇` },
+    ].filter((s) => s.value > 0);
+  }, [evidence]);
+
+  // 文献库：年份分布 Top 10
+  const yearDist = useMemo(() => {
+    const m = new Map<string, number>();
+    refs.forEach((r) => {
+      const y = r.year ? String(r.year) : '未知';
+      m.set(y, (m.get(y) || 0) + 1);
+    });
+    return [...m.entries()]
+      .map(([label, value]) => ({ label, value, hint: `${label} 年：${value} 篇` }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+  }, [refs]);
+
+  // 文献库：高被引 Top 8
+  const topCited = useMemo(() => {
+    return [...refs]
+      .filter((r) => r.citationCount > 0)
+      .sort((a, b) => b.citationCount - a.citationCount)
+      .slice(0, 8)
+      .map((r) => ({
+        label: r.title.length > 36 ? r.title.slice(0, 36) + '…' : r.title,
+        value: r.citationCount,
+        sub: `${r.year || 'n.d.'}·${(r.venue || '').slice(0, 14)}`,
+        hint: r.title,
+      }));
+  }, [refs]);
+
+  // 文献库：venue 分布 Donut（Top5 + 其他，无 venue 归未标注）
+  const venueDist = useMemo(() => {
+    const m = new Map<string, number>();
+    refs.forEach((r) => {
+      const v = r.venue?.trim() || '未标注';
+      m.set(v, (m.get(v) || 0) + 1);
+    });
+    const entries = [...m.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+    const top = entries.slice(0, 5);
+    const rest = entries.slice(5);
+    if (rest.length) top.push({ label: '其他', value: rest.reduce((s, x) => s + x.value, 0) });
+    return top;
+  }, [refs]);
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -319,41 +510,106 @@ export function LiteraturePage({ project }: { project: Project }) {
           {refs.length === 0 ? (
             <Empty text="文献库为空：点击「手动添加文献」录入，或先上传资料到知识库" />
           ) : (
-            <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
-              {refs.map((r) => (
-                <div key={r.id} className="border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="mt-1.5 accent-teal-600"
-                    checked={selectedRefs.has(r.id)}
-                    onChange={() => setSelectedRefs((s0) => { const n = new Set(s0); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })}
-                    title="勾选后可用于文献对比"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-slate-800 dark:text-slate-100">{r.title}</div>
-                    <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
-                      {authors(r.authors)} · {r.year || 'n.d.'} · {r.venue}
-                      {r.doi && <span className="text-emerald-600"> · DOI:{r.doi}</span>}
-                    </div>
+            <>
+              {/* 文献库统计概览 */}
+              <div className="mb-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800">
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">年份分布 Top 10</div>
+                    <HBar items={yearDist} barHeight={6} />
                   </div>
-                  <button
-                    className="text-slate-400 hover:text-teal-600 shrink-0 mt-0.5"
-                    title="AI 深度精读这篇文献"
-                    onClick={() => {
-                      setTool('deepdive');
-                      setDeepDiveRef(r.id);
-                      setDeepDive(null);
-                      runDeepDive(r.id);
-                    }}
-                  >
-                    <BookOpenCheck size={14} />
-                  </button>
-                  <button className="text-slate-300 hover:text-rose-500" onClick={() => removeRef(r.id)}>
-                    <Trash2 size={14} />
-                  </button>
+                  <div>
+                    <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">来源 / venue 分布</div>
+                    <Donut segments={venueDist} size={80} thickness={11} centerValue={String(refs.length)} centerLabel="篇总量" />
+                  </div>
                 </div>
-              ))}
-            </div>
+                {topCited.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-200/70 dark:border-slate-800">
+                    <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">高被引 Top {topCited.length}</div>
+                    <HBar items={topCited} barHeight={6} />
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
+                {refs.map((r) => {
+                  const sc = screenMap.get(r.id);
+                  const scStatus: ScreenStatus = sc?.status ?? 'pending';
+                  return (
+                    <div key={r.id} className="border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        className="mt-1.5 accent-teal-600"
+                        checked={selectedRefs.has(r.id)}
+                        onChange={() => setSelectedRefs((s0) => { const n = new Set(s0); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })}
+                        title="勾选后可用于文献对比"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start gap-1.5">
+                          <div className="text-sm text-slate-800 dark:text-slate-100">{r.title}</div>
+                          {scStatus !== 'pending' && <Badge tone={SCREEN_META[scStatus].tone}>{SCREEN_META[scStatus].label}</Badge>}
+                        </div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                          {authors(r.authors)} · {r.year || 'n.d.'} · {r.venue}
+                          {r.doi && <span className="text-emerald-600"> · DOI:{r.doi}</span>}
+                        </div>
+                        {/* 筛选状态按钮组 */}
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {(['included', 'excluded', 'uncertain'] as const).map((st) => {
+                            const active = scStatus === st;
+                            const toneCls =
+                              st === 'included'
+                                ? active
+                                  ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-300'
+                                  : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-emerald-300'
+                                : st === 'excluded'
+                                ? active
+                                  ? 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-300'
+                                  : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-rose-300'
+                                : active
+                                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-300'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-amber-300';
+                            return (
+                              <button
+                                key={st}
+                                onClick={() => doScreen(r.id, st)}
+                                className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${toneCls}`}
+                                title={`标记为${SCREEN_META[st].label}（系统综述筛选）`}
+                              >
+                                {SCREEN_META[st].label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {scStatus !== 'pending' && (
+                          <Input
+                            className="mt-1.5 text-xs h-7"
+                            placeholder="筛选理由（可选，失焦保存）"
+                            defaultValue={sc?.reason ?? ''}
+                            onBlur={(e) => doScreen(r.id, scStatus, e.target.value.trim())}
+                          />
+                        )}
+                      </div>
+                      <button
+                        className="text-slate-400 hover:text-teal-600 shrink-0 mt-0.5"
+                        title="AI 深度精读这篇文献"
+                        onClick={() => {
+                          setTool('deepdive');
+                          setDeepDiveRef(r.id);
+                          setDeepDive(null);
+                          runDeepDive(r.id);
+                        }}
+                      >
+                        <BookOpenCheck size={14} />
+                      </button>
+                      <button className="text-slate-300 hover:text-rose-500" onClick={() => removeRef(r.id)}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </Card>
 
@@ -497,16 +753,38 @@ export function LiteraturePage({ project }: { project: Project }) {
                     <div className="text-xs font-medium text-teal-700 dark:text-teal-300 mb-1">推荐选题</div>
                     <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{gapResult.recommendedTopic}</div>
                   </div>
-                  {gapResult.gaps.map((g, i) => (
-                    <div key={i} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="text-sm font-medium text-slate-700 dark:text-slate-200">缺口 {i + 1}：{g.gap}</div>
-                        <Badge tone={g.feasibility === '高' ? 'green' : g.feasibility === '中' ? 'amber' : 'red'}>{g.feasibility}</Badge>
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed"><span className="text-teal-600 dark:text-teal-400">依据：</span>{g.evidence}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed"><span className="text-teal-600 dark:text-teal-400">切入点：</span>{g.opportunity}</div>
-                    </div>
-                  ))}
+                  {/* 按可行性三栏看板 */}
+                  <div className="grid md:grid-cols-3 gap-2">
+                    {(['高', '中', '低'] as const).map((level) => {
+                      const items = gapResult.gaps.filter((g) => g.feasibility === level);
+                      const headCls =
+                        level === '高'
+                          ? 'text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900'
+                          : level === '中'
+                          ? 'text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900'
+                          : 'text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900';
+                      return (
+                        <div key={level} className="rounded-lg border border-slate-100 dark:border-slate-800 overflow-hidden">
+                          <div className={`px-2.5 py-1.5 text-xs font-semibold border-b bg-slate-50/60 dark:bg-slate-900/40 ${headCls}`}>
+                            可行性{level} · {items.length}
+                          </div>
+                          <div className="p-2 space-y-2">
+                            {items.length === 0 ? (
+                              <div className="text-[11px] text-slate-400 dark:text-slate-500 py-3 text-center">暂无</div>
+                            ) : (
+                              items.map((g, i) => (
+                                <div key={i} className="text-xs rounded-md bg-slate-50 dark:bg-slate-900/40 p-2">
+                                  <div className="font-medium text-slate-700 dark:text-slate-200 leading-snug">{g.gap}</div>
+                                  <div className="text-slate-500 dark:text-slate-400 mt-1 leading-relaxed"><span className="text-teal-600 dark:text-teal-400">依据：</span>{g.evidence}</div>
+                                  <div className="text-slate-500 dark:text-slate-400 mt-1 leading-relaxed"><span className="text-teal-600 dark:text-teal-400">切入点：</span>{g.opportunity}</div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               ) : (
                 <Empty text="基于文献库定位未被充分研究的子问题（Research Gap），并给出可行选题建议与可行性评估" />
@@ -568,6 +846,13 @@ export function LiteraturePage({ project }: { project: Project }) {
                 <Spinner label="综合证据中…" />
               ) : evidence ? (
                 <div className="space-y-3 max-h-[440px] overflow-y-auto pr-1">
+                  {/* 共识度 SegBar */}
+                  {consensus.length > 0 && (
+                    <div className="rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800 p-3">
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">共识度概览（按 stance 归类文献计数）</div>
+                      <SegBar segments={consensus} />
+                    </div>
+                  )}
                   <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{evidence.summary}</div>
                   {evidence.stances.map((s, i) => (
                     <div key={i} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3">
@@ -587,6 +872,192 @@ export function LiteraturePage({ project }: { project: Project }) {
           )}
         </Card>
       </div>
+
+      {/* ================= 系统综述：筛选队列 ================= */}
+      <CollapsibleCard
+        icon={<Filter size={16} className="text-teal-600" />}
+        title="筛选队列（系统综述 PRISMA 筛选）"
+        summary={`共 ${screenItems.length} 条 · 纳入 ${screenItems.filter((s) => s.status === 'included').length} / 排除 ${screenItems.filter((s) => s.status === 'excluded').length}`}
+        open={showScreen}
+        onToggle={() => setShowScreen((v) => !v)}
+      >
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <Select
+            className="text-xs w-40"
+            value={screenFilter}
+            onChange={(v) => setScreenFilter(v as 'all' | ScreenStatus)}
+            options={[
+              { value: 'all', label: `全部（${screenItems.length}）` },
+              { value: 'pending', label: `待筛（${screenItems.filter((s) => s.status === 'pending').length}）` },
+              { value: 'included', label: `纳入（${screenItems.filter((s) => s.status === 'included').length}）` },
+              { value: 'excluded', label: `排除（${screenItems.filter((s) => s.status === 'excluded').length}）` },
+              { value: 'uncertain', label: `不确定（${screenItems.filter((s) => s.status === 'uncertain').length}）` },
+            ]}
+          />
+          <label className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <input
+              type="checkbox"
+              className="accent-teal-600"
+              checked={allFilteredSelected}
+              onChange={() => {
+                setScreenSelected((prev) => {
+                  const next = new Set(prev);
+                  if (allFilteredSelected) filteredScreenItems.forEach((s) => next.delete(s.referenceId));
+                  else filteredScreenItems.forEach((s) => next.add(s.referenceId));
+                  return next;
+                });
+              }}
+            />
+            全选当前（已选 {screenSelected.size}）
+          </label>
+          <div className="ml-auto flex gap-2">
+            <Button variant="success" className="text-xs" disabled={screenSelected.size === 0 || screenBusy} onClick={() => doScreenBulk('included')}>
+              {screenBusy ? <Loader2 size={13} className="animate-spin" /> : null} 一键纳入
+            </Button>
+            <Button variant="danger" className="text-xs" disabled={screenSelected.size === 0 || screenBusy} onClick={() => doScreenBulk('excluded')}>
+              {screenBusy ? <Loader2 size={13} className="animate-spin" /> : null} 一键排除
+            </Button>
+          </div>
+        </div>
+
+        {filteredScreenItems.length === 0 ? (
+          <ChartEmpty title="暂无筛选记录" hint="在左侧文献库点击「纳入/排除/不确定」按钮，即可把文献加入筛选队列" />
+        ) : (
+          <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+            {filteredScreenItems.map((s) => (
+              <div key={s.id} className="flex items-start gap-2.5 border border-slate-100 dark:border-slate-800 rounded-lg p-2.5">
+                <input
+                  type="checkbox"
+                  className="mt-1 accent-teal-600"
+                  checked={screenSelected.has(s.referenceId)}
+                  onChange={() =>
+                    setScreenSelected((prev) => {
+                      const n = new Set(prev);
+                      n.has(s.referenceId) ? n.delete(s.referenceId) : n.add(s.referenceId);
+                      return n;
+                    })
+                  }
+                  title="勾选后可批量操作"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-800 dark:text-slate-100 leading-snug">{s.title}</div>
+                  <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                    {s.year || 'n.d.'} · {s.venue || '未标注'}
+                  </div>
+                  {s.reason && <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">理由：{s.reason}</div>}
+                </div>
+                <Badge tone={SCREEN_META[s.status].tone}>{SCREEN_META[s.status].label}</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+      </CollapsibleCard>
+
+      {/* ================= 系统综述：编码抽取表 ================= */}
+      <CollapsibleCard
+        icon={<ClipboardList size={16} className="text-teal-600" />}
+        title="编码抽取表（跨文献数据矩阵）"
+        summary={extTable ? `${extFields.length} 字段 · ${extTable.rows.length} 篇` : '定义抽取字段并逐篇编码'}
+        open={showExtraction}
+        onToggle={() => setShowExtraction((v) => !v)}
+      >
+        <ErrorBox message={extError} />
+
+        {/* 字段管理 */}
+        <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 mb-3">
+          <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">抽取字段管理</div>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {extFields.length === 0 ? (
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">尚未定义字段，下方添加第一个编码字段</span>
+            ) : (
+              extFields.map((f) => (
+                <span key={f.id} className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 text-[11px]">
+                  {f.label}
+                  <span className="text-slate-400">({f.kind})</span>
+                  <button className="text-slate-400 hover:text-rose-500" title="删除字段" onClick={() => removeField(f.id)}>
+                    <X size={11} />
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+          <div className="grid md:grid-cols-4 gap-2">
+            <Input placeholder="字段 key（英文标识，如 sampleSize）" value={newFieldKey} onChange={(e) => setNewFieldKey(e.target.value)} className="text-xs" />
+            <Input placeholder="显示名（如 样本量）" value={newFieldLabel} onChange={(e) => setNewFieldLabel(e.target.value)} className="text-xs" />
+            <Select
+              className="text-xs"
+              value={newFieldKind}
+              onChange={(v) => setNewFieldKind(v as 'text' | 'select')}
+              options={[
+                { value: 'text', label: '文本输入' },
+                { value: 'select', label: '下拉选择' },
+              ]}
+            />
+            {newFieldKind === 'select' && (
+              <Input placeholder="选项（逗号分隔，如  RCT,队列,综述）" value={newFieldOptions} onChange={(e) => setNewFieldOptions(e.target.value)} className="text-xs" />
+            )}
+            <Button variant="outline" className="text-xs" onClick={addField} disabled={!newFieldKey.trim() || !newFieldLabel.trim()}>
+              <Plus size={13} /> 添加字段
+            </Button>
+          </div>
+        </div>
+
+        {/* 矩阵表 */}
+        {extLoading ? (
+          <Spinner label="加载抽取矩阵…" />
+        ) : !extTable || extTable.rows.length === 0 || extFields.length === 0 ? (
+          <ChartEmpty title="暂无编码数据" hint="先在上方添加抽取字段，系统将以文献为行、字段为列生成可编辑矩阵" />
+        ) : (
+          <div className="overflow-auto rounded-lg border border-slate-100 dark:border-slate-800 max-h-[420px]">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 sticky top-0">
+                <tr>
+                  <th className="px-2 py-2 text-left min-w-[200px]">文献</th>
+                  {extFields.map((f) => (
+                    <th key={f.id} className="px-2 py-2 text-left min-w-[120px]">{f.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {extTable.rows.map((row) => (
+                  <tr key={row.referenceId} className="border-t border-slate-100 dark:border-slate-800 align-top">
+                    <td className="px-2 py-2">
+                      <div className="font-medium text-slate-700 dark:text-slate-200 leading-snug max-w-[200px] truncate" title={row.title}>{row.title}</div>
+                      <div className="text-slate-400 dark:text-slate-500 mt-0.5">{row.year || 'n.d.'} · {row.venue || '未标注'}</div>
+                    </td>
+                    {extFields.map((f) => {
+                      const val = row.values[f.key] ?? row.values[f.id] ?? '';
+                      return (
+                        <td key={f.id} className="px-2 py-1.5">
+                          {f.kind === 'select' ? (
+                            <select
+                              className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1 text-xs outline-none focus:border-teal-500"
+                              value={val}
+                              onChange={(e) => saveExtValue(f.id, row.referenceId, e.target.value)}
+                            >
+                              <option value="">—</option>
+                              {f.options.map((o) => (
+                                <option key={o} value={o}>{o}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <Input
+                              className="text-xs h-7"
+                              placeholder="…"
+                              defaultValue={val}
+                              onBlur={(e) => saveExtValue(f.id, row.referenceId, e.target.value)}
+                            />
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CollapsibleCard>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { ReferencesService, PaperHit } from './references.service';
 
 @Controller('references')
@@ -14,6 +14,24 @@ export class ReferencesController {
   @Get()
   list(@Query('projectId') projectId: string) {
     return this.references.list(projectId);
+  }
+
+  /** 系统综述·筛选队列列表（须声明在 :id 之前，避免 screen 被当成文献 id） */
+  @Get('screen')
+  screenList(@Query('projectId') projectId: string) {
+    return this.references.screenList(projectId);
+  }
+
+  /** 系统综述·抽取字段列表 */
+  @Get('extraction/fields')
+  extractionFields(@Query('projectId') projectId: string) {
+    return this.references.listExtractionFields(projectId);
+  }
+
+  /** 系统综述·抽取表矩阵 */
+  @Get('extraction/table')
+  extractionTable(@Query('projectId') projectId: string) {
+    return this.references.extractionTable(projectId);
   }
 
   @Get(':id')
@@ -33,9 +51,47 @@ export class ReferencesController {
     return this.references.import(body.projectId, body.hits);
   }
 
+  /** 更新阅读状态 / 标签 */
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() body: { readingStatus?: string; tags?: string }) {
+    return this.references.update(id, body);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.references.remove(id);
+  }
+
+  /** 系统综述·单条筛选（upsert） */
+  @Post('screen')
+  screen(@Body() body: { projectId: string; referenceId: string; status: string; reason?: string }) {
+    return this.references.screenUpsert(body.projectId, body.referenceId, body.status, body.reason || '');
+  }
+
+  /** 系统综述·批量筛选 */
+  @Post('screen/bulk')
+  screenBulk(@Body() body: { projectId: string; referenceIds: string[]; status: string; reason?: string }) {
+    return this.references.screenBulk(body.projectId, body.referenceIds || [], body.status, body.reason || '');
+  }
+
+  /** 系统综述·新建抽取字段 */
+  @Post('extraction/fields')
+  addExtractionField(
+    @Body() body: { projectId: string; key: string; label: string; kind?: string; options?: string[] },
+  ) {
+    return this.references.addExtractionField(body.projectId, body.key, body.label, body.kind, body.options || []);
+  }
+
+  /** 系统综述·删除抽取字段（级联清理取值） */
+  @Delete('extraction/fields/:id')
+  removeExtractionField(@Param('id') id: string) {
+    return this.references.removeExtractionField(id);
+  }
+
+  /** 系统综述·设置某字段在某文献上的取值 */
+  @Put('extraction/values')
+  setExtractionValue(@Body() body: { fieldId: string; referenceId: string; value: string }) {
+    return this.references.setExtractionValue(body.fieldId, body.referenceId, body.value || '');
   }
 
   /** AI 综述（只基于文献库真实文献） */

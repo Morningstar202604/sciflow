@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 
 /** 项目 */
 export const projects = sqliteTable('project', {
@@ -38,6 +38,10 @@ export const references = sqliteTable('reference', {
   source: text('source').default('manual'), // manual（本地文献库，已移除国外在线源）
   tags: text('tags').default('[]'), // JSON: string[]
   citationCount: integer('citation_count').default(0),
+  // 科研高级功能：阅读状态 / 去重指纹 / 重复指向
+  readingStatus: text('reading_status').default('unread'), // unread | reading | read | cited
+  fingerprint: text('fingerprint').default(''), // 标题归一化后哈希（项目内去重依据）
+  isDuplicateOf: text('is_duplicate_of').default(''), // 重复时指向已存在文献 id
   createdAt: integer('created_at').notNull(),
 });
 
@@ -231,3 +235,71 @@ export const llmCallLogs = sqliteTable('llm_call_log', {
 });
 
 export type LlmCallLog = typeof llmCallLogs.$inferSelect;
+
+/** 系统综述·筛选队列（题录筛选：纳入/排除/待定） */
+export const screeningQueue = sqliteTable('screening_queue', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  referenceId: text('reference_id').notNull(),
+  status: text('status').default('pending'), // pending | included | excluded | uncertain
+  reason: text('reason').default(''),
+  reviewer: text('reviewer').default('me'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** 系统综述·文献编码抽取字段（一列一个编码维度） */
+export const extractionFields = sqliteTable('extraction_field', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  key: text('key').notNull(), // 小写字母数字下划线，项目内唯一
+  label: text('label').notNull(),
+  kind: text('kind').default('text'), // text | select
+  options: text('options').default('[]'), // JSON: string[]
+  createdAt: integer('created_at').notNull(),
+});
+
+/** 系统综述·抽取值（field × reference 交叉单元格） */
+export const extractionValues = sqliteTable('extraction_value', {
+  id: text('id').primaryKey(),
+  fieldId: text('field_id').notNull(),
+  referenceId: text('reference_id').notNull(),
+  value: text('value').default(''),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** 审稿意见闭环（按文档逐条记录） */
+export const reviewComments = sqliteTable('review_comment', {
+  id: text('id').primaryKey(),
+  documentId: text('document_id').notNull(),
+  reviewer: text('reviewer').notNull(),
+  commentText: text('comment_text').notNull(),
+  category: text('category').default(''),
+  status: text('status').default('open'), // open | resolved | deferred
+  responseText: text('response_text').default(''),
+  sectionRef: text('section_ref').default(''),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** 自建期刊库（全局共享，不随项目级联删除） */
+export const journals = sqliteTable('journal', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  issn: text('issn').default(''),
+  publisher: text('publisher').default(''),
+  scopeText: text('scope_text').default(''),
+  if2024: real('if2024'), // REAL NULL（不确定指标一律 NULL，禁止编造）
+  quartile: text('quartile').default(''),
+  firstDecisionWeeks: integer('first_decision_weeks'),
+  acceptanceRate: real('acceptance_rate'), // REAL NULL
+  oa: text('oa').default(''),
+  createdAt: integer('created_at').notNull(),
+});
+
+export type ScreeningQueue = typeof screeningQueue.$inferSelect;
+export type ExtractionField = typeof extractionFields.$inferSelect;
+export type ExtractionValue = typeof extractionValues.$inferSelect;
+export type ReviewCommentRow = typeof reviewComments.$inferSelect;
+export type Journal = typeof journals.$inferSelect;

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs } from '../db/schema';
+import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments } from '../db/schema';
 
 @Injectable()
 export class ProjectsService {
@@ -39,12 +39,25 @@ export class ProjectsService {
 
   remove(id: string) {
     this.get(id);
+    // 先捕获本项目文档 id（review_comment 按 document_id 关联，删文档前需级联清理）
+    const docIds = db.select().from(documents).where(eq(documents.projectId, id)).all().map((d) => d.id);
+    // 捕获本项目抽取字段 id（extraction_value 按 field_id 关联，删字段前需级联清理取值）
+    const fieldIds = db.select().from(extractionFields).where(eq(extractionFields.projectId, id)).all().map((f) => f.id);
     // 级联清理：文档、文献、流水线任务及其子 Agent 轨迹、反思日志
     const tasks = db.select().from(pipelineTasks).where(eq(pipelineTasks.projectId, id)).all();
     for (const t of tasks) {
       db.delete(agentRuns).where(eq(agentRuns.taskId, t.id)).run();
       db.delete(reflexionLogs).where(eq(reflexionLogs.taskId, t.id)).run();
     }
+    // 科研高级功能级联清理：审稿意见（按文档）、筛选队列（按项目）、抽取取值与字段（按项目）
+    for (const docId of docIds) {
+      db.delete(reviewComments).where(eq(reviewComments.documentId, docId)).run();
+    }
+    db.delete(screeningQueue).where(eq(screeningQueue.projectId, id)).run();
+    for (const fieldId of fieldIds) {
+      db.delete(extractionValues).where(eq(extractionValues.fieldId, fieldId)).run();
+    }
+    db.delete(extractionFields).where(eq(extractionFields.projectId, id)).run();
     db.delete(documents).where(eq(documents.projectId, id)).run();
     db.delete(references).where(eq(references.projectId, id)).run();
     db.delete(pipelineTasks).where(eq(pipelineTasks.projectId, id)).run();

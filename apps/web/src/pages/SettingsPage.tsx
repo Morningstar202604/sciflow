@@ -4,6 +4,12 @@ import { CheckCircle2, ChevronDown, ChevronUp, Coins, Database, FlaskConical, Ga
 import { api } from '../api/client';
 import type { AppSettings, CustomIntent, CustomPromptTool, McpServerInfo, McpToolInfo, ModelProvider, PipelineStepConfig, QualityWeightItem, SelfCheck } from '../types';
 import { Badge, Button, Card, CollapsibleCard, ErrorBox, Input, Modal, SectionTitle, Select, Spinner, Textarea, errMsg } from '../components/ui';
+import { Donut, HBar, LineChart, MetricCard } from '../components/charts';
+
+/** 数字缩写格式化：12345 -> "12.3k" */
+const fmtK = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)));
+/** 千分位整数 */
+const fmtInt = (v: number) => Math.round(v).toLocaleString('en-US');
 
 interface UsageSummary {
   total: { calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; avg_latency_ms: number; success_rate: number };
@@ -176,61 +182,94 @@ export function SettingsPage() {
               <Coins size={16} className="text-teal-600" /> LLM 用量与成本
             </span>
           </SectionTitle>
-          <div className="grid sm:grid-cols-4 gap-3 mb-4">
-            <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
-              <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">调用次数</div>
-              <div className="text-lg font-semibold text-slate-800 dark:text-slate-100">{usage.total.calls}</div>
-            </div>
-            <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
-              <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">总 Token</div>
-              <div className="text-lg font-semibold text-slate-800 dark:text-slate-100">{(usage.total.total_tokens / 1000).toFixed(1)}k</div>
-              <div className="text-[10px] text-slate-400">入 {usage.total.prompt_tokens.toLocaleString()} · 出 {usage.total.completion_tokens.toLocaleString()}</div>
-            </div>
-            <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
-              <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">成功率</div>
-              <div className="text-lg font-semibold text-emerald-600">{usage.total.success_rate}%</div>
-            </div>
-            <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
-              <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">平均延迟</div>
-              <div className="text-lg font-semibold text-slate-800 dark:text-slate-100">{usage.total.avg_latency_ms}ms</div>
-            </div>
-          </div>
-          {usage.byCaller.length > 0 && (
-            <div className="mb-4">
-              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">按任务类型分布（Token 占比）</div>
-              <div className="space-y-1.5">
-                {usage.byCaller.slice(0, 8).map((c) => {
-                  const pct = usage.total.total_tokens ? Math.round((c.total_tokens / usage.total.total_tokens) * 100) : 0;
-                  return (
-                    <div key={c.caller} className="flex items-center gap-2 text-xs">
-                      <span className="w-32 shrink-0 text-slate-600 dark:text-slate-300 truncate">{c.caller}</span>
-                      <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                        <div className="h-full rounded-full bg-teal-500" style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className="w-16 shrink-0 text-right text-slate-400 dark:text-slate-500">{pct}%</span>
+          {(() => {
+            const byDayAsc = [...usage.byDay].sort((a, b) => a.day.localeCompare(b.day));
+            return (
+              <>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                  <MetricCard
+                    label="调用次数"
+                    value={usage.total.calls.toLocaleString()}
+                    hint="统计周期内 LLM 总调用"
+                    tone="brand"
+                    spark={byDayAsc.map((d) => d.calls)}
+                  />
+                  <MetricCard
+                    label="总 Token"
+                    value={fmtK(usage.total.total_tokens)}
+                    hint={`入 ${usage.total.prompt_tokens.toLocaleString()} · 出 ${usage.total.completion_tokens.toLocaleString()}`}
+                    tone="slate"
+                    spark={byDayAsc.map((d) => d.total_tokens)}
+                  />
+                  <MetricCard
+                    label="成功率"
+                    value={`${usage.total.success_rate}%`}
+                    hint="成功调用 / 总调用"
+                    tone="green"
+                  />
+                  <MetricCard
+                    label="平均延迟"
+                    value={`${usage.total.avg_latency_ms}ms`}
+                    hint="单次 LLM 往返耗时"
+                    tone="amber"
+                  />
+                </div>
+
+                {usage.byDay.length > 0 && (
+                  <div className="grid md:grid-cols-2 gap-4 mb-4">
+                    <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">近 14 天调用次数趋势</div>
+                      <LineChart
+                        points={byDayAsc.map((d) => ({ label: d.day.slice(5), value: d.calls }))}
+                        height={130}
+                        formatY={fmtInt}
+                      />
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {usage.byDay.length > 0 && (
-            <div>
-              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">近 14 天调用趋势</div>
-              <div className="flex items-end gap-1 h-16">
-                {[...usage.byDay].reverse().map((d) => {
-                  const max = Math.max(...usage.byDay.map((x) => x.calls), 1);
-                  const h = Math.max(4, Math.round((d.calls / max) * 56));
-                  return (
-                    <div key={d.day} className="flex-1 flex flex-col items-center gap-0.5" title={`${d.day}: ${d.calls} 次 / ${d.total_tokens.toLocaleString()} tokens`}>
-                      <div className="w-full rounded-t bg-teal-500/80" style={{ height: h }} />
-                      <div className="text-[9px] text-slate-400">{d.day.slice(5)}</div>
+                    <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">近 14 天 Token 消耗趋势</div>
+                      <LineChart
+                        points={byDayAsc.map((d) => ({ label: d.day.slice(5), value: d.total_tokens }))}
+                        height={130}
+                        formatY={fmtK}
+                      />
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+                  </div>
+                )}
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
+                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Token 入 / 出占比</div>
+                    <Donut
+                      size={120}
+                      centerValue={fmtK(usage.total.total_tokens)}
+                      centerLabel="总 Token"
+                      segments={[
+                        { label: '输入 Prompt', value: usage.total.prompt_tokens },
+                        { label: '输出 Completion', value: usage.total.completion_tokens },
+                      ]}
+                    />
+                  </div>
+                  {usage.byCaller.length > 0 && (
+                    <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">按任务类型分布（Token 占用）</div>
+                      <HBar
+                        items={[...usage.byCaller]
+                          .sort((a, b) => b.total_tokens - a.total_tokens)
+                          .slice(0, 8)
+                          .map((c) => ({
+                            label: c.caller,
+                            value: c.total_tokens,
+                            formatValue: fmtK,
+                            sub: `${c.success_rate}% 成功`,
+                            hint: `${c.caller}：${c.calls} 次调用 · ${c.success_rate}% 成功`,
+                          }))}
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </Card>
       )}
 
@@ -867,6 +906,16 @@ export function SettingsPage() {
                   <span className="text-[11px] text-slate-400">×</span>
                 </div>
               ))}
+            </div>
+            <div className="mt-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">权重分布预览（按当前输入实时归一）</div>
+              <HBar
+                items={qualityWeights.map((d) => ({
+                  label: d.label,
+                  value: Number(weightInputs[d.key] ?? d.weight) || 0,
+                  hint: `${d.label}：权重 ×${weightInputs[d.key] ?? d.weight}`,
+                }))}
+              />
             </div>
             <div className="mt-3 flex gap-2">
               <Button

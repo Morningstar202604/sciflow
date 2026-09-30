@@ -43,6 +43,10 @@ export interface Reference {
   tags: string;
   citationCount: number;
   createdAt: number;
+  /** 科研高级功能扩展字段（后端返回） */
+  readingStatus?: 'unread' | 'reading' | 'read' | 'cited';
+  fingerprint?: string;
+  isDuplicateOf?: string;
 }
 
 /** 文献录入入参（authors 兼容数组与 JSON 字符串两种形态） */
@@ -301,4 +305,89 @@ export interface McpToolInfo {
   name: string;
   description: string;
   inputSchema: Record<string, any>;
+}
+
+/* =====================================================================
+ * 科研高级功能契约类型（系统综述 / 审稿闭环 / 期刊库）
+ * 与后端 B1 实现的 API 一一对应，前端页面按此消费
+ * ===================================================================== */
+
+/** 系统综述·筛选队列条目（join reference 元数据） */
+export interface ScreeningItem {
+  id: string;
+  projectId: string;
+  referenceId: string;
+  status: 'pending' | 'included' | 'excluded' | 'uncertain';
+  reason: string;
+  reviewer: string;
+  createdAt: number;
+  updatedAt: number;
+  title: string;
+  year: number | null;
+  venue: string;
+  authors: string;
+}
+
+/** 系统综述·文献编码抽取字段 */
+export interface ExtractionField {
+  id: string;
+  projectId: string;
+  key: string;
+  label: string;
+  kind: 'text' | 'select';
+  options: string[];
+  createdAt: number;
+}
+
+/** 系统综述·抽取表（跨文献编码矩阵） */
+export interface ExtractionTableResult {
+  fields: ExtractionField[];
+  rows: { referenceId: string; title: string; year: number | null; venue: string; values: Record<string, string> }[];
+}
+
+/** 审稿意见闭环 */
+export interface ReviewComment {
+  id: string;
+  documentId: string;
+  reviewer: string;
+  commentText: string;
+  category: string;
+  status: 'open' | 'resolved' | 'deferred';
+  responseText: string;
+  sectionRef: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 自建期刊库 */
+export interface Journal {
+  id: string;
+  name: string;
+  issn: string;
+  publisher: string;
+  scopeText: string;
+  if2024: number | null;
+  quartile: string;
+  firstDecisionWeeks: number | null;
+  acceptanceRate: number | null;
+  oa: string;
+  createdAt: number;
+}
+
+/** 期刊匹配推荐结果（结构化） */
+export interface JournalMatchItem {
+  name: string;
+  score: number;
+  reason: string;
+  gap: string;
+  isInLibrary: boolean;
+  if2024: number | null;
+  quartile: string;
+  firstDecisionWeeks: number | null;
+  acceptanceRate: number | null;
+  oa: string;
+}
+
+export interface JournalMatchResult {
+  journals: JournalMatchItem[];
 }

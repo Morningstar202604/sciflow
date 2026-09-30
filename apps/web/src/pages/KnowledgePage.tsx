@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookMarked, FileText, Loader2, MessageSquare, Trash2, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { KnowledgeDoc, Project } from '../types';
 import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
+import { Donut, HBar } from '../components/charts';
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -41,6 +42,35 @@ export function KnowledgePage({ project }: { project: Project }) {
   useEffect(() => {
     load();
   }, [project.id]);
+
+  // 文档类型分布 Donut（pdf/markdown/text）
+  const typeDist = useMemo(() => {
+    const order: { key: string; label: string; color: string }[] = [
+      { key: 'pdf', label: 'PDF', color: '#f87171' },
+      { key: 'markdown', label: 'Markdown', color: '#0ea5e9' },
+      { key: 'text', label: '纯文本', color: '#94a3b8' },
+    ];
+    const counts: Record<string, number> = { pdf: 0, markdown: 0, text: 0 };
+    docs.forEach((d) => {
+      if (d.type in counts) counts[d.type]++;
+      else counts.text++;
+    });
+    return order.filter((o) => counts[o.key] > 0).map((o) => ({ label: o.label, value: counts[o.key], color: o.color }));
+  }, [docs]);
+
+  // 分块量 HBar（按 chunkCount 降序 Top 8）
+  const chunkDist = useMemo(
+    () =>
+      [...docs]
+        .sort((a, b) => b.chunkCount - a.chunkCount)
+        .slice(0, 8)
+        .map((d) => ({
+          label: d.name.length > 22 ? d.name.slice(0, 22) + '…' : d.name,
+          value: d.chunkCount,
+          hint: d.name,
+        })),
+    [docs],
+  );
 
   const uploadFile = async (file: File) => {
     const isPdf = file.name.toLowerCase().endsWith('.pdf');
@@ -140,6 +170,22 @@ export function KnowledgePage({ project }: { project: Project }) {
           )}
         </div>
 
+        {/* 资料概览可视化 */}
+        {docs.length > 0 && (
+          <div className="mt-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800">
+            <div className="grid md:grid-cols-2 gap-3">
+              <div>
+                <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">文档类型分布</div>
+                <Donut segments={typeDist} size={84} thickness={11} centerValue={String(docs.length)} centerLabel="份资料" />
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">分块量 Top {chunkDist.length}</div>
+                <HBar items={chunkDist} barHeight={6} />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 资料列表 */}
         <div className="mt-4">
           <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">知识库（{docs.length} 份资料）</div>
@@ -192,13 +238,23 @@ export function KnowledgePage({ project }: { project: Project }) {
             <div className="text-sm leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-200">{answer.answer}</div>
             {answer.sources.length > 0 && (
               <div className="mt-3 border-t border-slate-200 dark:border-slate-800 pt-3">
-                <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">回答依据来源</div>
-                {answer.sources.map((s, i) => (
-                  <div key={i} className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">
-                    <Badge tone="teal">{s.docName}</Badge> <span className="text-slate-400 dark:text-slate-500">匹配 {s.score}%</span>
-                    <div className="text-slate-400 dark:text-slate-500 mt-0.5 truncate">{s.snippet}</div>
-                  </div>
-                ))}
+                <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">回答依据来源（条越长匹配度越高，弱相关一眼可见）</div>
+                <HBar
+                  items={answer.sources.map((s) => ({
+                    label: s.docName,
+                    value: s.score,
+                    sub: `匹配 ${s.score}%`,
+                    hint: s.snippet,
+                    color: s.score >= 70 ? undefined : s.score >= 40 ? '#f59e0b' : '#f87171',
+                  }))}
+                />
+                <div className="mt-2 space-y-1 border-t border-slate-100 dark:border-slate-800 pt-2">
+                  {answer.sources.map((s, i) => (
+                    <div key={i} className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">「{s.docName}」</span> {s.snippet}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

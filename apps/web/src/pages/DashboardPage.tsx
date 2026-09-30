@@ -3,6 +3,7 @@ import { BookOpen, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } f
 import { api } from '../api/client';
 import type { Doc, Project, Reference } from '../types';
 import { Button, Card, Empty, Spinner, Skeleton, Badge, jsonText, SectionTitle } from '../components/ui';
+import { Donut, HBar, MetricCard } from '../components/charts';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { View } from '../App';
@@ -14,16 +15,25 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
 }) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [refs, setRefs] = useState<Reference[]>([]);
+  const [knowledgeCount, setKnowledgeCount] = useState(0);
+  const [pipelineCount, setPipelineCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [newTitle, setNewTitle] = useState('');
   const toast = useContext(ToastContext);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([api.documents.list(project.id), api.references.list(project.id)])
-      .then(([d, r]) => {
+    Promise.all([
+      api.documents.list(project.id),
+      api.references.list(project.id),
+      api.knowledge.list(project.id).catch(() => [] as any[]),
+      api.pipeline.list(project.id).catch(() => [] as any[]),
+    ])
+      .then(([d, r, k, p]) => {
         setDocs(d);
         setRefs(r);
+        setKnowledgeCount(k.length);
+        setPipelineCount(p.length);
       })
       .finally(() => setLoading(false));
   }, [project.id]);
@@ -36,11 +46,6 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
     toast('success', `草稿「${doc.title}」已创建`);
     openDoc(doc.id);
   };
-
-  const stats = [
-    { label: '论文草稿', value: docs.length, icon: FileText, tone: 'text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800' },
-    { label: '参考文献', value: refs.length, icon: BookOpen, tone: 'brand-logo text-white' },
-  ];
 
   const entries = [
     { label: '论文写作', desc: '大纲 · 起草 · 润色 · 翻译', icon: BookOpen, view: 'writing' as View },
@@ -58,21 +63,33 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
             <div className="text-lg font-semibold text-slate-900 dark:text-slate-100 tracking-tight">{project.name}</div>
             <div className="text-sm text-slate-400 dark:text-slate-500 mt-1">{project.description || '让科研从想法到成文，一站式完成文献、写作与投稿'}</div>
           </div>
-          <div className="flex gap-2 shrink-0 flex-wrap">
-            {stats.map((s) => (
-              <div key={s.label} className="card-lift flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-2">
-                <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${s.tone}`}>
-                  <s.icon size={14} />
-                </span>
-                <div className="leading-tight">
-                  <div className="text-lg font-semibold text-slate-900 dark:text-slate-100 leading-none">{s.value}</div>
-                  <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{s.label}</div>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       </Card>
+
+      {/* 项目数据概览：MetricCard 网格 + 草稿状态分布 */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <MetricCard label="论文草稿" value={docs.length} icon={<FileText size={14} />} hint={docs.length ? `${docs.length} 篇进行中` : '尚未创建草稿'} tone="brand" />
+        <MetricCard label="参考文献" value={refs.length} icon={<BookOpen size={14} />} hint={refs.length ? '已入库文献' : '文献库为空'} tone="slate" />
+        <MetricCard label="知识库资料" value={knowledgeCount} icon={<BookOpen size={14} />} hint="RAG 可问答资料数" tone="slate" />
+        <MetricCard label="流水线任务" value={pipelineCount} icon={<Workflow size={14} />} hint="历史全自动任务数" tone="slate" />
+      </div>
+
+      {docs.length > 0 && (
+        <Card className="p-4 mb-6">
+          <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">草稿状态分布</div>
+          <Donut
+            size={120}
+            centerValue={String(docs.length)}
+            centerLabel="草稿总数"
+            segments={[
+              { label: '草稿', value: docs.filter((d) => d.status === 'draft').length },
+              { label: '评审中', value: docs.filter((d) => d.status === 'reviewing').length },
+              { label: '已润色', value: docs.filter((d) => d.status === 'polished').length },
+              { label: '已定稿', value: docs.filter((d) => d.status === 'final').length },
+            ]}
+          />
+        </Card>
+      )}
 
       {/* 功能入口（大厂式网格：图标底 + 名称 + 描述 + 箭头） */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-7">
@@ -124,6 +141,9 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
         <div className="grid md:grid-cols-2 gap-3">
           {docs.map((d) => {
             const outline = jsonText<{ title: string; sections: { title: string }[] }>(d.outline, { title: '', sections: [] });
+            const totalSec = outline.sections?.length || 0;
+            const writtenSec = totalSec ? outline.sections.filter((s) => (d.content || '').includes(s.title)).length : 0;
+            const wordK = Math.round((d.content?.length || 0) / 100) / 10;
             return (
               <Card key={d.id} className="p-4 cursor-pointer card-lift hover:border-teal-300 dark:hover:border-teal-700" onClick={() => openDoc(d.id)}>
                 <div className="flex items-start justify-between gap-2">
@@ -136,10 +156,26 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
                   <span className="flex items-center gap-1">
                     <FileText size={12} /> v{d.version}
                   </span>
-                  <span>大纲 {outline.sections?.length || 0} 章</span>
-                  <span>{Math.round(d.content?.length / 100) / 10 || 0}K 字</span>
+                  <span>大纲 {totalSec} 章</span>
+                  <span>{wordK}K 字</span>
                   <span className="ml-auto">{new Date(d.updatedAt).toLocaleString()}</span>
                 </div>
+                {totalSec > 0 && (
+                  <div className="mt-2.5">
+                    <HBar
+                      barHeight={6}
+                      items={[
+                        {
+                          label: '写作进度',
+                          value: writtenSec,
+                          max: totalSec,
+                          sub: `${writtenSec}/${totalSec} 章`,
+                          hint: `v${d.version} · 已写 ${writtenSec}/${totalSec} 章 · ${wordK}K 字`,
+                        },
+                      ]}
+                    />
+                  </div>
+                )}
               </Card>
             );
           })}

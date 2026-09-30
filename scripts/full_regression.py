@@ -241,6 +241,76 @@ check("MCP 服务器配置列表", st == 200 and isinstance(d2, list), f"{st}")
 st, d2 = ai_call("模型测试 settings/test", lambda: req("POST", "/api/settings/test", {"model": "agnes-3.0-flash"}))
 info("模型连通性测试 test", f"st={st} {str(d2)[:90]}")
 
+# ---------- 12. 科研高级功能：阅读状态/去重指纹 ----------
+st, d = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "Systematic Review Methods in Medicine", "authors": ["A Smith", "B Wang"], "year": 2021, "venue": "J Clin Epidemiol", "abstract": "Methods for systematic review and meta-analysis."}})
+check("高级功能·文献入库（含指纹）", st in (200, 201) and d.get("id") and d.get("fingerprint"), f"st={st} {str(d)[:160]}")
+advRefId = d.get("id") if st in (200, 201) else None
+if advRefId:
+    # 同标题再入一条 → 应标记 isDuplicateOf 指向首条
+    st, d2 = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "systematic review methods in medicine!!!", "authors": ["A Smith", "B Wang"], "year": 2021, "venue": "J Clin Epidemiol", "abstract": "dup"}})
+    check("高级功能·标题指纹去重（isDuplicateOf）", st in (200, 201) and d2.get("isDuplicateOf") == advRefId, f"st={st} dup={str(d2)[:120]}")
+    st, d2 = req("PATCH", f"/api/references/{advRefId}", {"readingStatus": "reading", "tags": '["rct","cohort"]'})
+    check("高级功能·PATCH 阅读状态/标签", st == 200 and d2.get("readingStatus") == "reading" and d2.get("tags") == '["rct","cohort"]', f"st={st} {str(d2)[:120]}")
+
+    # ---------- 13. 系统综述·筛选队列 ----------
+    st, d2 = req("POST", "/api/references/screen", {"projectId": pid, "referenceId": advRefId, "status": "included", "reason": "RCT 符合纳入标准"})
+    check("筛选·单条纳入 upsert", st in (200, 201) and d2.get("status") == "included" and d2.get("referenceId") == advRefId and d2.get("title"), f"st={st} {str(d2)[:140]}")
+    sid = d2.get("id") if st in (200, 201) else None
+    # 同条再改状态 → upsert 更新而非新增
+    st, d3 = req("POST", "/api/references/screen", {"projectId": pid, "referenceId": advRefId, "status": "uncertain", "reason": "待复核"})
+    check("筛选·同条 upsert 更新状态", st in (200, 201) and d3.get("id") == sid and d3.get("status") == "uncertain", f"st={st} {str(d3)[:120]}")
+    st, d3 = req("GET", f"/api/references/screen?projectId={pid}")
+    check("筛选·列表 join 文献元数据", st == 200 and isinstance(d3, list) and any(x.get("id") == sid for x in d3), f"st={st} n={len(d3) if isinstance(d3, list) else 0}")
+    st, d3 = req("POST", "/api/references/screen/bulk", {"projectId": pid, "referenceIds": [advRefId], "status": "excluded", "reason": "批量排除"})
+    check("筛选·批量 screen/bulk", st in (200, 201) and d3.get("ok") and d3.get("updated") == 1, f"st={st} {str(d3)[:100]}")
+
+    # ---------- 14. 系统综述·文献编码抽取表 ----------
+    st, d2 = req("POST", "/api/references/extraction/fields", {"projectId": pid, "key": "study_design", "label": "研究设计", "kind": "select", "options": ["RCT", "队列", "病例对照"]})
+    check("抽取·新建字段（key 校验）", st in (200, 201) and d2.get("id") and d2.get("options") == ["RCT", "队列", "病例对照"], f"st={st} {str(d2)[:140]}")
+    fid = d2.get("id") if st in (200, 201) else None
+    st, d2 = req("POST", "/api/references/extraction/fields", {"projectId": pid, "key": "Bad Key!", "label": "非法"})
+    check("抽取·非法 key 被拒绝", st == 400, f"st={st} {str(d2)[:80]}")
+    st, d2 = req("GET", f"/api/references/extraction/fields?projectId={pid}")
+    check("抽取·字段列表", st == 200 and isinstance(d2, list) and any(f.get("key") == "study_design" for f in d2), f"st={st}")
+    if fid:
+        st, d3 = req("PUT", "/api/references/extraction/values", {"fieldId": fid, "referenceId": advRefId, "value": "RCT"})
+        check("抽取·设置取值 upsert", st in (200, 201) and d3.get("ok"), f"st={st} {str(d3)[:80]}")
+    st, d2 = req("GET", f"/api/references/extraction/table?projectId={pid}")
+    row = next((r for r in d2.get("rows", []) if r.get("referenceId") == advRefId), None) if st == 200 else None
+    check("抽取·矩阵 table（字段+取值）", st == 200 and d2.get("fields") and row and row.get("values", {}).get(fid) == "RCT", f"st={st} {str(d2)[:140]}")
+
+# ---------- 15. 审稿意见闭环 ----------
+if docid:
+    st, d = req("POST", "/api/research/review-comments", {"documentId": docid, "comments": [
+        {"reviewer": "Reviewer A", "commentText": "方法部分样本量计算缺失，请补充。", "category": "major"},
+        {"reviewer": "Reviewer B", "commentText": "相关工作章节缺少近三年文献。", "category": "minor"},
+    ]})
+    check("审稿意见·批量创建", st in (200, 201) and isinstance(d, list) and len(d) == 2, f"st={st} {str(d)[:140]}")
+    rcid = d[0].get("id") if st in (200, 201) and d else None
+    st, d2 = req("GET", f"/api/research/review-comments?documentId={docid}")
+    check("审稿意见·列表", st == 200 and isinstance(d2, list) and len(d2) >= 2, f"st={st} n={len(d2) if isinstance(d2, list) else 0}")
+    if rcid:
+        st, d2 = req("PATCH", f"/api/research/review-comments/{rcid}", {"status": "resolved", "responseText": "已在 2.1 节补充样本量计算。"})
+        check("审稿意见·更新状态/回复", st == 200 and d2.get("status") == "resolved" and "样本量" in d2.get("responseText", ""), f"st={st} {str(d2)[:120]}")
+    # response-letter 为 AI 类，按现有跳过机制调用
+    st, d2 = ai_call("审稿回复信 response-letter", lambda: req("POST", "/api/research/response-letter", {"documentId": docid}))
+    info("审稿回复信 response-letter", f"st={st} {str(d2)[:90]}")
+    if rcid:
+        st, d2 = req("DELETE", f"/api/research/review-comments/{rcid}")
+        check("审稿意见·删除", st == 200 and d2.get("ok"), f"st={st}")
+
+# ---------- 16. 期刊库 + 结构化匹配 ----------
+st, d = req("GET", "/api/submission/journals")
+check("期刊库·列表（含种子）", st == 200 and isinstance(d, list) and len(d) >= 4, f"st={st} n={len(d) if isinstance(d, list) else 0}")
+st, d = req("POST", "/api/submission/journals-lib", {"name": "回归测试期刊", "scopeText": "测试用期刊，可删除。"})
+check("期刊库·新增", st in (200, 201) and d.get("id") and d.get("name") == "回归测试期刊", f"st={st} {str(d)[:120]}")
+newJid = d.get("id") if st in (200, 201) else None
+if newJid:
+    st, d2 = req("DELETE", f"/api/submission/journals-lib/{newJid}")
+    check("期刊库·删除", st == 200 and d2.get("ok"), f"st={st}")
+st, d2 = ai_call("期刊结构化匹配 journals-match", lambda: req("POST", "/api/submission/journals-match", {"title": "Graph neural networks for node classification", "abstract": "We survey GNNs and propose a new message passing architecture."}))
+info("期刊结构化匹配 journals-match", f"st={st} {str(d2)[:120]}")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL}")
 if FAILED:

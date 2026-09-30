@@ -2,6 +2,7 @@ import type {
   Project, Doc, Reference, ReferenceInput, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
   AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool, PipelineStepConfig, QualityWeightItem,
+  ScreeningItem, ExtractionField, ExtractionTableResult, ReviewComment, Journal, JournalMatchResult,
 } from '../types';
 
 /** 友好错误转译：后端中文业务错误原样保留；英文/状态码/网络错误转为清晰中文提示 */
@@ -137,6 +138,15 @@ export const api = {
       request<PaperComparisonResult>(`/api/research/comparison`, { method: 'POST', body: JSON.stringify({ papers }) }),
     review: (title: string, content: string) =>
       request<SimulatedReviewResult>(`/api/research/review`, { method: 'POST', body: JSON.stringify({ title, content }) }),
+    /* —— 审稿意见闭环 —— */
+    reviewComments: (documentId: string) => request<ReviewComment[]>(`/api/research/review-comments?documentId=${documentId}`),
+    addReviewComments: (documentId: string, comments: { reviewer: string; commentText: string; category?: string }[]) =>
+      request<ReviewComment[]>('/api/research/review-comments', { method: 'POST', body: JSON.stringify({ documentId, comments }) }),
+    updateReviewComment: (id: string, patch: Partial<{ status: string; responseText: string; category: string }>) =>
+      request<ReviewComment>(`/api/research/review-comments/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    removeReviewComment: (id: string) => request<{ ok: boolean }>(`/api/research/review-comments/${id}`, { method: 'DELETE' }),
+    responseLetter: (documentId: string) =>
+      request<{ letter: string }>('/api/research/response-letter', { method: 'POST', body: JSON.stringify({ documentId }) }),
   },
 
   references: {
@@ -156,6 +166,23 @@ export const api = {
       request<EvidenceResult>(`/api/references/evidence`, { method: 'POST', body: JSON.stringify({ projectId, question }) }),
     deepDive: (projectId: string, refId: string) => request<DeepDiveResult>(`/api/references/deep-dive`, { method: 'POST', body: JSON.stringify({ projectId, refId }) }),
     gap: (projectId: string, topic: string) => request<GapResult>(`/api/references/gap`, { method: 'POST', body: JSON.stringify({ projectId, topic }) }),
+    /* —— 科研高级功能：阅读状态 / 去重指纹 —— */
+    update: (id: string, patch: Partial<{ readingStatus: string; tags: string }>) =>
+      request<Reference>(`/api/references/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    /* —— 系统综述：筛选队列 —— */
+    screen: (projectId: string, referenceId: string, status: string, reason = '') =>
+      request<ScreeningItem>('/api/references/screen', { method: 'POST', body: JSON.stringify({ projectId, referenceId, status, reason }) }),
+    screenBulk: (projectId: string, referenceIds: string[], status: string, reason = '') =>
+      request<{ ok: boolean; updated: number }>('/api/references/screen/bulk', { method: 'POST', body: JSON.stringify({ projectId, referenceIds, status, reason }) }),
+    screenList: (projectId: string) => request<ScreeningItem[]>(`/api/references/screen?projectId=${projectId}`),
+    /* —— 系统综述：文献编码抽取表 —— */
+    extractionFields: (projectId: string) => request<ExtractionField[]>(`/api/references/extraction/fields?projectId=${projectId}`),
+    addExtractionField: (projectId: string, key: string, label: string, kind = 'text', options: string[] = []) =>
+      request<ExtractionField>('/api/references/extraction/fields', { method: 'POST', body: JSON.stringify({ projectId, key, label, kind, options }) }),
+    removeExtractionField: (id: string) => request<{ ok: boolean }>(`/api/references/extraction/fields/${id}`, { method: 'DELETE' }),
+    setExtractionValue: (fieldId: string, referenceId: string, value: string) =>
+      request<{ ok: boolean }>('/api/references/extraction/values', { method: 'PUT', body: JSON.stringify({ fieldId, referenceId, value }) }),
+    extractionTable: (projectId: string) => request<ExtractionTableResult>(`/api/references/extraction/table?projectId=${projectId}`),
   },
 
   knowledge: {
@@ -251,23 +278,52 @@ export const api = {
       request<string>('/api/submission/cover-letter', { method: 'POST', body: JSON.stringify({ title, abstract, journal }) }),
     replyReview: (reviewComments: string, response: string) =>
       request<string>('/api/submission/reply-review', { method: 'POST', body: JSON.stringify({ reviewComments, response }) }),
+    /* —— 科研高级功能：期刊库 + 结构化匹配 —— */
+    journalsMatch: (title: string, abstract: string) =>
+      request<JournalMatchResult>('/api/submission/journals-match', { method: 'POST', body: JSON.stringify({ title, abstract }) }),
+    listJournals: () => request<Journal[]>('/api/submission/journals'),
+    addJournal: (j: Partial<Journal>) => request<Journal>('/api/submission/journals-lib', { method: 'POST', body: JSON.stringify(j) }),
+    removeJournal: (id: string) => request<{ ok: boolean }>(`/api/submission/journals-lib/${id}`, { method: 'DELETE' }),
   },
 };
 
-/** SSE 流式问答 */
-export function streamChat(
-  message: string,
-  history: { role: string; content: string }[],
-  onDelta: (text: string) => void,
-  onDone: (full: string) => void,
-  onError: (msg: string) => void,
-  projectId?: string,
-  docContext?: string,
-) {
+/** SSE 流式问答（主流智能体范式版：停止/推理流/来源/用量事件回调）
+ * 事件契约：正文增量 data: {"delta": string}，可同事件携带 "reasoning"；
+ * 正文前可能先来 data: {"sources": [{docName,score}]}；结束前 data: {"usage": {...}}；
+ * data: {"error": string}；末尾 data: [DONE]。
+ * 返回 abort 函数：调用后立即断开连接，已收文本保留（onDone 以当前全文触发）。
+ */
+export function streamChat(opts: {
+  message: string;
+  history?: { role: 'user' | 'assistant'; content: string }[];
+  projectId?: string;
+  docContext?: string;
+  model?: string;
+  enableThinking?: boolean;
+  signal?: AbortSignal;
+  onDelta?: (text: string) => void;
+  onReasoning?: (text: string) => void;
+  onSources?: (sources: { docName: string; score: number }[]) => void;
+  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
+  onDone?: (full: string) => void;
+  onError?: (msg: string) => void;
+}): () => void {
+  const ctrl = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([ctrl.signal, opts.signal]) : ctrl.signal;
+  let full = '';
+  const finish = () => opts.onDone?.(full);
   fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history, projectId, docContext }),
+    body: JSON.stringify({
+      message: opts.message,
+      history: opts.history || [],
+      projectId: opts.projectId,
+      docContext: opts.docContext,
+      model: opts.model,
+      enableThinking: opts.enableThinking,
+    }),
+    signal,
   })
     .then(async (res) => {
       if (!res.ok || !res.body) {
@@ -283,7 +339,7 @@ export function streamChat(
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let full = '';
+      let reasoning = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -294,21 +350,49 @@ export function streamChat(
           const t = line.trim();
           if (!t.startsWith('data:')) continue;
           const payload = t.slice(5).trim();
-          if (payload === '[DONE]') continue;
+          if (payload === '[DONE]') {
+            finish();
+            return;
+          }
           try {
             const json = JSON.parse(payload) as any;
             if (json.error) throw new Error(json.error);
-            const delta = json.delta;
-            if (delta) {
-              full += delta;
-              onDelta(full);
+            if (json.sources) {
+              opts.onSources?.(json.sources);
+              continue;
             }
-          } catch {
-            /* ignore */
+            if (json.usage) {
+              opts.onUsage?.(json.usage);
+              continue;
+            }
+            if (json.delta) {
+              full += json.delta;
+              opts.onDelta?.(full);
+            }
+            if (json.reasoning) {
+              reasoning += json.reasoning;
+              opts.onReasoning?.(reasoning);
+            }
+          } catch (e: any) {
+            if (e?.message) {
+              opts.onError?.(friendlyError(typeof e.message === 'string' && /[\u4e00-\u9fa5]/.test(e.message) ? e.message : undefined));
+              opts.onDone?.(full);
+              return;
+            }
+            /* 忽略无法解析的行 */
           }
         }
       }
-      onDone(full);
+      finish();
     })
-    .catch((e) => onError(friendlyError(e?.message && /^[请求服务网络未授权没有操作]/.test(e.message) ? e.message : undefined)));
+    .catch((e: any) => {
+      // 用户主动停止：保留已收文本，正常收尾（不报错）
+      if (e?.name === 'AbortError') {
+        finish();
+        return;
+      }
+      const msg = e?.message;
+      opts.onError?.(friendlyError(msg && /^[请求服务网络未授权没有操作]/.test(msg) ? msg : undefined));
+    });
+  return () => ctrl.abort();
 }

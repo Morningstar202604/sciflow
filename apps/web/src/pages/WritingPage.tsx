@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { BookOpen, Bot, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Languages, ListTree, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { BookOpen, Bot, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Languages, ListTree, Loader2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { ChatPanel } from './ChatPanel';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { CitationRow, Doc, Outline, Project, Reference, ResearchDesignResult, SimulatedReviewResult } from '../types';
+import type { CitationRow, Doc, Outline, Project, Reference, ResearchDesignResult, ReviewComment, SimulatedReviewResult } from '../types';
 import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Select, Spinner, Textarea, downloadBase64, downloadText, jsonText } from '../components/ui';
+import { Donut, HBar } from '../components/charts';
 
 export function WritingPage({ project, initialDocId }: { project: Project; initialDocId: string | null }) {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -37,6 +38,16 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [designResult, setDesignResult] = useState<ResearchDesignResult | null>(null);
   const [designIdea, setDesignIdea] = useState('');
   const [reviewResult, setReviewResult] = useState<SimulatedReviewResult | null>(null);
+  /* —— 审稿意见闭环状态 —— */
+  const [reviewComments, setReviewComments] = useState<ReviewComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [replyId, setReplyId] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState('');
+  const [savingReply, setSavingReply] = useState(false);
+  const [letter, setLetter] = useState<string | null>(null);
+  const [generatingLetter, setGeneratingLetter] = useState(false);
+  const [importingComments, setImportingComments] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showNewDoc, setShowNewDoc] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState('');
@@ -77,6 +88,14 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     if (docId) {
       api.documents.citations(docId).then(setCitations).catch(() => setCitations([]));
       api.documents.polishRecords(docId).then(setHistory).catch(() => setHistory([]));
+      // 审稿意见闭环：后端未就绪时优雅降级为空列表
+      setCommentsLoading(true);
+      api.research.reviewComments(docId)
+        .then(setReviewComments)
+        .catch(() => setReviewComments([]))
+        .finally(() => setCommentsLoading(false));
+    } else {
+      setReviewComments([]);
     }
   }, [docId]);
 
@@ -133,6 +152,20 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       setAiBusy(false);
     }
   };
+
+  /** 章节字数分布：按 ## 切分正文（与 LaTeX 导出同一 split 口径） */
+  const chapterStats = useMemo(() => {
+    if (!content) return [] as { label: string; value: number }[];
+    return content
+      .split(/\n\s*##+\s*/)
+      .map((part, i) => {
+        const lines = part.split('\n');
+        const title = i === 0 ? '前言/摘要' : (lines[0] || '未命名章节').replace(/^#+\s*/, '').trim();
+        const body = i === 0 ? part : lines.slice(1).join('\n');
+        return { label: title.slice(0, 16), value: body.replace(/\s/g, '').length };
+      })
+      .filter((c) => c.value > 0);
+  }, [content]);
 
   const createDoc = async () => {
     const title = newDocTitle.trim();
@@ -273,6 +306,95 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       setReviewResult(r);
       toast('success', '模拟同行评审完成');
     });
+
+  /* —— 审稿意见闭环：状态切换 / 回复 / 删除 / 生成回复信 / 从模拟评审导入 —— */
+  const COMMENT_STATUS_META: Record<string, { label: string; tone: 'amber' | 'green' | 'slate' }> = {
+    open: { label: '待处理', tone: 'amber' },
+    resolved: { label: '已解决', tone: 'green' },
+    deferred: { label: '暂缓', tone: 'slate' },
+  };
+
+  const changeCommentStatus = async (c: ReviewComment, status: 'open' | 'resolved' | 'deferred') => {
+    const prev = c.status;
+    setReviewComments((s) => s.map((x) => (x.id === c.id ? { ...x, status } : x)));
+    try {
+      const updated = await api.research.updateReviewComment(c.id, { status });
+      setReviewComments((s) => s.map((x) => (x.id === c.id ? updated : x)));
+    } catch (e: any) {
+      setReviewComments((s) => s.map((x) => (x.id === c.id ? { ...x, status: prev } : x)));
+      setError(e.message);
+    }
+  };
+
+  const saveReply = async (c: ReviewComment) => {
+    setSavingReply(true);
+    try {
+      const updated = await api.research.updateReviewComment(c.id, { responseText: replyDraft });
+      setReviewComments((s) => s.map((x) => (x.id === c.id ? updated : x)));
+      setReplyId(null);
+      setReplyDraft('');
+      toast('success', '回复已保存');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSavingReply(false);
+    }
+  };
+
+  const removeComment = async (c: ReviewComment) => {
+    setReviewComments((s) => s.filter((x) => x.id !== c.id));
+    try {
+      await api.research.removeReviewComment(c.id);
+      toast('info', '已删除该条意见');
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const generateResponseLetter = async () => {
+    setGeneratingLetter(true);
+    setError('');
+    try {
+      const r = await api.research.responseLetter(docId!);
+      setLetter(r.letter);
+      toast('success', 'Point-by-point 回复信已生成');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setGeneratingLetter(false);
+    }
+  };
+
+  const importFromSimulatedReview = async () => {
+    if (!reviewResult || 'error' in reviewResult) return;
+    setImportingComments(true);
+    setError('');
+    try {
+      const existing = new Set(reviewComments.map((c) => c.commentText.trim()));
+      const toAdd: { reviewer: string; commentText: string; category: string }[] = [];
+      for (const rv of reviewResult.reviewers) {
+        for (const c of rv.concerns) {
+          const t = c.trim();
+          if (t && !existing.has(t)) {
+            toAdd.push({ reviewer: rv.role, commentText: t, category: 'concern' });
+            existing.add(t);
+          }
+        }
+      }
+      if (!toAdd.length) {
+        toast('info', '没有新的 concerns 可导入（已去重）');
+        return;
+      }
+      const added = await api.research.addReviewComments(docId!, toAdd);
+      setReviewComments((s) => [...s, ...added]);
+      setCommentsOpen(true);
+      toast('success', `已从模拟评审导入 ${added.length} 条审稿意见`);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setImportingComments(false);
+    }
+  };
 
   /** 科研加强：导出 LaTeX 全文（标题 + 摘要占位 + 正文 + GB/T 7714 参考文献） */
   const exportLatex = async () => {
@@ -458,6 +580,15 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
               ))}
             </div>
           )}
+          {/* 章节字数分布（折叠，默认收起，避免挤压大纲树） */}
+          {chapterStats.length > 1 && (
+            <details className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <summary className="cursor-pointer text-[11px] text-slate-400 dark:text-slate-500 select-none">章节字数分布</summary>
+              <div className="mt-2">
+                <HBar items={chapterStats} barHeight={5} />
+              </div>
+            </details>
+          )}
           <div className="mt-auto pt-3 border-t border-slate-100 dark:border-slate-800">
             <Input placeholder="研究方向 / 论文主题" value={topicInput} onChange={(e) => setTopicInput(e.target.value)} />
             <Button className="w-full mt-2" onClick={generateOutline} disabled={aiBusy || !docId}>
@@ -599,14 +730,19 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             </Button>
             {designResult && !('error' in designResult) && (
               <div className="mt-2 text-xs space-y-2">
-                <div className="flex gap-2">
-                  <div className="flex-1 rounded-lg border border-teal-200 dark:border-teal-800 p-2">
-                    <div className="text-teal-700 dark:text-teal-300 font-medium mb-0.5">新颖性 {designResult.noveltyScore}/100</div>
-                    <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{designResult.noveltyFeedback}</div>
-                  </div>
-                  <div className="flex-1 rounded-lg border border-sky-200 dark:border-sky-800 p-2">
-                    <div className="text-sky-700 dark:text-sky-300 font-medium mb-0.5">可行性 {designResult.feasibilityScore}/100</div>
-                    <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{designResult.feasibilityFeedback}</div>
+                {/* 新颖性 / 可行性 双条 HBar（替代大数字；sub=反馈摘要，hint=完整反馈） */}
+                <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                  <HBar
+                    max={100}
+                    barHeight={6}
+                    items={[
+                      { label: '新颖性', value: designResult.noveltyScore, sub: designResult.noveltyFeedback.slice(0, 14) + '…', color: designResult.noveltyScore >= 70 ? undefined : designResult.noveltyScore >= 50 ? '#f59e0b' : '#f87171', hint: designResult.noveltyFeedback },
+                      { label: '可行性', value: designResult.feasibilityScore, sub: designResult.feasibilityFeedback.slice(0, 14) + '…', color: designResult.feasibilityScore >= 70 ? undefined : designResult.feasibilityScore >= 50 ? '#f59e0b' : '#f87171', hint: designResult.feasibilityFeedback },
+                    ]}
+                  />
+                  <div className="mt-2 space-y-1 text-slate-600 dark:text-slate-300 leading-relaxed">
+                    <div><span className="text-teal-700 dark:text-teal-300 font-medium">新颖性：</span>{designResult.noveltyFeedback}</div>
+                    <div><span className="text-sky-700 dark:text-sky-300 font-medium">可行性：</span>{designResult.feasibilityFeedback}</div>
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
@@ -680,17 +816,152 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                   <div className="text-teal-700 dark:text-teal-300 font-medium mb-0.5">主编决定：{reviewResult.verdict}</div>
                   <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{reviewResult.overall}</div>
                 </div>
+                {/* 3 位审稿人得分对比 HBar（替代分散 Badge；悬停看 concerns 摘要） */}
+                <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                  <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1.5">审稿人得分（满分 100）</div>
+                  <HBar
+                    max={100}
+                    barHeight={6}
+                    items={reviewResult.reviewers.map((rv) => ({
+                      label: rv.role,
+                      value: rv.score,
+                      color: rv.score >= 80 ? undefined : rv.score >= 60 ? '#f59e0b' : '#f87171',
+                      hint: rv.concerns.join('；').slice(0, 60),
+                    }))}
+                  />
+                </div>
                 {reviewResult.reviewers.map((rv, i) => (
                   <div key={i} className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-slate-700 dark:text-slate-200">{rv.role}</span>
-                      <Badge tone={rv.score >= 80 ? 'green' : rv.score >= 60 ? 'amber' : 'red'}>{rv.score} 分</Badge>
-                    </div>
+                    <div className="font-medium text-slate-700 dark:text-slate-200 mb-1">{rv.role} · {rv.score} 分</div>
                     <div className="text-slate-600 dark:text-slate-300 mb-1">👍 {rv.strengths.join('；')}</div>
                     <div className="text-slate-500 dark:text-slate-400 mb-1">⚠ {rv.concerns.join('；')}</div>
                     <div className="text-teal-600 dark:text-teal-400">建议：{rv.suggestion}</div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* 审稿意见闭环（折叠卡片，默认收起；真实增删改查，不占位） */}
+          <div className="mb-4">
+            <button
+              className="w-full flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5"
+              onClick={() => setCommentsOpen((v) => !v)}
+            >
+              <span className="flex items-center gap-1"><MessageSquare size={12} className="text-teal-600" /> 审稿意见闭环</span>
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                {reviewComments.length > 0 && `${reviewComments.length} 条 · `}{commentsOpen ? '收起 ▾' : '展开 ▸'}
+              </span>
+            </button>
+            {commentsOpen && (
+              <div className="text-xs space-y-2">
+                <div className="flex gap-1.5">
+                  <Button
+                    variant="outline"
+                    className="text-xs flex-1"
+                    onClick={generateResponseLetter}
+                    disabled={aiBusy || generatingLetter || !docId || reviewComments.length === 0}
+                  >
+                    {generatingLetter ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />} 生成回复信
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="text-xs flex-1"
+                    onClick={importFromSimulatedReview}
+                    disabled={aiBusy || importingComments || !reviewResult || 'error' in reviewResult}
+                  >
+                    {importingComments ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />} 导入模拟评审
+                  </Button>
+                </div>
+                {commentsLoading ? (
+                  <Spinner />
+                ) : reviewComments.length === 0 ? (
+                  <div className="text-slate-400 dark:text-slate-500">暂无审稿意见。点击"导入模拟评审"可把本次模拟评审的 concerns 批量入库，形成可追踪闭环。</div>
+                ) : (
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
+                    {reviewComments.map((c) => {
+                      const meta = COMMENT_STATUS_META[c.status] || { label: c.status, tone: 'slate' as const };
+                      return (
+                        <div key={c.id} className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="font-medium text-slate-700 dark:text-slate-200">{c.reviewer}</span>
+                            <Badge tone={meta.tone}>{meta.label}</Badge>
+                            {c.category && <span className="text-[10px] text-slate-400">#{c.category}</span>}
+                            <button
+                              className="ml-auto text-slate-300 hover:text-rose-500"
+                              title="删除该意见"
+                              onClick={() => removeComment(c)}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                          <div className="text-slate-600 dark:text-slate-300 mb-1.5 leading-relaxed">{c.commentText}</div>
+                          <div className="flex gap-1 mb-1.5">
+                            {(['open', 'resolved', 'deferred'] as const).map((st) => (
+                              <button
+                                key={st}
+                                onClick={() => changeCommentStatus(c, st)}
+                                className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                                  c.status === st
+                                    ? st === 'resolved'
+                                      ? 'bg-emerald-600 text-white'
+                                      : st === 'open'
+                                        ? 'bg-amber-500 text-white'
+                                        : 'bg-slate-500 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200'
+                                }`}
+                              >
+                                {COMMENT_STATUS_META[st].label}
+                              </button>
+                            ))}
+                          </div>
+                          {replyId === c.id ? (
+                            <div>
+                              <Textarea rows={2} placeholder="撰写针对该意见的 point 回复…" value={replyDraft} onChange={(e) => setReplyDraft(e.target.value)} className="mb-1" />
+                              <div className="flex gap-1">
+                                <Button variant="success" className="text-xs px-2 py-0.5" onClick={() => saveReply(c)} disabled={savingReply}>
+                                  {savingReply ? <Loader2 size={11} className="animate-spin" /> : '保存回复'}
+                                </Button>
+                                <Button variant="ghost" className="text-xs px-2 py-0.5" onClick={() => { setReplyId(null); setReplyDraft(''); }}>取消</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              {c.responseText && (
+                                <div className="text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-900/20 rounded p-1.5 mb-1 leading-relaxed">{c.responseText}</div>
+                              )}
+                              <button
+                                className="text-teal-600 dark:text-teal-400 underline"
+                                onClick={() => { setReplyId(c.id); setReplyDraft(c.responseText || ''); }}
+                              >
+                                {c.responseText ? '编辑回复' : '回复'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {letter && (
+                  <div className="mt-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-teal-700 dark:text-teal-300">Point-by-point 回复信</span>
+                      <Button
+                        variant="outline"
+                        className="text-xs px-2 py-0.5"
+                        onClick={() => {
+                          navigator.clipboard.writeText(letter)
+                            .then(() => toast('success', '回复信已复制到剪贴板'))
+                            .catch(() => setError('复制失败'));
+                        }}
+                      >
+                        <ClipboardCheck size={11} /> 复制
+                      </Button>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded p-2 text-slate-600 dark:text-slate-300 max-h-56 overflow-y-auto whitespace-pre-wrap">{letter}</div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -726,6 +997,25 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
               <BookOpen size={12} /> 引用管理（文献库 {refs.length} 条）
             </div>
+            {/* 引用核验率 Donut：citations 中 verified=1 占比 */}
+            {citations.length > 0 && (() => {
+              const verified = citations.filter((c) => c.verified === 1).length;
+              const pct = Math.round((verified / citations.length) * 100);
+              return (
+                <div className="mb-2 rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                  <Donut
+                    size={64}
+                    thickness={9}
+                    centerValue={`${pct}%`}
+                    centerLabel="核验率"
+                    segments={[
+                      { label: `已核验 ${verified}`, value: verified, color: '#10b981' },
+                      { label: `未核验 ${citations.length - verified}`, value: citations.length - verified, color: '#cbd5e1' },
+                    ]}
+                  />
+                </div>
+              );
+            })()}
             {refs.length === 0 ? (
               <div className="text-xs text-slate-400 dark:text-slate-500">文献库为空，请先到「文献调研」检索导入</div>
             ) : (

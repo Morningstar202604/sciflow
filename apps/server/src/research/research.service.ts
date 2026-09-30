@@ -1,5 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
+import { eq, and } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { db } from '../db/database';
+import { reviewComments, documents } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import * as prompts from '../ai/prompts';
 
@@ -119,5 +123,95 @@ export class ResearchService {
       return { error: '审稿意见解析失败，请重试', raw };
     }
     return parsed;
+  }
+
+  // ---------- 审稿意见闭环 ----------
+
+  /** 批量录入审稿意见 */
+  addReviewComments(documentId: string, comments: { reviewer: string; commentText: string; category?: string }[]) {
+    if (!documentId) throw new BadRequestException('documentId 必填');
+    const now = Date.now();
+    const created: any[] = [];
+    for (const c of comments || []) {
+      if (!c.commentText?.trim()) continue;
+      const row = {
+        id: randomUUID(),
+        documentId,
+        reviewer: c.reviewer?.trim() || 'reviewer',
+        commentText: c.commentText,
+        category: c.category || '',
+        status: 'open' as const,
+        responseText: '',
+        sectionRef: '',
+        createdAt: now,
+        updatedAt: now,
+      };
+      db.insert(reviewComments).values(row).run();
+      created.push(row);
+    }
+    return created;
+  }
+
+  /** 列出某文档的全部审稿意见 */
+  listReviewComments(documentId: string) {
+    return db
+      .select()
+      .from(reviewComments)
+      .where(eq(reviewComments.documentId, documentId))
+      .orderBy(reviewComments.createdAt)
+      .all();
+  }
+
+  /** 更新单条意见状态 / 回复 / 分类 */
+  updateReviewComment(id: string, patch: { status?: string; responseText?: string; category?: string }) {
+    const existing = db.select().from(reviewComments).where(eq(reviewComments.id, id)).get();
+    if (!existing) throw new NotFoundException('审稿意见不存在');
+    const set: Record<string, unknown> = { updatedAt: Date.now() };
+    if (patch.status !== undefined) {
+      if (!['open', 'resolved', 'deferred'].includes(patch.status)) throw new BadRequestException('status 取值不合法');
+      set.status = patch.status;
+    }
+    if (patch.responseText !== undefined) set.responseText = patch.responseText;
+    if (patch.category !== undefined) set.category = patch.category;
+    db.update(reviewComments).set(set).where(eq(reviewComments.id, id)).run();
+    return db.select().from(reviewComments).where(eq(reviewComments.id, id)).get();
+  }
+
+  /** 删除单条意见 */
+  deleteReviewComment(id: string) {
+    db.delete(reviewComments).where(eq(reviewComments.id, id)).run();
+    return { ok: true };
+  }
+
+  /** 生成 point-by-point 回复信（仅针对 open 状态意见） */
+  async generateResponseLetter(documentId: string): Promise<{ letter: string }> {
+    const doc = db.select().from(documents).where(eq(documents.id, documentId)).get();
+    const openList = db
+      .select()
+      .from(reviewComments)
+      .where(and(eq(reviewComments.documentId, documentId), eq(reviewComments.status, 'open')))
+      .all();
+    if (openList.length === 0) {
+      throw new BadRequestException('当前文档没有待回复（open）的审稿意见，无需生成回复信');
+    }
+    const commentText = openList
+      .map((c, i) => `意见${i + 1}（${c.reviewer}${c.category ? '，分类：' + c.category : ''}）：${c.commentText}`)
+      .join('\n');
+    const title = doc?.title || '（未命名论文）';
+    const custom = this.ai.getCustomPrompt('response_letter');
+    const userContent =
+      custom ??
+      `你是一位严谨的学术作者。请针对以下审稿意见，逐点（point-by-point）撰写一封正式的回复信。` +
+        `每一条意见都要：①引用该意见原文 → ②给出你态度诚恳、有理有据的回应（接受/反驳/补充）→ ③说明你在论文中具体修改了哪一处（章节/段落定位）。` +
+        `语气礼貌专业，中文撰写。\n\n论文标题：${title}\n\n审稿意见：\n${commentText}`;
+    try {
+      const letter = await this.ai.complete(
+        [{ role: 'user', content: userContent }],
+        { temperature: 0.5, model: 'strong', context: 'responseLetter' },
+      );
+      return { letter };
+    } catch {
+      throw new BadRequestException('回复信生成失败：AI 服务暂不可用，请稍后重试或检查模型配置');
+    }
   }
 }

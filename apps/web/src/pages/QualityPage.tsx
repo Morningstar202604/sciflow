@@ -3,6 +3,7 @@ import { Gauge, Loader2, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, QualityReport } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Select, Spinner, jsonText } from '../components/ui';
+import { HBar, LineChart, ProgressRing } from '../components/charts';
 
 const DIMS = [
   { key: 'literature', label: '文献充分性' },
@@ -37,20 +38,20 @@ function Radar({ scores }: { scores: Record<string, number> }) {
         <line key={i} x1={CX} y1={CY} x2={pt(i, 100)[0]} y2={pt(i, 100)[1]} stroke="#e2e8f0" strokeWidth="1" className="dark:stroke-slate-700" />
       ))}
       {/* 数据多边形 */}
-      <polygon points={poly(100)} fill="rgba(13,148,136,0.22)" stroke="#0d9488" strokeWidth="2" />
+      <polygon points={poly(100)} fill="rgba(13,148,136,0.22)" stroke="var(--brand-500)" strokeWidth="2" />
       {/* 顶点 + 数值标签 */}
       {DIMS.map((d, i) => {
         const [x, y] = pt(i, value(i));
         const [lx, ly] = pt(i, 118);
         return (
           <g key={d.key}>
-            <circle cx={x} cy={y} r="3.5" fill="#0891b2" stroke="#fff" strokeWidth="1.5">
+            <circle cx={x} cy={y} r="3.5" fill="var(--brand-400)" stroke="#fff" strokeWidth="1.5">
               <title>{`${d.label}：${value(i)}/100`}</title>
             </circle>
             <text x={lx} y={ly} textAnchor="middle" fontSize="10" fill="#475569" className="dark:fill-slate-300" fontWeight={600}>
               {d.label}
             </text>
-            <text x={lx} y={ly + 11} textAnchor="middle" fontSize="10" fill="#0d9488" fontWeight={700}>
+            <text x={lx} y={ly + 11} textAnchor="middle" fontSize="10" fill="var(--brand-500)" fontWeight={700}>
               {value(i)}
             </text>
           </g>
@@ -134,28 +135,53 @@ export function QualityPage({ project }: { project: Project }) {
         <div className="grid lg:grid-cols-2 gap-4">
           <Card className="p-4">
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">当前评分</span>
-              <Badge tone={current.totalScore >= 80 ? 'green' : current.totalScore >= 60 ? 'amber' : 'red'}>
-                总分 {current.totalScore}/100
-              </Badge>
+              <ProgressRing value={current.totalScore} size={54} thickness={6} />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">当前评分</div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500">{new Date(current.createdAt).toLocaleString()}</div>
+              </div>
+              <div className="ml-auto">
+                <Badge tone={current.totalScore >= 80 ? 'green' : current.totalScore >= 60 ? 'amber' : 'red'}>
+                  总分 {current.totalScore}/100
+                </Badge>
+              </div>
             </div>
             <Radar scores={current.scoresObj} />
-            <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">{new Date(current.createdAt).toLocaleString()}</div>
+            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">最需改进的维度</div>
+              <HBar
+                items={[...DIMS]
+                  .map((d) => ({ label: d.label, value: Math.round(current.scoresObj[d.key] ?? 0) }))
+                  .sort((a, b) => a.value - b.value)
+                  .slice(0, 3)
+                  .map((it) => ({ ...it, color: it.value < 60 ? '#f87171' : it.value < 75 ? '#f59e0b' : undefined }))}
+              />
+            </div>
           </Card>
           <Card className="p-4">
             <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">改进建议</div>
-            <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+            <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
               {current.feedback || '暂无反馈'}
             </div>
             {history.length > 1 && (
               <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">历史评分（可对比）</div>
-                <div className="space-y-1">
+                <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">总分趋势（点击数据点可对比）</div>
+                <LineChart
+                  points={[...history]
+                    .reverse()
+                    .map((h) => ({ label: `${new Date(h.createdAt).getMonth() + 1}/${new Date(h.createdAt).getDate()}`, value: h.totalScore }))}
+                  height={130}
+                  onPointClick={(i) => {
+                    const h = [...history].reverse()[i];
+                    if (h) setSelectedHist({ ...h, scoresObj: jsonText<Record<string, number>>(h.scores, {}) });
+                  }}
+                />
+                <div className="mt-2 space-y-1">
                   {history.map((h) => (
                     <button
                       key={h.id}
                       className={`w-full text-left text-xs rounded px-2 py-1.5 border ${
-                        selectedHist?.id === h.id ? 'border-teal-400 bg-teal-50' : 'border-slate-100 dark:border-slate-800 hover:border-teal-300'
+                        selectedHist?.id === h.id ? 'border-teal-400 bg-teal-50 dark:bg-teal-500/10' : 'border-slate-100 dark:border-slate-800 hover:border-teal-300'
                       }`}
                       onClick={() => setSelectedHist({ ...h, scoresObj: jsonText<Record<string, number>>(h.scores, {}) })}
                     >

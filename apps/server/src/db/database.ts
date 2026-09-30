@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
@@ -222,6 +223,71 @@ CREATE TABLE IF NOT EXISTS llm_call_log (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_caller ON llm_call_log(caller);
 CREATE INDEX IF NOT EXISTS idx_llm_created ON llm_call_log(created_at);
+
+-- 科研高级功能：系统综述筛选队列
+CREATE TABLE IF NOT EXISTS screening_queue (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  reference_id TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  reason TEXT DEFAULT '',
+  reviewer TEXT DEFAULT 'me',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_screening_project ON screening_queue(project_id);
+
+-- 科研高级功能：文献编码抽取字段与取值
+CREATE TABLE IF NOT EXISTS extraction_field (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  kind TEXT DEFAULT 'text',
+  options TEXT DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_extraction_field_project ON extraction_field(project_id);
+
+CREATE TABLE IF NOT EXISTS extraction_value (
+  id TEXT PRIMARY KEY,
+  field_id TEXT NOT NULL,
+  reference_id TEXT NOT NULL,
+  value TEXT DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_extraction_value_field ON extraction_value(field_id);
+
+-- 科研高级功能：审稿意见闭环
+CREATE TABLE IF NOT EXISTS review_comment (
+  id TEXT PRIMARY KEY,
+  document_id TEXT NOT NULL,
+  reviewer TEXT NOT NULL,
+  comment_text TEXT NOT NULL,
+  category TEXT DEFAULT '',
+  status TEXT DEFAULT 'open',
+  response_text TEXT DEFAULT '',
+  section_ref TEXT DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_review_comment_document ON review_comment(document_id);
+
+-- 科研高级功能：自建期刊库（全局共享）
+CREATE TABLE IF NOT EXISTS journal (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  issn TEXT DEFAULT '',
+  publisher TEXT DEFAULT '',
+  scope_text TEXT DEFAULT '',
+  if2024 REAL,
+  quartile TEXT DEFAULT '',
+  first_decision_weeks INTEGER,
+  acceptance_rate REAL,
+  oa TEXT DEFAULT '',
+  created_at INTEGER NOT NULL
+);
 `);
 
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */
@@ -236,6 +302,31 @@ ensureColumn('pipeline_task', 'trace', "TEXT DEFAULT '[]'");
 // 知识库 Contextual Retrieval 升级：旧库补齐 context/vector 列（RAG 混合检索依赖）
 ensureColumn('knowledge_chunk', 'context', "TEXT DEFAULT ''");
 ensureColumn('knowledge_chunk', 'vector', "TEXT DEFAULT '[]'");
+// 科研高级功能：reference 阅读状态 / 去重指纹 / 重复指向
+ensureColumn('reference', 'reading_status', "TEXT DEFAULT 'unread'");
+ensureColumn('reference', 'fingerprint', "TEXT DEFAULT ''");
+ensureColumn('reference', 'is_duplicate_of', "TEXT DEFAULT ''");
+
+/** 期刊库种子：内置国内主流期刊（仅写领域定位等事实描述；ISSN/IF/分区等不确定指标一律 NULL，禁止编造） */
+const seedJournals = [
+  ['计算机学报', '中国计算机学会（CCF）会刊，中国科学院计算技术研究所主办。刊登计算机科学理论、系统结构、软件、人工智能、计算机网络等方向的原创性研究论文。'],
+  ['软件学报', 'CCF 会刊，中国科学院软件研究所主办。聚焦软件工程、程序设计语言、系统软件、形式化方法、智能化软件工程等方向的高水平研究。'],
+  ['电子学报', '中国电子学会主办。覆盖电子科学与技术、信号与信息处理、通信、微电子、雷达与遥感等电子信息领域的基础与应用研究。'],
+  ['自动化学报', '中国自动化学会与中国科学院自动化研究所主办。聚焦控制理论与控制工程、模式识别、智能系统、机器人、复杂系统等方向。'],
+  ['中文信息学报', '中国中文信息学会主办。聚焦自然语言处理、中文信息处理、机器翻译、信息抽取、文本挖掘、计算语言学等方向。'],
+  ['计算机研究与发展', 'CCF 会刊，中国科学院计算技术研究所主办。刊登计算机系统、体系结构、算法、数据库、人工智能、信息安全等方向的研究成果。'],
+];
+const journalCount = (sqlite.prepare('SELECT COUNT(*) AS c FROM journal').get() as { c: number }).c;
+if (journalCount === 0) {
+  const insert = sqlite.prepare(
+    'INSERT INTO journal (id, name, issn, publisher, scope_text, if2024, quartile, first_decision_weeks, acceptance_rate, oa, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?)',
+  );
+  const now = Date.now();
+  for (const [name, scope] of seedJournals) {
+    insert.run(randomUUID(), name, '', '', scope, '', '', now);
+  }
+  console.log(`[DB] 期刊库种子：已写入 ${seedJournals.length} 个国内期刊`);
+}
 
 export const db: BetterSQLite3Database<typeof schema> = drizzle(sqlite, { schema });
 export { sqlite, DB_PATH };

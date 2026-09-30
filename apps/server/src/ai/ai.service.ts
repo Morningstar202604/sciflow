@@ -12,6 +12,16 @@ export interface ChatMessage {
   content: string;
 }
 
+/** chat 流式/问答的可选运行参数（best-effort 透传，厂商不支持时静默忽略） */
+export interface ChatStreamOptions {
+  /** 显式覆盖完整模型 ID（优先于 fast/strong 档位） */
+  modelName?: string;
+  /** 开启推理过程输出（对应上游 delta.reasoning_content / delta.thinking 透传） */
+  enableThinking?: boolean;
+  /** 客户端断连时中止上游生成，避免空跑 token */
+  signal?: AbortSignal;
+}
+
 interface CompleteOptions {
   temperature?: number;
   maxTokens?: number;
@@ -19,6 +29,14 @@ interface CompleteOptions {
   model?: 'fast' | 'strong';
   /** 调用方标识（成本追踪落库用） */
   context?: string;
+  /** 显式指定完整模型 ID（覆盖 fast/strong 档位；best-effort） */
+  modelName?: string;
+  /** 流式请求收尾 usage 块（stream_options.include_usage） */
+  streamIncludeUsage?: boolean;
+  /** 外部 AbortSignal（客户端断连时中止上游请求） */
+  signal?: AbortSignal;
+  /** 思考模式开关：仅 true 时附加上下文厂商 thinking 参数；不支持的厂商静默忽略 */
+  enableThinking?: boolean;
 }
 
 /**
@@ -87,6 +105,7 @@ export class AiService {
   }
 
   private resolveModel(opts: CompleteOptions): string {
+    if (opts.modelName) return opts.modelName;
     return opts.model === 'strong' ? this.strongModel : this.fastModel;
   }
 
@@ -170,23 +189,30 @@ export class AiService {
   private buildChatRequest(
     model: string,
     messages: ChatMessage[],
-    opts: { temperature?: number; maxTokens?: number; stream?: boolean },
+    opts: { temperature?: number; maxTokens?: number; stream?: boolean; streamIncludeUsage?: boolean; enableThinking?: boolean },
     timeoutMs: number,
+    signal?: AbortSignal,
   ) {
+    const body: Record<string, unknown> = {
+      model,
+      messages,
+      temperature: opts.temperature ?? 0.7,
+      max_tokens: opts.maxTokens ?? 4096,
+      stream: opts.stream ?? false,
+    };
+    // OpenAI 兼容流式：要求最后一个 chunk 带 usage 统计（厂商拒绝时由 completeStream 容错重试去掉）
+    if (opts.stream && opts.streamIncludeUsage) body.stream_options = { include_usage: true };
+    // 推理开关：仅显式开启时附加方舟/智谱系 thinking 参数；不支持的厂商静默忽略
+    if (opts.enableThinking) body.thinking = { type: 'enabled' };
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
     return fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: opts.temperature ?? 0.7,
-        max_tokens: opts.maxTokens ?? 4096,
-        stream: opts.stream ?? false,
-      }),
-      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify(body),
+      signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
     });
   }
 
@@ -254,7 +280,27 @@ export class AiService {
     const t0 = Date.now();
     const model = this.resolveModel(opts);
     const caller = opts.context || 'general';
-    const res = await this.buildChatRequest(model, messages, { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: true }, 300_000);
+    const reqOpts = {
+      temperature: opts.temperature,
+      maxTokens: opts.maxTokens,
+      stream: true,
+      streamIncludeUsage: opts.streamIncludeUsage,
+      enableThinking: opts.enableThinking,
+    };
+    let res = await this.buildChatRequest(model, messages, reqOpts, 300_000, opts.signal);
+    // 部分厂商拒绝 stream_options.include_usage → 去掉该参数容错重试一次（拿不到 usage 也不阻断正文流）
+    if (!res.ok && opts.streamIncludeUsage) {
+      const status = res.status;
+      await res.body?.cancel().catch(() => undefined);
+      console.warn(`[AiService] 上游拒绝 stream_options.include_usage (HTTP ${status})，去掉该参数重试`);
+      res = await this.buildChatRequest(
+        model,
+        messages,
+        { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: true, enableThinking: opts.enableThinking },
+        300_000,
+        opts.signal,
+      );
+    }
     if (!res.ok || !res.body) {
       const errText = await res.text().catch(() => '');
       this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: `HTTP ${res.status}` });
@@ -296,29 +342,41 @@ export class AiService {
   // ---------- 科研任务封装 ----------
 
   /** 科研问答（非流式） */
-  async chat(question: string, history: ChatMessage[] = []): Promise<string> {
-    return this.complete([{ role: 'system', content: prompts.CHAT_SYSTEM }, ...history, { role: 'user', content: question }]);
+  async chat(question: string, history: ChatMessage[] = [], opts: Pick<ChatStreamOptions, 'modelName'> = {}): Promise<string> {
+    return this.complete([{ role: 'system', content: prompts.CHAT_SYSTEM }, ...history, { role: 'user', content: question }], { modelName: opts.modelName });
   }
 
   /** Agent 化问答：在系统提示中注入项目记忆 + 知识库上下文（RAG） */
-  async chatWithContext(question: string, history: ChatMessage[] = [], context: string = ''): Promise<string> {
+  async chatWithContext(question: string, history: ChatMessage[] = [], context: string = '', opts: Pick<ChatStreamOptions, 'modelName'> = {}): Promise<string> {
     const sys = context
       ? `${prompts.CHAT_SYSTEM}\n\n【当前项目上下文】\n${context}\n\n请优先结合上下文回答；上下文不足以覆盖时，再用你的专业知识补充，并说明依据。`
       : prompts.CHAT_SYSTEM;
-    return this.complete([{ role: 'system', content: sys }, ...history, { role: 'user', content: question }]);
+    return this.complete([{ role: 'system', content: sys }, ...history, { role: 'user', content: question }], { modelName: opts.modelName });
   }
 
-  /** Agent 化问答（流式） */
-  streamChatWithContext(question: string, history: ChatMessage[] = [], context: string = ''): Promise<ReadableStream<Uint8Array>> {
+  /** Agent 化问答（流式）：默认请求 include_usage 收尾块，并接线外部 AbortSignal */
+  streamChatWithContext(question: string, history: ChatMessage[] = [], context: string = '', streamOpts: ChatStreamOptions = {}): Promise<ReadableStream<Uint8Array>> {
     const sys = context
       ? `${prompts.CHAT_SYSTEM}\n\n【当前项目上下文】\n${context}\n\n请优先结合上下文回答；上下文不足以覆盖时，再用你的专业知识补充，并说明依据。`
       : prompts.CHAT_SYSTEM;
-    return this.completeStream([{ role: 'system', content: sys }, ...history, { role: 'user', content: question }]);
+    return this.completeStream([{ role: 'system', content: sys }, ...history, { role: 'user', content: question }], {
+      context: 'chat',
+      modelName: streamOpts.modelName,
+      enableThinking: streamOpts.enableThinking,
+      signal: streamOpts.signal,
+      streamIncludeUsage: true,
+    });
   }
 
-  /** 科研问答（流式） */
-  streamChat(question: string, history: ChatMessage[] = []): Promise<ReadableStream<Uint8Array>> {
-    return this.completeStream([{ role: 'system', content: prompts.CHAT_SYSTEM }, ...history, { role: 'user', content: question }]);
+  /** 科研问答（流式）：默认请求 include_usage 收尾块，并接线外部 AbortSignal */
+  streamChat(question: string, history: ChatMessage[] = [], streamOpts: ChatStreamOptions = {}): Promise<ReadableStream<Uint8Array>> {
+    return this.completeStream([{ role: 'system', content: prompts.CHAT_SYSTEM }, ...history, { role: 'user', content: question }], {
+      context: 'chat',
+      modelName: streamOpts.modelName,
+      enableThinking: streamOpts.enableThinking,
+      signal: streamOpts.signal,
+      streamIncludeUsage: true,
+    });
   }
 
   /** 选题建议 */

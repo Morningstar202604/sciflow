@@ -1,28 +1,72 @@
-import { Controller, Post, Body, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Controller, Post, Body, Res, Req } from '@nestjs/common';
+import type { Response, Request } from 'express';
 import { ChatService } from './chat.service';
 import { ChatMessage } from '../ai/ai.service';
 
+interface ChatRequestBody {
+  message: string;
+  history?: ChatMessage[];
+  projectId?: string;
+  docContext?: string;
+  /** 可选：显式指定模型 ID（best-effort 覆盖默认模型） */
+  model?: string;
+  /** 可选：开启推理过程透传（delta.reasoning_content / delta.thinking） */
+  enableThinking?: boolean;
+}
+
+/**
+ * SSE 事件契约（向后兼容升级）：
+ *  - `data: {"sources":[{docName,score}]}`   正文开始前一次（无命中则不发）
+ *  - `data: {"delta":"..."}`                  正文增量（旧客户端兼容）
+ *  - `data: {"delta":"...","reasoning":"..."}` 正文+推理过程同发（reasoning 仅在有值时附加）
+ *  - `data: {"usage":{prompt_tokens,completion_tokens,total_tokens}}` 收尾一次
+ *  - `data: {"error":"..."}`                  异常
+ *  - `data: [DONE]`                           结束
+ */
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chat: ChatService) {}
 
   @Post()
-  async answer(@Body() body: { message: string; history?: ChatMessage[]; projectId?: string; docContext?: string }) {
-    return this.chat.answer(body.message, body.history || [], body.projectId, body.docContext);
+  async answer(@Body() body: ChatRequestBody) {
+    return this.chat.answer(body.message, body.history || [], body.projectId, body.docContext, { model: body.model });
   }
 
   /** SSE 流式问答 */
   @Post('stream')
-  async stream(@Body() body: { message: string; history?: ChatMessage[]; projectId?: string; docContext?: string }, @Res() res: Response) {
+  async stream(@Body() body: ChatRequestBody, @Res() res: Response, @Req() req: Request) {
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders?.();
 
+    // 前端停止流式时客户端断开 → 中止上游 fetch，避免生成空跑浪费 token（尽力而为）
+    const ac = new AbortController();
+    let closed = false;
+    req.on('close', () => {
+      closed = true;
+      try {
+        ac.abort();
+      } catch {
+        /* noop */
+      }
+    });
+
     try {
-      const upstream = await this.chat.stream(body.message, body.history || [], body.projectId, body.docContext);
-      const reader = upstream.getReader();
+      const { stream, sources } = await this.chat.stream(
+        body.message,
+        body.history || [],
+        body.projectId,
+        body.docContext,
+        { model: body.model, enableThinking: body.enableThinking, signal: ac.signal },
+      );
+
+      // 正文流开始前先推送 RAG 来源（无命中则不发送）
+      if (sources.length && !closed) {
+        res.write(`data: ${JSON.stringify({ sources })}\n\n`);
+      }
+
+      const reader = stream.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       while (true) {
@@ -38,16 +82,41 @@ export class ChatController {
           if (payload === '[DONE]') continue;
           try {
             const json = JSON.parse(payload) as any;
-            const delta = json.choices?.[0]?.delta?.content;
-            if (delta) res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+            const choice = json?.choices?.[0]?.delta || {};
+            // 正文增量（行为与旧版完全一致）
+            const delta: string | undefined = choice.content;
+            // 推理过程透传：DeepSeek/通义系 reasoning_content，豆包系 thinking
+            const reasoning: string | undefined = choice.reasoning_content || choice.thinking;
+            const chunk: Record<string, string> = {};
+            if (delta) chunk.delta = delta;
+            if (reasoning) chunk.reasoning = reasoning;
+            if (Object.keys(chunk).length && !closed) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            // 用量收尾块（include_usage）：此块 choices 为空、usage 独立下发
+            const usage = json?.usage;
+            if (usage && !closed && (usage.prompt_tokens != null || usage.total_tokens != null)) {
+              const prompt_tokens = Number(usage.prompt_tokens) || 0;
+              const completion_tokens = Number(usage.completion_tokens) || 0;
+              res.write(
+                `data: ${JSON.stringify({
+                  usage: {
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens: Number(usage.total_tokens) || prompt_tokens + completion_tokens,
+                  },
+                })}\n\n`,
+              );
+            }
           } catch {
-            /* 忽略无法解析的行 */
+            /* 未知字段/坏行忽略，绝不中断流式 */
           }
         }
       }
-      res.write('data: [DONE]\n\n');
+      if (!closed) res.write('data: [DONE]\n\n');
     } catch (e: any) {
-      res.write(`data: ${JSON.stringify({ error: e.message || String(e) })}\n\n`);
+      // 客户端主动断连属于正常停止，不回写 error 事件
+      if (!closed) {
+        res.write(`data: ${JSON.stringify({ error: e?.message || String(e) })}\n\n`);
+      }
     }
     res.end();
   }
