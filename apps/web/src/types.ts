@@ -74,6 +74,28 @@ export interface CitationRow {
   reference: Reference;
 }
 
+/** 支持的 8 种引用样式（与前端 WritingPage CITE_STYLES 一致） */
+export type CiteStyle = 'apa' | 'ieee' | 'vancouver' | 'gbt' | 'nature' | 'chicago' | 'springer' | 'acs';
+
+/** POST /api/documents/:id/render-citations 响应：纯函数渲染预览，永不落库（前端确认后自行覆盖保存 content） */
+export interface RenderCitationsResult {
+  /** 重排后的正文（著者-年样式把 [n] 换成 (作者, 年)；序号样式原样） */
+  content: string;
+  /** 文末参考文献条目（序号样式按插入序；著者-年样式按作者姓字母序） */
+  references: string[];
+  style: CiteStyle;
+  /** 序号样式恒 false；著者-年样式发生正文重排为 true */
+  changed: boolean;
+}
+
+/** versions JSON 历史元素（本轮起可选携带 name） */
+export interface DocVersionEntry {
+  version: number;
+  content: string;
+  updatedAt: number;
+  name?: string;
+}
+
 export interface QualityReport {
   id: string;
   documentId: string;
@@ -195,6 +217,19 @@ export interface KnowledgeSource {
 export interface KnowledgeQueryResult {
   answer: string;
   sources: KnowledgeSource[];
+}
+
+/** Chat SSE 首事件来源（/api/chat/stream 的 sources 数组元素）。
+ *  旧字段 docName/score 保留；chunkText/chunkSeq/referenceId/referenceTitle 为本轮新增附加，与 KnowledgeSource 对齐。 */
+export interface ChatSource {
+  docName: string;
+  score: number;
+  /** 完整命中块文本（来源卡片"展开原文"） */
+  chunkText: string;
+  /** 命中块在所属知识库文档内的分块序号（0 起） */
+  chunkSeq: number;
+  referenceId: string | null;
+  referenceTitle: string | null;
 }
 
 /** 学习复盘取数（GET /api/knowledge/:id）：单文档全部分块正文（按 seq 升序） */

@@ -1,6 +1,6 @@
 import type {
   Project, Doc, Reference, ReferenceInput, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
-  KnowledgeDoc, KnowledgeQueryResult, KnowledgeDocDetail, KnowledgeSearchHit, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
+  KnowledgeDoc, KnowledgeQueryResult, KnowledgeDocDetail, KnowledgeSearchHit, ChatSource, RenderCitationsResult, DocVersionEntry, CiteStyle, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
   AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool, PipelineStepConfig, QualityWeightItem,
   ScreeningItem, ExtractionField, ExtractionTableResult, ReviewComment, Journal, JournalMatchResult, Experiment,
   SubmissionTrack, SubmissionStatus, ParseEmailResult, ReferenceGraph, BibtexImportResult, DashboardOverview,
@@ -103,6 +103,12 @@ export const api = {
     exportDocx: (id: string) =>
       request<{ base64: string; filename: string }>(`/api/documents/${id}/export-docx`),
     abstract: (id: string) => request<{ abstract: string; keywords: string[] }>(`/api/documents/${id}/abstract`, { method: 'POST' }),
+    /** 版本命名（PATCH versions JSON 内嵌 name，幂等覆盖；version 不存在/被历史上限淘汰返回 400），返回更新后的 versions 数组 */
+    setVersionName: (id: string, version: number, name: string) =>
+      request<DocVersionEntry[]>(`/api/documents/${id}/version-name`, { method: 'PATCH', body: JSON.stringify({ version, name }) }),
+    /** 按样式渲染正文锚点+参考文献列表（纯函数预览，永不落库；前端确认后自行 PATCH content 覆盖） */
+    renderCitations: (id: string, style: CiteStyle, dryRun = true) =>
+      request<RenderCitationsResult>(`/api/documents/${id}/render-citations`, { method: 'POST', body: JSON.stringify({ style, dryRun }) }),
   },
 
   customization: {
@@ -353,7 +359,7 @@ export const api = {
 
 /** SSE 流式问答（主流智能体范式版：停止/推理流/来源/用量事件回调）
  * 事件契约：正文增量 data: {"delta": string}，可同事件携带 "reasoning"；
- * 正文前可能先来 data: {"sources": [{docName,score}]}；结束前 data: {"usage": {...}}；
+ * 正文前可能先来 data: {"sources": [{docName,score,chunkText,chunkSeq,referenceId,referenceTitle}]}；结束前 data: {"usage": {...}}；
  * data: {"error": string}；末尾 data: [DONE]。
  * 返回 abort 函数：调用后立即断开连接，已收文本保留（onDone 以当前全文触发）。
  */
@@ -367,7 +373,7 @@ export function streamChat(opts: {
   signal?: AbortSignal;
   onDelta?: (text: string) => void;
   onReasoning?: (text: string) => void;
-  onSources?: (sources: { docName: string; score: number }[]) => void;
+  onSources?: (sources: ChatSource[]) => void;
   onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
   onDone?: (full: string) => void;
   onError?: (msg: string) => void;

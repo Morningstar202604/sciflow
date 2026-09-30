@@ -360,10 +360,10 @@ export function SettingsPage() {
         ) : (
           <div className="space-y-1.5">
             {providers.map((p) => (
-              <div key={p.id} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-sm">
-                <span className={`w-2 h-2 rounded-full ${p.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                <span className="font-medium text-slate-700 dark:text-slate-200 w-28 truncate">{p.name}</span>
-                <span className="font-mono text-xs text-slate-500 dark:text-slate-400 flex-1 min-w-0 truncate">{p.model} · {p.baseUrl}</span>
+              <div key={p.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-sm">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${p.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                <span className="font-medium text-slate-700 dark:text-slate-200 w-20 sm:w-28 truncate">{p.name}</span>
+                <span className="font-mono text-xs text-slate-500 dark:text-slate-400 flex-1 min-w-0 truncate w-full sm:w-auto">{p.model} · {p.baseUrl}</span>
                 {p.isActive ? (
                   <Badge tone="green">激活中</Badge>
                 ) : (
@@ -583,10 +583,10 @@ export function SettingsPage() {
           <input className="rounded-md border border-slate-300 dark:border-slate-700 px-2 py-1.5 text-sm" placeholder="URL（如 http://localhost:3000/api/mcp）" value={mcpServerForm.url} onChange={(e) => setMcpServerForm({ ...mcpServerForm, url: e.target.value })} />
         </div>
         {mcpServers.map((ms) => (
-          <div key={ms.id} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-sm mb-1.5">
-            <span className={`w-2 h-2 rounded-full ${ms.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-            <span className="font-medium text-slate-700 dark:text-slate-200 w-28 truncate">{ms.name}</span>
-            <span className="font-mono text-xs text-slate-500 dark:text-slate-400 flex-1 min-w-0 truncate">{ms.url}</span>
+          <div key={ms.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-sm mb-1.5">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${ms.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+            <span className="font-medium text-slate-700 dark:text-slate-200 w-20 sm:w-28 truncate">{ms.name}</span>
+            <span className="font-mono text-xs text-slate-500 dark:text-slate-400 flex-1 min-w-0 truncate w-full sm:w-auto">{ms.url}</span>
             <Button
               variant="outline"
               className="text-xs px-2 py-1"
@@ -620,8 +620,8 @@ export function SettingsPage() {
             <div className="text-xs text-slate-400 dark:text-slate-500 mb-1.5">{externalResult} —— 选择工具调用（参数用逗号分隔）</div>
             <div className="space-y-1.5">
               {externalTools.map((t) => (
-                <div key={t.name} className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-teal-700 w-40 truncate">{t.name}</span>
+                <div key={t.name} className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-xs text-teal-700 w-24 sm:w-40 truncate">{t.name}</span>
                   <input
                     className="flex-1 min-w-0 rounded-md border border-slate-300 dark:border-slate-700 px-2 py-1 text-xs"
                     placeholder={(t.description || '').slice(0, 40)}
@@ -733,11 +733,11 @@ export function SettingsPage() {
             ) : (
               <div className="space-y-1.5">
                 {intents.map((it) => (
-                  <div key={it.id} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                  <div key={it.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
                     <Badge tone={it.enabled ? 'teal' : 'slate'}>{it.enabled ? '启用' : '停用'}</Badge>
                     <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{it.label}</span>
                     <span className="text-[11px] text-slate-400">{it.key} · {it.route}</span>
-                    <span className="text-[11px] text-slate-400 truncate flex-1">
+                    <span className="text-[11px] text-slate-400 truncate flex-1 min-w-0 w-full sm:w-auto">
                       {(() => { try { return JSON.parse(it.keywords).join('、'); } catch { return it.keywords; } })()}
                     </span>
                     <button
@@ -785,9 +785,9 @@ export function SettingsPage() {
             </div>
             <div className="grid sm:grid-cols-2 gap-2">
               {promptTools.map((t) => (
-                <div key={t.toolKey} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                <div key={t.toolKey} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
                   <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{t.toolLabel}</span>
-                  <span className="text-[11px] text-slate-400 truncate flex-1">{t.toolKey}</span>
+                  <span className="text-[11px] text-slate-400 truncate flex-1 min-w-0 w-full sm:w-auto">{t.toolKey}</span>
                   <Badge tone={t.customized ? (t.enabled ? 'green' : 'amber') : 'slate'}>{t.customized ? (t.enabled ? '已自定义' : '已停用') : '系统默认'}</Badge>
                   <button
                     className="text-xs text-teal-600 hover:underline"
@@ -917,7 +917,7 @@ export function SettingsPage() {
                 }))}
               />
             </div>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 className="text-xs"
                 onClick={async () => {

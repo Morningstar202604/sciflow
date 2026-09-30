@@ -16,7 +16,10 @@ interface ChatRequestBody {
 
 /**
  * SSE 事件契约（向后兼容升级）：
- *  - `data: {"sources":[{docName,score}]}`   正文开始前一次（无命中则不发）
+ *  - `data: {"sources":[{docName,score,chunkText,chunkSeq,referenceId,referenceTitle}]}`   正文开始前一次（无命中则不发）
+ *      · docName/score 为旧字段，保持不变；chunkText(完整块文本)/chunkSeq/referenceId/referenceTitle 为本轮新增附加字段，
+ *        与 knowledge query 的 sources 对齐。referenceId/referenceTitle 未绑定文献时为 null。旧客户端只读 docName/score，不受影响。
+ *      · chunkText 可能数百~数千字符，单帧体积在 SSE 可接受范围。
  *  - `data: {"delta":"..."}`                  正文增量（旧客户端兼容）
  *  - `data: {"delta":"...","reasoning":"..."}` 正文+推理过程同发（reasoning 仅在有值时附加）
  *  - `data: {"usage":{prompt_tokens,completion_tokens,total_tokens}}` 收尾一次

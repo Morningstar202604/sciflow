@@ -25,6 +25,12 @@ export class DocumentsController {
     return this.documents.update(id, body);
   }
 
+  /** 缺口#2：为某个历史版本命名（versions JSON 内嵌 name，幂等覆盖；version 不存在返回 400） */
+  @Patch(':id/version-name')
+  setVersionName(@Param('id') id: string, @Body() body: { version: number; name: string }) {
+    return this.documents.setVersionName(id, Number(body.version), body.name);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.documents.remove(id);
@@ -80,6 +86,12 @@ export class DocumentsController {
   @Get(':id/export-citations')
   exportCitations(@Param('id') id: string, @Query('format') format: string) {
     return this.documents.exportCitations(id, format || 'apa');
+  }
+
+  /** 缺口#4：按 8 样式渲染正文锚点+参考文献列表（纯函数预览，永不落库；前端确认后自行 PATCH content 覆盖） */
+  @Post(':id/render-citations')
+  renderCitations(@Param('id') id: string, @Body() body: { style: string; dryRun?: boolean }) {
+    return this.documents.renderCitations(id, body.style, body.dryRun);
   }
 
   /** 导出 Markdown 全文 */

@@ -8,7 +8,7 @@ import { api } from '../api/client';
 import { ChatPanel } from './ChatPanel';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { CitationRow, Doc, Experiment, Outline, Project, QualityReport, Reference, ResearchDesignResult, ReviewComment, SimulatedReviewResult } from '../types';
+import type { CitationRow, Doc, DocVersionEntry, Experiment, Outline, Project, QualityReport, Reference, ResearchDesignResult, ReviewComment, SimulatedReviewResult } from '../types';
 import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Select, Spinner, Textarea, downloadBase64, downloadText, jsonText } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
 
@@ -47,6 +47,11 @@ function initialsOf(a: string): string {
   parts.pop();
   return parts.map((p) => p.charAt(0).toUpperCase()).join('. ') + (parts.length ? '.' : '');
 }
+
+/** 质量分配色：≥good 默认色，good~mid 琥珀，<mid 红 */
+const scoreColor = (v: number, good = 70, mid = 50) => (v >= good ? undefined : v >= mid ? '#f59e0b' : '#f87171');
+/** 工具区小节标题统一类名（多处复用，缩小 bundle） */
+const SEC = 'text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5';
 
 type RefLite = { title: string; authors: string; year: number | null; venue: string; doi: string };
 
@@ -94,6 +99,8 @@ function formatRefEntry(ref: RefLite, format: string, index: number): string {
 /** 版本快照类型与 diff 逻辑拆至独立 chunk（VersionDiffModal，仅打开对比时加载） */
 import type { VersionSnapshot } from './VersionDiffModal';
 const VersionDiffModal = lazy(() => import('./VersionDiffModal').then((m) => ({ default: m.VersionDiffModal })));
+/** 著者-年重排入口（按钮+预览 Modal）拆至独立 chunk，避免撑大 WritingPage */
+const CiteReorderButton = lazy(() => import('./CiteReorderButton').then((m) => ({ default: m.CiteReorderButton })));
 
 /** 取编辑器 textarea DOM 节点（ui.tsx 的 Textarea 未透传 ref，用 id 定位，不改 ui.tsx） */
 function getEditorTa(): HTMLTextAreaElement | null {
@@ -112,7 +119,6 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [topicInput, setTopicInput] = useState('');
   const [sectionTarget, setSectionTarget] = useState('');
   const [polishResult, setPolishResult] = useState<{ original: string; polished: string; reason: string } | null>(null);
-  const [polishMode, setPolishMode] = useState<'polish' | 'reduce'>('polish');
   const [translateTarget, setTranslateTarget] = useState<'zh' | 'en'>('zh');
   const [editorMode, setEditorMode] = useState<'edit' | 'preview' | 'split'>(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? 'edit' : 'split'));
   const toast = useContext(ToastContext);
@@ -290,8 +296,8 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   /** 版本快照列表：doc.versions 历史快照 + 当前编辑态（v=doc.version）。历史快照 content 为旧正文 */
   const snapshots = useMemo<VersionSnapshot[]>(() => {
     if (!doc) return [];
-    const arr = jsonText<{ version: number; content: string; updatedAt: number }[]>(doc.versions || '[]', []);
-    const hist = arr.map((s) => ({ version: s.version, content: s.content ?? '', updatedAt: s.updatedAt }));
+    const arr = jsonText<DocVersionEntry[]>(doc.versions || '[]', []);
+    const hist = arr.map((s) => ({ ...s, content: s.content ?? '' }));
     return [...hist, { version: doc.version, content, updatedAt: doc.updatedAt, current: true }];
   }, [doc, content]);
 
@@ -927,7 +933,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
           {/* 科研加强：摘要 + 关键词 */}
           <div className="mb-4">
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">论文摘要 + 关键词（AI 一键生成）</div>
+            <div className={SEC}>论文摘要 + 关键词（AI 一键生成）</div>
             <Button variant="outline" className="text-xs w-full" onClick={generateAbstract} disabled={aiBusy || !content.trim()}>
               <Sparkles size={12} className="text-teal-600" /> 生成摘要与关键词
             </Button>
@@ -957,7 +963,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
           {/* 科研加强：研究设计诊断 */}
           <div className="mb-4">
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">研究设计诊断（选题阶段：新颖性 / 可行性 / 风险）</div>
+            <div className={SEC}>研究设计诊断（选题阶段：新颖性 / 可行性 / 风险）</div>
             <Textarea
               rows={2}
               placeholder="描述你的研究想法，如：用图神经网络预测蛋白质-药物相互作用…"
@@ -976,8 +982,8 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                     max={100}
                     barHeight={6}
                     items={[
-                      { label: '新颖性', value: designResult.noveltyScore, sub: designResult.noveltyFeedback.slice(0, 14) + '…', color: designResult.noveltyScore >= 70 ? undefined : designResult.noveltyScore >= 50 ? '#f59e0b' : '#f87171', hint: designResult.noveltyFeedback },
-                      { label: '可行性', value: designResult.feasibilityScore, sub: designResult.feasibilityFeedback.slice(0, 14) + '…', color: designResult.feasibilityScore >= 70 ? undefined : designResult.feasibilityScore >= 50 ? '#f59e0b' : '#f87171', hint: designResult.feasibilityFeedback },
+                      { label: '新颖性', value: designResult.noveltyScore, sub: designResult.noveltyFeedback.slice(0, 14) + '…', color: scoreColor(designResult.noveltyScore), hint: designResult.noveltyFeedback },
+                      { label: '可行性', value: designResult.feasibilityScore, sub: designResult.feasibilityFeedback.slice(0, 14) + '…', color: scoreColor(designResult.feasibilityScore), hint: designResult.feasibilityFeedback },
                     ]}
                   />
                   <div className="mt-2 space-y-1 text-slate-600 dark:text-slate-300 leading-relaxed">
@@ -1003,7 +1009,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
           {/* 章节起草 */}
           <div className="mb-4">
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">章节起草（点击大纲章节或选择）</div>
+            <div className={SEC}>章节起草（点击大纲章节或选择）</div>
             <Select
               options={[
                 { value: '', label: '选择要起草的章节…' },
@@ -1019,7 +1025,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
           {/* 润色 / 降重 / 翻译 */}
           <div className="mb-4 space-y-2">
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">润色 / 降重 / 翻译（默认处理全文，也可先选中文本）</div>
+            <div className={SEC}>润色 / 降重 / 翻译（默认处理全文，也可先选中文本）</div>
             <div className="flex gap-2">
               <Button className="flex-1" variant="outline" onClick={() => doPolish('polish')} disabled={aiBusy}>
                 学术润色
@@ -1046,7 +1052,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
           {/* 科研加强：模拟同行评审 */}
           <div className="mb-4">
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">模拟同行评审（投稿前：3 审稿人 + 主编决定）</div>
+            <div className={SEC}>模拟同行评审（投稿前：3 审稿人 + 主编决定）</div>
             <Button variant="outline" className="text-xs w-full" onClick={runSimulatedReview} disabled={aiBusy || !content.trim()}>
               <ClipboardCheck size={12} className="text-teal-600" /> 模拟评审全文
             </Button>
@@ -1065,7 +1071,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                     items={reviewResult.reviewers.map((rv) => ({
                       label: rv.role,
                       value: rv.score,
-                      color: rv.score >= 80 ? undefined : rv.score >= 60 ? '#f59e0b' : '#f87171',
+                      color: scoreColor(rv.score, 80, 60),
                       hint: rv.concerns.join('；').slice(0, 60),
                     }))}
                   />
@@ -1085,7 +1091,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           {/* 审稿意见闭环（折叠卡片，默认收起；真实增删改查，不占位） */}
           <div className="mb-4">
             <button
-              className="w-full flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5"
+              className={`w-full flex items-center justify-between ${SEC}`}
               onClick={() => setCommentsOpen((v) => !v)}
             >
               <span className="flex items-center gap-1"><MessageSquare size={12} className="text-teal-600" /> 审稿意见闭环</span>
@@ -1116,7 +1122,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                 {commentsLoading ? (
                   <Spinner />
                 ) : reviewComments.length === 0 ? (
-                  <div className="text-slate-400 dark:text-slate-500">暂无审稿意见。点击"导入模拟评审"可把本次模拟评审的 concerns 批量入库，形成可追踪闭环。</div>
+                  <div className="text-slate-400 dark:text-slate-500">暂无审稿意见。点「导入模拟评审」把本次评审 concerns 批量入库。</div>
                 ) : (
                   <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
                     {reviewComments.map((c) => {
@@ -1209,7 +1215,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           {/* 质量评分（折叠卡片：最新一次 7 维评分；null/失败显示空态，不白屏） */}
           <div className="mb-4">
             <button
-              className="w-full flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5"
+              className={`w-full flex items-center justify-between ${SEC}`}
               onClick={() => setQualityOpen((v) => !v)}
             >
               <span className="flex items-center gap-1"><Gauge size={12} className="text-teal-600" /> 质量评分</span>
@@ -1220,7 +1226,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             {qualityOpen && (
               <div className="text-xs">
                 {!qualityReport ? (
-                  <div className="text-slate-400 dark:text-slate-500">暂无质量评分记录，可到「质量评分」页对本文档运行 7 维评分。</div>
+                  <div className="text-slate-400 dark:text-slate-500">暂无质量评分，可到「质量评分」页对本文档运行 7 维评分。</div>
                 ) : (
                   <div className="space-y-2">
                     <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
@@ -1238,7 +1244,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                         showValue={false}
                         items={QUALITY_DIMS.map((d) => {
                           const v = Math.round(qualityScores[d.key] ?? 0);
-                          return { label: d.label, value: v, color: v < 60 ? '#f87171' : v < 75 ? '#f59e0b' : undefined };
+                          return { label: d.label, value: v, color: scoreColor(v, 75, 60) };
                         })}
                       />
                     </div>
@@ -1256,7 +1262,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           {/* 关联实验（折叠卡片：只读展示，不做一键插入正文） */}
           <div className="mb-4">
             <button
-              className="w-full flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5"
+              className={`w-full flex items-center justify-between ${SEC}`}
               onClick={() => setExperimentsOpen((v) => !v)}
             >
               <span className="flex items-center gap-1"><FlaskConical size={12} className="text-teal-600" /> 关联实验</span>
@@ -1267,7 +1273,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             {experimentsOpen && (
               <div className="text-xs">
                 {docExperiments.length === 0 ? (
-                  <div className="text-slate-400 dark:text-slate-500">暂无关联实验，可到「实验记录」页运行并关联本文档。</div>
+                  <div className="text-slate-400 dark:text-slate-500">暂无关联实验，可到「实验记录」页关联本文档。</div>
                 ) : (
                   <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
                     {docExperiments.map((exp) => (
@@ -1307,7 +1313,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           {/* 版本历史（任务3：左右栏 diff 对比 + 命名 + 恢复） */}
           <div className="mb-4">
             <button
-              className="w-full flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5"
+              className={`w-full flex items-center justify-between ${SEC}`}
               onClick={() => setVersionsOpen((v) => !v)}
             >
               <span className="flex items-center gap-1"><History size={12} className="text-teal-600" /> 版本历史</span>
@@ -1321,7 +1327,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                   <History size={12} /> 左右栏对比版本
                 </Button>
                 {snapshots.length < 2 && (
-                  <div className="text-slate-400 dark:text-slate-500">再保存一次内容变更后才会产生可对比的历史快照。</div>
+                  <div className="text-slate-400 dark:text-slate-500">再保存一次内容变更才会产生可对比的历史快照。</div>
                 )}
               </div>
             )}
@@ -1355,7 +1361,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
           {/* 引用管理 */}
           <div className="mb-4">
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
+            <div className={`${SEC} flex items-center gap-1`}>
               <BookOpen size={12} /> 引用管理（文献库 {refs.length} 条）
             </div>
             {/* 引用核验率 Donut：citations 中 verified=1 占比 */}
@@ -1431,6 +1437,10 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                 渲染列表
               </Button>
             </div>
+            {/* 著者-年重排入口（独立 lazy chunk）：确认后 setContent→自动保存链 */}
+            <Suspense fallback={null}>
+              <CiteReorderButton docId={docId} style={exportFormat} citationsCount={citations.length} onApply={setContent} />
+            </Suspense>
             {(() => {
               const meta = CITE_STYLES.find((s) => s.value === exportFormat);
               if (!meta) return null;
@@ -1468,7 +1478,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           {/* 历史记录 */}
           {history.length > 0 && (
             <div>
-              <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">润色 / 翻译历史（可追溯）</div>
+              <div className={SEC}>润色 / 翻译历史（可追溯）</div>
               <div className="space-y-1.5">
                 {history.slice(0, 6).map((h, i) => (
                   <details key={i} className="bg-slate-50 dark:bg-slate-900/50 rounded p-2 text-xs">

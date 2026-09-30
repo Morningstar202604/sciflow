@@ -135,5 +135,6 @@ sciflow 是一个**本地优先、单机部署**的 AI 科研助手：NestJS 11 
 | 构建 | 前后端 `build`（CI ×2） | 全绿 |
 | 依赖安全 | `pnpm audit` | 0 漏洞 |
 | 体积红线 | 首屏 JS 821KB、主包 84KB、echarts 懒加载 chunk 443KB；前端 `dist` 约 2.2MB | 守住，新增功能不引入重型运行时 |
+| 本地 mock AI 网关 | `AI_MOCK=1` 起后端后跑 `full_regression.py`（见 README「本地 mock AI 网关」） | **mock 模式 PASS / FAIL 0**：无 Key 本机即可端到端跑通流水线；无 `AI_MOCK` 时回归保持 2 个 AI 未配置环境项（settings/check 503、pipeline 创建 400）不变 |
 
 > 后续每轮改造完成后，须以同一套基线（typecheck ×2 + vitest + build ×2 + `full_regression.py`）回归全绿作为合并门槛；AI 网关限流类失败仍按环境项处理并显式标注，不得静默吞掉。

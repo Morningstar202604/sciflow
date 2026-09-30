@@ -70,6 +70,107 @@ export class DocumentsService {
     return { ok: true };
   }
 
+  /** versions JSON 历史元素：本轮起可选携带 name（纯 JSON 内嵌，无需 ensureColumn/列迁移） */
+  private parseVersions(existing: { versions: string | null }): { version: number; content: string; updatedAt: number; name?: string }[] {
+    return this.parseJson<{ version: number; content: string; updatedAt: number; name?: string }[]>(existing.versions ?? '[]');
+  }
+
+  /**
+   * 缺口#2：为某个历史版本命名（PATCH /api/documents/:id/version-name）。
+   *  - 幂等：同 version 重复命名直接覆盖 name，不新增历史条目；
+   *  - 仅写入 versions JSON 内嵌的可选 name 字段，不动 content/updatedAt；
+   *  - version 不存在（历史已被 MAX_VERSIONS=20 上限淘汰出数组）或 name 非法 → 400；
+   *  - 返回更新后的整个 versions 数组。
+   */
+  setVersionName(id: string, version: number, name: string) {
+    const existing = this.get(id);
+    if (typeof version !== 'number' || !Number.isFinite(version)) throw new BadRequestException('version 必须是数字');
+    const trimmed = String(name ?? '').trim();
+    if (!trimmed) throw new BadRequestException('版本名不能为空');
+    if (trimmed.length > 80) throw new BadRequestException('版本名过长（≤80 字）');
+    const versions = this.parseVersions(existing);
+    const target = versions.find((v) => v.version === version);
+    if (!target) {
+      throw new BadRequestException(
+        `未找到版本 v${version}：它可能尚未产生历史快照，或已被历史上限（${MAX_VERSIONS} 条）淘汰出数组`,
+      );
+    }
+    target.name = trimmed;
+    db.update(documents).set({ versions: JSON.stringify(versions), updatedAt: Date.now() }).where(eq(documents.id, id)).run();
+    return versions;
+  }
+
+  /**
+   * 缺口#4：按样式渲染正文锚点 + 文末参考文献列表（纯函数预览，永不落库）。
+   *  - 序号样式（ieee/vancouver/gbt/nature/springer/acs）：正文 [n] 保持 [n]（citations 插入序 n=index+1，与现状一致），
+   *    references 按插入序渲染，changed=false；
+   *  - 著者-年样式（apa/chicago）：正文每个 [n] 重排为 (第一作者姓, 年份)，文末参考文献按作者姓字母序重排，changed=true；
+   *    无作者/年份降级为 (佚名, n.d.)；同作者同年按字母序分配 a/b 后缀（取舍见 formatRefEntry8 注释）。
+   *  - 幂等：相同 style 重复调用逐字节一致（纯函数变换，不读外部可变状态）。
+   *  - 不落库：无论 dryRun 传与否，都只返回渲染结果，不写 documents.content——由前端预览确认后自行 PATCH content，
+   *    避免破坏编辑器自动保存链。dryRun 入参仅为 API 对称/前向兼容保留。
+   */
+  renderCitations(docId: string, style: string, _dryRun?: boolean) {
+    const doc = this.get(docId);
+    const valid: CiteStyleKind[] = ['apa', 'ieee', 'vancouver', 'gbt', 'nature', 'chicago', 'springer', 'acs'];
+    if (!valid.includes(style as CiteStyleKind)) throw new BadRequestException(`不支持的引用样式: ${style}`);
+    const isAuthorYear = style === 'apa' || style === 'chicago';
+
+    // citations 按存储顺序（rowid=插入序 = 前端 n=index+1）
+    const rows = this.listCitations(docId);
+    const refs = rows.map((r) => ({
+      title: r.reference.title,
+      authors: r.reference.authors ?? '[]',
+      year: r.reference.year,
+      venue: r.reference.venue ?? '',
+      doi: r.reference.doi ?? '',
+    }));
+    const content = doc.content || '';
+
+    // 序号样式：正文锚点与参考文献顺序均不变
+    if (!isAuthorYear) {
+      const references = refs.map((ref, i) => formatRefEntry8(ref, style, i + 1));
+      return { content, references, style, changed: false };
+    }
+
+    // 著者-年样式：解析每条 citation 的第一作者姓 / 年
+    const meta = refs.map((ref) => {
+      const arr = parseAuthorArr(ref.authors);
+      const surname = arr.length ? surnameOf(arr[0]) : '佚名';
+      const year = ref.year ? String(ref.year) : 'n.d.';
+      return { ref, surname, year };
+    });
+
+    // 字母序（作者姓小写 → 年）；同 (姓, 年) 组内按字母序分配 a/b 后缀（确定性，按字母序而非正文首现序——简化取舍）
+    const order = meta.map((_, i) => i);
+    order.sort((a, b) => {
+      const sa = meta[a].surname.toLowerCase();
+      const sb = meta[b].surname.toLowerCase();
+      if (sa !== sb) return sa < sb ? -1 : 1;
+      return meta[a].year < meta[b].year ? -1 : meta[a].year > meta[b].year ? 1 : 0;
+    });
+    const letterByIndex: string[] = meta.map(() => '');
+    const groupSeen = new Map<string, number>();
+    for (const idx of order) {
+      const key = `${meta[idx].surname.toLowerCase()}||${meta[idx].year}`;
+      const seen = groupSeen.get(key) || 0;
+      groupSeen.set(key, seen + 1);
+      if (seen > 0) letterByIndex[idx] = String.fromCharCode(97 + seen);
+    }
+
+    // 正文 [n] → (姓, 年{letter})；n 越界（非本文档引用锚点）原样保留
+    const contentOut = content.replace(/\[(\d+)\]/g, (m, g1) => {
+      const n = Number(g1);
+      if (!Number.isInteger(n) || n < 1 || n > meta.length) return m;
+      const i = n - 1;
+      return `(${meta[i].surname}, ${meta[i].year}${letterByIndex[i]})`;
+    });
+
+    // 参考文献按字母序渲染（著者-年样式无序号；letter 拼进年份）
+    const references = order.map((idx) => formatRefEntry8(meta[idx].ref, style, 0, `${meta[idx].year}${letterByIndex[idx]}`));
+    return { content: contentOut, references, style, changed: true };
+  }
+
   // ---------- AI 写作工具 ----------
 
   /** 大纲生成（outline-first，借鉴 STORM），保存到文档 */
@@ -416,5 +517,73 @@ export function formatCitation(ref: { title: string; authors: string; year: numb
     }
     default:
       return `${authors} (${year.trim()}). ${ref.title}.${venue}${doi}`;
+  }
+}
+
+/* =====================================================================
+ * 缺口#4：render-citations 用的 8 样式单条条目渲染——逐行镜像前端 WritingPage.formatRefEntry，
+ * 保证后端预览列表与前端所见一致（加粗/斜体以纯文本近似）。
+ * ===================================================================== */
+type CiteStyleKind = 'apa' | 'ieee' | 'vancouver' | 'gbt' | 'nature' | 'chicago' | 'springer' | 'acs';
+
+function parseAuthorArr(authors: string): string[] {
+  try {
+    const a = JSON.parse(authors || '[]');
+    return Array.isArray(a) ? a.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+/** "First Middle Last" -> "Last" */
+function surnameOf(a: string): string {
+  const parts = a.trim().split(/\s+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : a;
+}
+/** "First Middle Last" -> "F. M." */
+function initialsOf(a: string): string {
+  const parts = a.trim().split(/\s+/).filter(Boolean);
+  parts.pop();
+  return parts.map((p) => p.charAt(0).toUpperCase()).join('. ') + (parts.length ? '.' : '');
+}
+
+type RefLite = { title: string; authors: string; year: number | null; venue: string; doi: string };
+
+/** 单条参考文献条目渲染（镜像前端 formatRefEntry）。yearOverride 用于著者-年样式注入 a/b 后缀 */
+function formatRefEntry8(ref: RefLite, format: string, index: number, yearOverride?: string): string {
+  const arr = parseAuthorArr(ref.authors);
+  const year = yearOverride ?? (ref.year ? `${ref.year}` : 'n.d.');
+  const venue = ref.venue || '';
+  const doi = ref.doi ? ` https://doi.org/${ref.doi}` : '';
+  const t = ref.title || 'Untitled';
+
+  const apaAuthors = arr.length === 0 ? 'Anonymous' : arr.length === 1 ? arr[0] : `${arr[0]} et al.`;
+  const iniOf = (a: string) => initialsOf(a).replace(/\.\s?/g, '');
+  const ieeeAuthors = arr.map((a) => (iniOf(a) ? `${initialsOf(a)} ${surnameOf(a)}` : surnameOf(a))).join(', ');
+  const vanAuthors = arr.map((a) => `${surnameOf(a)} ${iniOf(a)}`.trim()).join(', ');
+  const semiAuthors = arr.map((a) => `${surnameOf(a)}${iniOf(a) ? `, ${initialsOf(a)}` : ''}`).join('; ');
+  const gbtAuthors = arr.length === 0 ? '佚名' : arr.length === 1 ? arr[0] : arr.length > 3 ? `${arr[0]} 等` : arr.join(', ');
+
+  switch (format) {
+    case 'ieee':
+      return `[${index}] ${ieeeAuthors || 'Anonymous'} "${t},"${venue ? ` ${venue},` : ''} ${year}.${doi}`;
+    case 'vancouver':
+      return `${index}. ${vanAuthors || 'Anonymous'} ${t}.${venue ? ` ${venue}.` : ''} ${year}.${doi}`;
+    case 'gbt':
+      return `[${index}] ${gbtAuthors}. ${t}[J].${venue ? ` ${venue},` : ''} ${year}.${doi}`;
+    case 'nature': {
+      const names = arr.slice(0, 6).map((a) => `${iniOf(a)} ${surnameOf(a)}`.trim()).join(', ');
+      return `[${index}] ${names || 'Anonymous'}${arr.length > 6 ? ' et al.' : ''}. ${t}. ${venue} ${year}.${doi}`;
+    }
+    case 'chicago': {
+      const names =
+        arr.length === 0 ? 'Anonymous' : arr.length === 1 ? arr[0] : arr.length === 2 ? `${arr[0]} and ${arr[1]}` : `${arr.slice(0, -1).join(', ')}, and ${arr[arr.length - 1]}`;
+      return `${names}. ${year}. "${t}."${venue ? ` ${venue}.` : ''}${doi}`;
+    }
+    case 'springer':
+    case 'acs':
+      return `[${index}] ${semiAuthors || 'Anonymous'}. ${t}. ${venue} ${year}.${doi}`;
+    case 'apa':
+    default:
+      return `${apaAuthors} (${year}). ${t}.${venue ? ` ${venue}.` : ''}${doi}`;
   }
 }

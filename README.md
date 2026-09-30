@@ -85,6 +85,8 @@ pnpm dev
 | `AI_MODEL_FAST` | fast 档模型（问答/润色/翻译） | `agnes-3.0-flash` |
 | `AI_MODEL_STRONG` | strong 档模型（规划/长文/评审） | 未配置则回落 fast |
 | `AI_RPM_CAP` | 每分钟最大 AI 调用数（令牌桶防 429） | `8` |
+| `AI_MOCK` | 设为 `1` 启用本机 mock AI 网关（无 Key / 无外网跑通全链路测试用，见下文） | `1` |
+| `AI_MOCK_PORT` | mock 网关监听端口（默认 5099） | `5099` |
 
 未配置 Key 时应用可正常使用（项目管理/文献检索），AI 功能会给出明确配置提示，不会返回假数据。
 
@@ -95,6 +97,24 @@ pnpm dev
 # 单元测试（引用格式化等核心纯逻辑）
 pnpm --filter server test
 ```
+
+### 本地 mock AI 网关（测试 / 演示用，与任何国外平台无关）
+
+无 `AI_API_KEY`、无外网的本机环境下，可用内置的零依赖 mock 网关跑通「Planner→Research→Writer→Reviewer→Polisher→renderCitations」整条流水线并跑全量回归：
+
+```bash
+# 起后端（mock 模式）
+AI_MOCK=1 AI_RPM_CAP=100 DATABASE_PATH=/tmp/sciflow_mock.db PORT=3000 \
+  node apps/server/dist/main.js
+
+# 另一个终端：全量回归（FAIL 0）
+SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
+  SCIFLOW_DB_PATH=/tmp/sciflow_mock.db python3 scripts/full_regression.py
+```
+
+- `AI_MOCK=1` 时 `ai.configured=true`，`settings/check` 返回连通；`AI_MOCK_PORT` 覆盖端口（默认 `127.0.0.1:5099`）。
+- mock 网关（`apps/server/src/ai/mock-gateway.ts`，仅 `node:http`、零新增依赖、只监听回环）按 prompt 关键词返回**确定性**响应：研究计划/大纲 JSON、带 `[Ref:N]` 的中文章节、7 维评分（≈87 分不回炉）、润色三段式、RAG 答案、期刊匹配/邮件解析 JSON 等，并支持 `stream:true` 的 SSE 分块。
+- **仅本机测试/演示用**：不访问任何外部网络、不代表真实模型能力；不要在生产或演示给真实作者时依赖它。未设 `AI_MOCK` 时，AI 调用行为与真实网关逐字节一致。
 
 ## 🧭 2026 前沿升级（查漏补缺批次）
 
