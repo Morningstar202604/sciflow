@@ -12,7 +12,7 @@ import { projects } from '../db/schema';
 export interface ChatSource {
   docName: string;
   score: number;
-  /** 完整命中块文本（来源卡片"展开原文"；单块约数百~数千字符，SSE 单帧可接受） */
+  /** 命中块文本（来源卡片"展开原文"；截断到 CHUNK_TEXT_MAX_LEN 字符，超限末尾加截断标记，未超限原样） */
   chunkText: string;
   /** 命中块在所属知识库文档内的分块序号（0 起，来自 knowledge_chunk.seq） */
   chunkSeq: number;
@@ -20,6 +20,15 @@ export interface ChatSource {
   referenceId: string | null;
   /** 绑定文献标题（未绑定为 null） */
   referenceTitle: string | null;
+}
+
+/** sources.chunkText 上限：超过则截断并在末尾加明确标记；前端可凭 chunkSeq 经 GET /api/knowledge/:id 取全文 */
+const CHUNK_TEXT_MAX_LEN = 2000;
+const CHUNK_TRUNC_MARK = '…[已截断]';
+
+function truncateChunkText(text: string): string {
+  if (!text || text.length <= CHUNK_TEXT_MAX_LEN) return text ?? '';
+  return text.slice(0, CHUNK_TEXT_MAX_LEN) + CHUNK_TRUNC_MARK;
 }
 
 interface ChatRuntimeOptions {
@@ -80,7 +89,7 @@ export class ChatService {
             sources.push({
               docName: h.docName,
               score: Math.round(h.score * 1000) / 1000,
-              chunkText: h.content ?? '',
+              chunkText: truncateChunkText(h.content ?? ''),
               chunkSeq: h.seq ?? 0,
               referenceId: h.referenceId ?? null,
               referenceTitle: h.referenceTitle ?? null,

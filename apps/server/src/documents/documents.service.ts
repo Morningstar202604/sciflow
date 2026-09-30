@@ -105,7 +105,7 @@ export class DocumentsService {
    *  - 序号样式（ieee/vancouver/gbt/nature/springer/acs）：正文 [n] 保持 [n]（citations 插入序 n=index+1，与现状一致），
    *    references 按插入序渲染，changed=false；
    *  - 著者-年样式（apa/chicago）：正文每个 [n] 重排为 (第一作者姓, 年份)，文末参考文献按作者姓字母序重排，changed=true；
-   *    无作者/年份降级为 (佚名, n.d.)；同作者同年按字母序分配 a/b 后缀（取舍见 formatRefEntry8 注释）。
+   *    无作者/年份降级为 (佚名, n.d.)；同作者同年多篇按**正文重排后首次出现顺序**分配 a/b 后缀（首现 a、次现 b…），文末列表同步。
    *  - 幂等：相同 style 重复调用逐字节一致（纯函数变换，不读外部可变状态）。
    *  - 不落库：无论 dryRun 传与否，都只返回渲染结果，不写 documents.content——由前端预览确认后自行 PATCH content，
    *    避免破坏编辑器自动保存链。dryRun 入参仅为 API 对称/前向兼容保留。
@@ -141,21 +141,37 @@ export class DocumentsService {
       return { ref, surname, year };
     });
 
-    // 字母序（作者姓小写 → 年）；同 (姓, 年) 组内按字母序分配 a/b 后缀（确定性，按字母序而非正文首现序——简化取舍）
-    const order = meta.map((_, i) => i);
-    order.sort((a, b) => {
-      const sa = meta[a].surname.toLowerCase();
-      const sb = meta[b].surname.toLowerCase();
-      if (sa !== sb) return sa < sb ? -1 : 1;
-      return meta[a].year < meta[b].year ? -1 : meta[a].year > meta[b].year ? 1 : 0;
-    });
+    // key = 第一作者姓(小写)||年；文末参考文献按此字母序
+    const keyOf = (i: number) => `${meta[i].surname.toLowerCase()}||${meta[i].year}`;
+    // 先按正文锚点 [n] 的出现顺序收集 citation 下标（0 基），用于 a/b 后缀按正文首现序分配
+    const anchorOrder: number[] = [];
+    const anchorRe = /\[(\d+)\]/g;
+    let am: RegExpExecArray | null;
+    while ((am = anchorRe.exec(content)) !== null) {
+      const n = Number(am[1]);
+      if (Number.isInteger(n) && n >= 1 && n <= meta.length) anchorOrder.push(n - 1);
+    }
+    // 同 (姓,年) 组内不同引用的数量：≥2 才需要 a/b 后缀
+    const groupSize = new Map<string, number>();
+    for (let i = 0; i < meta.length; i++) groupSize.set(keyOf(i), (groupSize.get(keyOf(i)) || 0) + 1);
+
+    // 按正文首现序分配 a/b：组内第一次出现→a、第二次→b…；同一引用多次出现复用同一后缀
     const letterByIndex: string[] = meta.map(() => '');
-    const groupSeen = new Map<string, number>();
-    for (const idx of order) {
-      const key = `${meta[idx].surname.toLowerCase()}||${meta[idx].year}`;
-      const seen = groupSeen.get(key) || 0;
-      groupSeen.set(key, seen + 1);
-      if (seen > 0) letterByIndex[idx] = String.fromCharCode(97 + seen);
+    const groupNext = new Map<string, number>();
+    for (const i of anchorOrder) {
+      const key = keyOf(i);
+      if ((groupSize.get(key) || 0) < 2 || letterByIndex[i]) continue;
+      const next = groupNext.get(key) || 0;
+      letterByIndex[i] = String.fromCharCode(97 + next);
+      groupNext.set(key, next + 1);
+    }
+    // 兜底：组内未在正文出现的引用，按插入序补字母（确定性，保证纯函数幂等）
+    for (let i = 0; i < meta.length; i++) {
+      const key = keyOf(i);
+      if ((groupSize.get(key) || 0) < 2 || letterByIndex[i]) continue;
+      const next = groupNext.get(key) || 0;
+      letterByIndex[i] = String.fromCharCode(97 + next);
+      groupNext.set(key, next + 1);
     }
 
     // 正文 [n] → (姓, 年{letter})；n 越界（非本文档引用锚点）原样保留
@@ -166,7 +182,14 @@ export class DocumentsService {
       return `(${meta[i].surname}, ${meta[i].year}${letterByIndex[i]})`;
     });
 
-    // 参考文献按字母序渲染（著者-年样式无序号；letter 拼进年份）
+    // 参考文献按 key（作者姓字母序→年）；同 key 组内按后缀字母序（= 正文首现序）
+    const order = meta.map((_, i) => i);
+    order.sort((a, b) => {
+      const ka = keyOf(a);
+      const kb = keyOf(b);
+      if (ka !== kb) return ka < kb ? -1 : 1;
+      return letterByIndex[a] < letterByIndex[b] ? -1 : letterByIndex[a] > letterByIndex[b] ? 1 : 0;
+    });
     const references = order.map((idx) => formatRefEntry8(meta[idx].ref, style, 0, `${meta[idx].year}${letterByIndex[idx]}`));
     return { content: contentOut, references, style, changed: true };
   }

@@ -824,6 +824,61 @@ if st in (200, 201) and isinstance(hits, list) and hits:
           all(k in h0 for k in ("content", "seq", "referenceTitle", "docName", "score", "referenceId")),
           f"keys={list(h0.keys())}")
 
+# ---------- 24. R6B 行为收紧：a/b 按正文首现序 / chunkText ≤2000 截断 ----------
+# 24.1 同作者同年两篇，正文 [1] 先引 B、[2] 后引 A → 后缀按正文出现序 (2020a)=B、(2020b)=A，列表同步
+st, rA = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "SameAuthor Paper A", "authors": ["Wei Zhang"], "year": 2020, "venue": "J1"}})
+abA = rA.get("id") if st in (200, 201) else None
+st, rB = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "SameAuthor Paper B", "authors": ["Wei Zhang"], "year": 2020, "venue": "J2"}})
+abB = rB.get("id") if st in (200, 201) else None
+st, d = req("POST", "/api/documents", {"projectId": pid, "title": "ab-order-doc"})
+abDoc = d.get("id") if st == 201 else None
+if abDoc and abA and abB:
+    # 插入序：先 B(=[1]) 后 A(=[2])
+    req("POST", f"/api/documents/{abDoc}/citations", {"referenceId": abB})
+    req("POST", f"/api/documents/{abDoc}/citations", {"referenceId": abA})
+    req("PATCH", f"/api/documents/{abDoc}", {"content": "结论见 [1]，后续 [2] 补充。"})
+    st, ra = req("POST", f"/api/documents/{abDoc}/render-citations", {"style": "apa"})
+    _c = ra.get("content", "")
+    # 正文：先出现 (Zhang, 2020a) 对应 [1]=Paper B，后 (Zhang, 2020b) 对应 [2]=Paper A
+    _pos_a = _c.find("(Zhang, 2020a)")
+    _pos_b = _c.find("(Zhang, 2020b)")
+    check("R6B·a/b 按正文首现序：[1](先引)=2020a、[2](后引)=2020b",
+          st in (200, 201) and _pos_a != -1 and _pos_b != -1 and _pos_a < _pos_b,
+          f"content={_c!r}")
+    _refs = ra.get("references", [])
+    check("R6B·a/b 文末列表同步：Paper B(2020a) 先于 Paper A(2020b)",
+          len(_refs) == 2 and "Paper B" in _refs[0] and "2020a" in _refs[0] and "Paper A" in _refs[1] and "2020b" in _refs[1],
+          f"refs={_refs}")
+    # 幂等
+    st, r1 = req("POST", f"/api/documents/{abDoc}/render-citations", {"style": "apa"})
+    st, r2 = req("POST", f"/api/documents/{abDoc}/render-citations", {"style": "apa"})
+    check("R6B·a/b 渲染幂等（同 style 两次逐字节一致）", r1 == r2, "")
+
+# 24.2 chunkText ≤2000 截断（chat SSE sources）：上传 >2000 字知识文档，读 SSE 首事件校验
+_long = "这是一段用于截断测试的长文本。" * 200  # 3000 字
+st, up = req("POST", "/api/knowledge/upload", {"projectId": pid, "name": "trunc-long-doc", "type": "text", "content": _long})
+if st in (200, 201) and up.get("id"):
+    try:
+        rq = urllib.request.Request(BASE + "/api/chat/stream",
+                                    data=json.dumps({"projectId": pid, "message": "截断测试"}).encode(),
+                                    method="POST", headers={"Content-Type": "application/json"})
+        _src = None
+        with urllib.request.urlopen(rq, timeout=30) as resp:
+            for rawline in resp:
+                line = rawline.decode().strip()
+                if line.startswith("data:") and '"sources"' in line:
+                    _src = json.loads(line[5:]).get("sources")
+                    break
+        if _src:
+            _ct = _src[0].get("chunkText", "")
+            check("R6B·chunkText 截断：长度≤2000+标记 且含截断标记、chunkSeq 保留",
+                  len(_ct) <= 2006 and _ct.endswith("…[已截断]") and "chunkSeq" in _src[0],
+                  f"len={len(_ct)} tail={_ct[-12:]!r}")
+        else:
+            print("  ⏭ R6B·chunkText 截断 — 未抓到 sources 事件（无 AI/mock 未起），跳过")
+    except Exception as e:
+        print(f"  ⏭ R6B·chunkText 截断 — SSE 读取失败（{e}），跳过")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL}")
 if FAILED:
