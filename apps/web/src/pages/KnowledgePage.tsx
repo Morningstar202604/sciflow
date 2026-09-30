@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookMarked, ChevronDown, ChevronUp, FileText, Link2, Loader2, MessageSquare, Trash2, Unlink, Upload } from 'lucide-react';
+import { BookMarked, Brain, Check, ChevronDown, ChevronUp, FileText, Link2, Loader2, MessageSquare, Quote, Trash2, Unlink, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { KnowledgeDoc, KnowledgeQueryResult, Project, Reference } from '../types';
-import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
+import type { Doc, KnowledgeDoc, KnowledgeDocDetail, KnowledgeQueryResult, KnowledgeSource, Project, Reference } from '../types';
+import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
 
 function fileToBase64(file: File): Promise<string> {
@@ -18,6 +18,238 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+/* =====================================================================
+ * 差距#24：NotebookLM 式学习/复盘（轻量版，纯前端规则生成，零依赖）
+ * ---------------------------------------------------------------------
+ * 后端未暴露「按文档取 chunk 正文 / outline」的读接口（knowledge 仅
+ * upload/list/query/bind/remove，且 query 无 AI key 时 503）。故本卡片：
+ *  - 主题/思维导图节点由文档名按分隔符规则派生；
+ *  - 测验卡为规则版（填空/问答），不调 AI，无 key 也可用；
+ *  - 待后端补 GET /knowledge/:id（chunk 正文 + outline）后，可平滑升级
+ *    为「原文关键句挖空 + 真实大纲层级」。
+ * ===================================================================== */
+interface FlashCard {
+  q: string;
+  a: string;
+}
+
+/** 从文档名派生主题方向（去扩展名后按常见分隔符切分） */
+function deriveTopics(name: string): string[] {
+  return name
+    .replace(/\.(pdf|md|txt|markdown)$/i, '')
+    .split(/[\/·•|—–\-_，,;；：:\s]+/)
+    .map((s) => s.trim())
+    .filter((t) => t && t.length >= 2)
+    .slice(0, 8);
+}
+
+/** 规则生成 3-5 张复习卡（Q=问题/挖空，A=原文/答案） */
+function buildFlashCards(docName: string, topics: string[]): FlashCard[] {
+  const cards: FlashCard[] = [];
+  cards.push({ q: `这份资料「${docName}」主要围绕哪些主题方向展开？`, a: topics.length > 0 ? topics.join('、') : docName });
+  topics.slice(0, 3).forEach((t) => {
+    cards.push({ q: `从资料名判断，它覆盖的核心主题之一是「____」`, a: t });
+  });
+  cards.push({
+    q: `复盘：读完这份资料，你能用自己的话复述 ${topics[0] || '其核心内容'} 吗？`,
+    a: '（请口头复述后对照资料原文检查要点是否遗漏）',
+  });
+  return cards.slice(0, 5);
+}
+
+/** 自绘 SVG 思维导图：根=文档名，子节点=派生主题；teal→cyan→sky 品牌色，节点可折叠 */
+function MindMap({ root, leaves }: { root: string; leaves: string[] }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const H = Math.max(140, leaves.length * 38 + 70);
+  const W = 720;
+  const rootX = 90;
+  const rootY = H / 2;
+  const leafX = 470;
+  const leafH = 26;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40">
+      {/* 连线（贝塞尔 parent→child） */}
+      {!collapsed &&
+        leaves.map((_, i) => {
+          const ly = 36 + i * 38 + leafH / 2;
+          return (
+            <path
+              key={`e-${i}`}
+              d={`M ${rootX + 110} ${rootY} C ${rootX + 220} ${rootY}, ${leafX - 60} ${ly}, ${leafX} ${ly}`}
+              fill="none"
+              stroke="#94a3b8"
+              strokeWidth={1.4}
+            />
+          );
+        })}
+      {/* 根节点（点击折叠/展开子树） */}
+      <g onClick={() => setCollapsed((v) => !v)} className="cursor-pointer">
+        <rect x={rootX} y={rootY - 22} width={220} height={44} rx={10} fill="#14b8a6" />
+        <text x={rootX + 110} y={rootY + 4} textAnchor="middle" fontSize={12} fill="#ffffff" fontWeight={600}>
+          {root.length > 16 ? root.slice(0, 16) + '…' : root}
+        </text>
+        <text x={rootX + 110} y={rootY + 36} textAnchor="middle" fontSize={9} fill="#0f766e">
+          {collapsed ? '▸ 点击展开子树' : '▾ 点击折叠'}
+        </text>
+      </g>
+      {/* 子节点（cyan→sky 交替） */}
+      {!collapsed &&
+        leaves.map((t, i) => {
+          const ly = 36 + i * 38;
+          const fill = i % 2 === 0 ? '#06b6d4' : '#0ea5e9';
+          return (
+            <g key={`n-${i}`}>
+              <rect x={leafX} y={ly} width={200} height={leafH} rx={8} fill={fill} />
+              <text x={leafX + 100} y={ly + 17} textAnchor="middle" fontSize={11} fill="#ffffff">
+                {t.length > 18 ? t.slice(0, 18) + '…' : t}
+              </text>
+            </g>
+          );
+        })}
+    </svg>
+  );
+}
+
+/** 从真实 chunk 正文按句切分挖空（纯前端规则，无 AI 降级）：取 18-80 字的完整句子，挖掉中间一段 4-8 字 */
+function buildCardsFromChunks(docName: string, detail: KnowledgeDocDetail): FlashCard[] | null {
+  const sentences: string[] = [];
+  for (const c of detail.chunks) {
+    for (const s of c.content.split(/(?<=[。！？；!?;。.])|\n+/)) {
+      const t = s.trim().replace(/^#+\s*/, '');
+      if (t.length >= 18 && t.length <= 80) sentences.push(t);
+    }
+  }
+  if (sentences.length === 0) return null;
+  // 稳定取样：按句子哈希选前 3 个分散句子（避免每次渲染抖动）
+  const picked = sentences
+    .map((s, i) => ({ s, h: (i * 2654435761) % 997 }))
+    .sort((a, b) => a.h - b.h)
+    .slice(0, 3)
+    .map((x) => x.s);
+  const cards: FlashCard[] = picked.map((s) => {
+    const start = Math.max(2, Math.floor(s.length * 0.25));
+    const len = Math.min(8, Math.max(4, Math.floor(s.length / 4)));
+    const ans = s.slice(start, start + len);
+    const q = `${s.slice(0, start)}＿＿＿${s.slice(start + len)}`;
+    return { q: `挖空填空：${q}`, a: ans };
+  });
+  cards.push({ q: `这份资料「${docName}」的核心脉络是什么？请口述后对照分块原文检查要点是否遗漏。`, a: '（答案为开放式：回看各节小标题与关键句，查漏补缺）' });
+  return cards.slice(0, 5);
+}
+
+/** 思维导图叶子：优先 outline 真实标题；无则按 chunk 序号+开头派生；都没有则文档名规则 */
+function buildLeaves(docName: string, detail: KnowledgeDocDetail | null): string[] {
+  if (detail?.outline) {
+    const heads = detail.outline.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (heads.length > 0) return heads.slice(0, 10);
+  }
+  if (detail && detail.chunks.length > 0) {
+    return detail.chunks.slice(0, 8).map((c, i) => `第${i + 1}节 · ${c.content.replace(/\s+/g, ' ').slice(0, 14)}…`);
+  }
+  return deriveTopics(docName);
+}
+
+function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
+  const [open, setOpen] = useState(false);
+  const [docId, setDocId] = useState('');
+  const [revealed, setRevealed] = useState<Record<number, boolean>>({});
+  const [detail, setDetail] = useState<KnowledgeDocDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const doc = docs.find((d) => d.id === docId) ?? null;
+
+  // 选中文档后拉真实 chunk 正文 + outline（GET /knowledge/:id）；失败则静默回退到文档名规则
+  useEffect(() => {
+    if (!docId) {
+      setDetail(null);
+      return;
+    }
+    setLoadingDetail(true);
+    setDetail(null);
+    setRevealed({});
+    api.knowledge
+      .get(docId)
+      .then(setDetail)
+      .catch(() => setDetail(null))
+      .finally(() => setLoadingDetail(false));
+  }, [docId]);
+
+  const topics = doc ? deriveTopics(doc.name) : [];
+  const cards = useMemo(() => {
+    if (!doc) return [];
+    if (detail && detail.chunks.length > 0) {
+      const fromChunks = buildCardsFromChunks(doc.name, detail);
+      if (fromChunks) return fromChunks;
+    }
+    return buildFlashCards(doc.name, topics);
+  }, [doc, detail, topics]);
+  const leaves = useMemo(() => (doc ? buildLeaves(doc.name, detail) : []), [doc, detail]);
+
+  return (
+    <Card className="p-4 sm:p-5 mb-4">
+      <SectionTitle>
+        <span className="flex items-center gap-2">
+          <Brain size={16} className="text-teal-600" /> 学习复盘
+        </span>
+      </SectionTitle>
+      <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
+        选一份资料，前端规则生成复习卡 + 思维导图（NotebookLM 式）。已接入分块取数：挖空来自原文句子，思维导图优先用真实章节标题；无 AI key 也可用。
+      </div>
+      <div className="max-w-md">
+        <select
+          value={docId}
+          onChange={(e) => {
+            setDocId(e.target.value);
+            setRevealed({});
+          }}
+          className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm bg-white dark:bg-slate-900 outline-none focus:border-teal-500"
+        >
+          <option value="">选择一份资料…</option>
+          {docs.map((d) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {loadingDetail && (
+        <div className="mt-4">
+          <Spinner label="读取分块正文…" />
+        </div>
+      )}
+
+      {doc && !loadingDetail && cards.length > 0 && (
+        <div className="mt-4">
+          <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">复习卡（点击翻面）{detail ? ' · 来自原文挖空' : ' · 文档名规则'}</div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {cards.map((c, i) => (
+              <div
+                key={i}
+                onClick={() => setRevealed((m) => ({ ...m, [i]: !m[i] }))}
+                className="cursor-pointer rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-900/50 hover:border-teal-300 transition-colors"
+              >
+                <div className="text-[10px] text-teal-600 dark:text-teal-400 mb-1">{revealed[i] ? '答案' : '问题/填空'}</div>
+                <div className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
+                  {revealed[i] ? c.a : c.q}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {doc && !loadingDetail && (
+        <div className="mt-4">
+          <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">思维导图{detail?.outline ? ' · 真实章节标题' : detail ? ' · 按分块派生' : ''}</div>
+          {leaves.length > 0 ? (
+            <MindMap root={doc.name} leaves={leaves} />
+          ) : (
+            <div className="text-xs text-slate-400">文档名过于简短，暂无可拆分的主题节点</div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
 }
 
 export function KnowledgePage({ project }: { project: Project }) {
@@ -37,6 +269,11 @@ export function KnowledgePage({ project }: { project: Project }) {
   const [bindQuery, setBindQuery] = useState('');
   // RAG 引用可点（#17）：已展开原文的来源块（按 chunkId 记录）
   const [openChunks, setOpenChunks] = useState<Record<string, boolean>>({});
+  // RAG 一键引用到论文：正在选择目标文档的来源块 + 项目文档列表 + 已引用标记
+  const [citeSource, setCiteSource] = useState<KnowledgeSource | null>(null);
+  const [citeDocs, setCiteDocs] = useState<Doc[]>([]);
+  const [citing, setCiting] = useState(false);
+  const [citedKeys, setCitedKeys] = useState<Record<string, boolean>>({});
 
   const load = async () => {
     try {
@@ -73,6 +310,40 @@ export function KnowledgePage({ project }: { project: Project }) {
   };
 
   const toggleChunk = (key: string) => setOpenChunks((m) => ({ ...m, [key]: !m[key] }));
+
+  /** RAG 一键引用：打开目标文档选择弹层（懒加载项目内论文草稿） */
+  const openCite = async (s: KnowledgeSource) => {
+    if (!s.referenceId) return; // 未绑定文献：按钮已禁用
+    setCiteSource(s);
+    try {
+      setCiteDocs(await api.documents.list(project.id));
+    } catch {
+      setCiteDocs([]);
+    }
+  };
+
+  /** 选定目标文档 → 幂等写入引用（references.addCitation 已去重） */
+  const doCite = async (docId: string) => {
+    if (!citeSource || !citeSource.referenceId) return;
+    setCiting(true);
+    try {
+      await api.references.addCitation({
+        documentId: docId,
+        referenceId: citeSource.referenceId,
+        location: 'rag:' + citeSource.docName,
+        context: (citeSource.chunkText || '').slice(0, 200),
+      });
+      const key = citeSource.chunkId || citeSource.docName;
+      setCitedKeys((m) => ({ ...m, [key]: true }));
+      toast('success', `已引用「${citeSource.docName}」到论文`);
+      setCiteSource(null);
+    } catch (e: any) {
+      setError(e?.message || '引用失败');
+    } finally {
+      setCiting(false);
+    }
+  };
+
 
   // 绑定文献搜索：前端实时过滤 title / venue / 年份（数据已在 refs）
   const filteredRefs = useMemo(() => {
@@ -316,6 +587,9 @@ export function KnowledgePage({ project }: { project: Project }) {
         </div>
       </Card>
 
+      {/* 差距#24：学习复盘（复习卡 + 思维导图，纯前端规则生成） */}
+      <StudyReviewCard docs={docs} />
+
       {/* RAG 问答 */}
       <Card className="p-4 sm:p-5">
         <SectionTitle>
@@ -376,6 +650,18 @@ export function KnowledgePage({ project }: { project: Project }) {
                               {open ? '收起原文' : '展开原文'}
                             </button>
                           )}
+                          {citedKeys[key] ? (
+                            <span className="inline-flex items-center gap-0.5 text-teal-600 dark:text-teal-400"><Check size={11} />已引用</span>
+                          ) : (
+                            <button
+                              onClick={() => openCite(s)}
+                              disabled={!s.referenceId}
+                              title={s.referenceId ? '把这段来源引用进你的论文草稿' : '先在上方资料列表把这份资料绑定到文献，再引用'}
+                              className="inline-flex items-center gap-0.5 text-teal-500 hover:underline disabled:text-slate-300 dark:disabled:text-slate-600 disabled:no-underline disabled:cursor-not-allowed"
+                            >
+                              <Quote size={11} /> 引用到论文
+                            </button>
+                          )}
                         </div>
                         <div>
                           {s.snippet}
@@ -417,6 +703,31 @@ export function KnowledgePage({ project }: { project: Project }) {
         onConfirm={confirmDelete}
         onClose={() => setDeleting(null)}
       />
+
+      {/* RAG 一键引用：选择目标论文草稿 */}
+      <Modal open={!!citeSource} onClose={() => !citing && setCiteSource(null)} title="引用到论文">
+        <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+          把来源「{citeSource?.docName}」引用进哪篇论文草稿？（已绑定文献：{citeSource?.referenceTitle || '—'}）
+        </div>
+        {citeDocs.length === 0 ? (
+          <div className="text-xs text-slate-400 py-4 text-center">本项目暂无论文草稿，请到「论文写作」新建一篇</div>
+        ) : (
+          <div className="max-h-72 overflow-y-auto space-y-1.5">
+            {citeDocs.map((d) => (
+              <button
+                key={d.id}
+                disabled={citing}
+                onClick={() => doCite(d.id)}
+                className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 flex items-center gap-2"
+              >
+                <FileText size={13} className="text-teal-500 shrink-0" />
+                <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{d.title}</span>
+                {citing && <Loader2 size={13} className="animate-spin ml-auto" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

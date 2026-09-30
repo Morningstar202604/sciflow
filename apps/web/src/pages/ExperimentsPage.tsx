@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from 'react';
-import { AlertTriangle, Beaker, Check, Copy, Loader2, Play, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, Beaker, Check, Copy, Loader2, Play, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import { ToastContext } from '../App';
 import type { Doc, Experiment, Project } from '../types';
@@ -47,6 +47,8 @@ export function ExperimentsPage({ project }: { project: Project }) {
   const [conclusionDraft, setConclusionDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<Experiment | null>(null);
+  /** 差距#23：正在「重新运行」的记录 id（列表按钮 loading 态） */
+  const [rerunningId, setRerunningId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [copiedCmd, setCopiedCmd] = useState<string>('');
   /**
@@ -111,6 +113,36 @@ export function ExperimentsPage({ project }: { project: Project }) {
   const select = (exp: Experiment) => {
     setSelected(exp);
     setConclusionDraft(exp.conclusion);
+  };
+
+  /**
+   * 差距#23 轻量版：重新运行——沿用原记录的 projectId/goal/code/documentId
+   * 再调一次 experiments.run（现有 experiment 表每次 run 即一行，列表天然是执行历史，无需新表）。
+   * 无 python3 时后端返回 error 记录并渲染既有琥珀引导卡。
+   */
+  const rerun = async (exp: Experiment) => {
+    if (rerunningId) return;
+    setRerunningId(exp.id);
+    setError('');
+    try {
+      const fresh = await api.experiments.run({
+        projectId: project.id,
+        goal: exp.goal,
+        code: exp.code,
+        documentId: exp.documentId,
+      });
+      setExps((s) => [fresh, ...s]);
+      setSelected(fresh);
+      setConclusionDraft(fresh.conclusion);
+      if (typeof fresh.memoryMonitored === 'boolean') {
+        setLastRunMem({ id: fresh.id, value: fresh.memoryMonitored });
+      }
+      toast('success', `已重新运行：实验${fresh.status === 'ok' ? '执行成功' : `状态 ${fresh.status}`}`);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setRerunningId(null);
+    }
   };
 
   const saveConclusion = async () => {
@@ -194,10 +226,13 @@ export function ExperimentsPage({ project }: { project: Project }) {
             ) : (
               <div className="space-y-2">
                 {exps.map((exp) => (
-                  <button
+                  <div
                     key={exp.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => select(exp)}
-                    className={`w-full text-left rounded-lg px-3 py-2.5 border transition-colors ${
+                    onKeyDown={(e) => e.key === 'Enter' && select(exp)}
+                    className={`w-full text-left rounded-lg px-3 py-2.5 border transition-colors cursor-pointer ${
                       selected?.id === exp.id
                         ? 'border-teal-400 bg-teal-50/70 dark:bg-teal-900/20'
                         : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
@@ -209,8 +244,20 @@ export function ExperimentsPage({ project }: { project: Project }) {
                         {exp.goal || exp.code.split('\n')[0].slice(0, 40) || '未命名实验'}
                       </span>
                       <span className="text-[11px] text-slate-400 shrink-0">{(exp.runtimeMs / 1000).toFixed(1)}s</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          rerun(exp);
+                        }}
+                        disabled={rerunningId === exp.id}
+                        title="用相同代码与目的再跑一次（执行历史即新记录）"
+                        className="shrink-0 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-teal-600 disabled:opacity-50"
+                      >
+                        {rerunningId === exp.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                        重新运行
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}

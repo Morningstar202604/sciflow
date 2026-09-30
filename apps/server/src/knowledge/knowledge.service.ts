@@ -2,7 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { randomUUID, createHash } from 'node:crypto';
 import { db } from '../db/database';
 import { knowledgeDocs, knowledgeChunks, references } from '../db/schema';
-import { eq, inArray, and } from 'drizzle-orm';
+import { eq, inArray, and, asc } from 'drizzle-orm';
 import { AiService } from '../ai/ai.service';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -59,6 +59,46 @@ export class KnowledgeService {
     return hit ? hit.id : null;
   }
 
+  /**
+   * 差距 #6 补全：标题指纹未命中时，把上传文件名自动建成一条文献（source='knowledge-upload'）并回填 referenceId。
+   * 判定逻辑（谨慎防误建）：
+   *  1) 标题取 name 去扩展名后 trim，长度必须 ≥ 4；
+   *  2) 标题含「笔记/纪要/备忘录/会议/草稿/提纲/notes/memo/minutes/agenda/todo」等词时视为非论文文档，不建；
+   *  3) 同项目标题指纹已存在则不重复建（幂等）。
+   */
+  private autoCreateReference(projectId: string, name: string): string | null {
+    const title = (name || '').replace(/\.[a-zA-Z0-9]{1,12}$/, '').trim();
+    if (title.length < 4) return null;
+    if (/笔记|纪要|备忘录|会议|草稿|提纲|notes?|memo|minutes|agenda|todo/i.test(title)) return null;
+    const fp = this.fingerprint(title);
+    if (fp) {
+      const dup = db.select().from(references).where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp))).get();
+      if (dup) return dup.id;
+    }
+    const id = randomUUID();
+    db.insert(references)
+      .values({
+        id,
+        projectId,
+        title,
+        authors: '[]',
+        year: null,
+        venue: '',
+        doi: '',
+        url: '',
+        abstract: '',
+        source: 'knowledge-upload',
+        tags: '[]',
+        citationCount: 0,
+        readingStatus: 'unread',
+        fingerprint: fp,
+        isDuplicateOf: '',
+        createdAt: Date.now(),
+      })
+      .run();
+    return id;
+  }
+
   /** 批量取 reference 摘要映射：docId -> RefSummary（列表/检索共用，避免 N+1） */
   private referenceSummaryMap(rows: { referenceId: string | null }[]): Map<string, RefSummary> {
     const refIds = [...new Set(rows.map((r) => r.referenceId).filter((x): x is string => !!x))];
@@ -89,8 +129,10 @@ export class KnowledgeService {
     if (chunks.length === 0) throw new HttpException('文档内容为空或无法解析', HttpStatus.BAD_REQUEST);
 
     const docId = randomUUID();
-    // 文献库↔知识库打通：按文档标题自动命中项目内已有文献并回填 referenceId（不强绑，未命中则为 null）
-    const referenceId = this.matchReference(projectId, name);
+    // 文献库↔知识库打通：先按文档标题指纹命中项目内已有文献回填 referenceId；
+    // 未命中且文件名像论文时（差距 #6 补全）自动建一条 source='knowledge-upload' 文献并回填
+    let referenceId = this.matchReference(projectId, name);
+    if (!referenceId) referenceId = this.autoCreateReference(projectId, name);
     // Contextual Retrieval：文档级上下文描述（文档名 + 首段要点），检索时拼在块前，显著提升命中精度
     const head = text.replace(/\s+/g, ' ').trim().slice(0, 100);
     const context = `【${name}】${head}`;
@@ -126,6 +168,41 @@ export class KnowledgeService {
       .all();
     const refMap = this.referenceSummaryMap(docs);
     return docs.map((d) => ({ ...d, reference: d.referenceId ? (refMap.get(d.referenceId) || null) : null }));
+  }
+
+  /**
+   * 学习复盘取数（波1 辅助线缺口补齐）：按 id 返回文档元信息 + 全部分块正文（按 seq 升序）+ outline。
+   * knowledge_doc 表无独立 outline 列，故 outline 从分块正文里抽取 Markdown 标题（#/##/###）派生；
+   * 无任何标题时返回 null，前端按 chunk 序号分组兜底。
+   */
+  async get(id: string) {
+    const doc = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.id, id)).get();
+    if (!doc) throw new HttpException('知识库文档不存在', HttpStatus.NOT_FOUND);
+    const chunks = db
+      .select()
+      .from(knowledgeChunks)
+      .where(eq(knowledgeChunks.docId, id))
+      .orderBy(asc(knowledgeChunks.seq))
+      .all();
+    // 从分块正文抽取 Markdown 标题行（按出现顺序去重），拼成 outline；无标题则 null
+    const headings: string[] = [];
+    for (const c of chunks) {
+      for (const line of (c.content || '').split('\n')) {
+        const m = line.match(/^\s{0,3}(#{1,3})\s+(\S.*?)\s*$/);
+        if (m) {
+          const h = m[2].trim();
+          if (h && !headings.includes(h)) headings.push(h);
+        }
+      }
+    }
+    const outline = headings.length > 0 ? headings.join('\n') : null;
+    const refMap = this.referenceSummaryMap([doc]);
+    return {
+      ...doc,
+      chunks: chunks.map((c) => ({ id: c.id, seq: c.seq, content: c.content })),
+      outline,
+      reference: doc.referenceId ? (refMap.get(doc.referenceId) || null) : null,
+    };
   }
 
   /** 手动绑定/解除文献：入参 referenceId 传 null 即解绑；绑定校验文献必须属于同一项目 */

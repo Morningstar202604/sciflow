@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import { AiService, ChatMessage, ChatStreamOptions } from '../ai/ai.service';
 import { MemoryService } from '../memory/memory.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
+import { db } from '../db/database';
+import { projects } from '../db/schema';
 
 /** RAG 来源（轻量字段，随 SSE 首事件下发给前端） */
 export interface ChatSource {
@@ -31,6 +34,15 @@ export class ChatService {
   private async contextFor(projectId?: string, question?: string, docContext?: string): Promise<{ context: string; sources: ChatSource[] }> {
     const parts: string[] = [];
     const sources: ChatSource[] = [];
+    // 差距 #22：项目级系统提示 projectPreface 拼在上下文最前（即 system prompt 开头）；无 preface 时行为完全不变
+    try {
+      if (projectId) {
+        const proj = db.select().from(projects).where(eq(projects.id, projectId)).get();
+        if (proj?.preface?.trim()) parts.push(`项目要求：${proj.preface.trim()}`);
+      }
+    } catch {
+      /* preface 不可用时忽略 */
+    }
     try {
       const mems = this.memory.list(undefined, undefined, projectId).slice(0, 4);
       if (mems.length) {

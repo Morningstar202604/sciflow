@@ -1,9 +1,20 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, gte } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { qualityReports } from '../db/schema';
+import { qualityReports, reviewComments } from '../db/schema';
 import { AiService, ReviewResult } from '../ai/ai.service';
+
+/** 7 维英文 key → 中文维度名（category 取最低分维度映射中文，差距 #7） */
+const DIM_CN: Record<string, string> = {
+  literature: '文献',
+  logic: '逻辑',
+  citation: '引用',
+  language: '语言',
+  novelty: '创新性',
+  figures: '图表',
+  format: '格式',
+};
 
 @Injectable()
 export class QualityService {
@@ -49,5 +60,68 @@ export class QualityService {
     const row = db.select().from(qualityReports).where(eq(qualityReports.id, id)).get();
     if (!row) throw new NotFoundException('评分报告不存在');
     return { ...row, scores: JSON.parse(row.scores) };
+  }
+
+  // ---------- 差距 #7：质量 feedback 结构化进 review_comment ----------
+
+  /** 把 feedback 按行/中英文分号拆成条目（每条 1-3 句的自然切分；纯本地拆分，无 AI key 亦可测） */
+  private splitFeedback(feedback: string): string[] {
+    return (feedback || '')
+      .split(/[\n;；]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 4);
+  }
+
+  /**
+   * 读取该文档最新 quality_report，把 feedback 拆条写入 review_comment：
+   * - reviewer 固定 'AI 质量评审'，status='open'，sectionRef 留空
+   * - category 取 scores 最低分维度的中文名（并列时取最后一个最低维，稳定即可）
+   * 幂等键（最简设计）：同 documentId + reviewer='AI 质量评审' + created_at >= report.createdAt
+   * —— 即「同一份报告导出过就不再重复插入」；新报告（时间戳更晚）可再次导出。
+   * 无报告返回 {created:0, existing:0}。
+   */
+  exportComments(documentId: string) {
+    const report = this.latest(documentId);
+    if (!report) return { created: 0, existing: 0 };
+    const entries = this.splitFeedback(report.feedback || '');
+    const scores = (report.scores || {}) as Record<string, number>;
+    let minDim = 'novelty';
+    let minVal = Infinity;
+    for (const [k, v] of Object.entries(scores)) {
+      const n = Number(v);
+      if (!Number.isNaN(n) && n <= minVal) {
+        minVal = n;
+        minDim = k;
+      }
+    }
+    const category = DIM_CN[minDim] || '综合';
+    const existing = db
+      .select()
+      .from(reviewComments)
+      .where(and(eq(reviewComments.documentId, documentId), eq(reviewComments.reviewer, 'AI 质量评审'), gte(reviewComments.createdAt, report.createdAt)))
+      .all();
+    if (existing.length > 0) {
+      return { created: 0, existing: existing.length };
+    }
+    const now = Date.now();
+    let created = 0;
+    for (const text of entries) {
+      db.insert(reviewComments)
+        .values({
+          id: randomUUID(),
+          documentId,
+          reviewer: 'AI 质量评审',
+          commentText: text,
+          category,
+          status: 'open',
+          responseText: '',
+          sectionRef: '',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      created++;
+    }
+    return { created, existing: 0 };
   }
 }

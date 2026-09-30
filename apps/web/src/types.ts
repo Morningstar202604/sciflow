@@ -197,6 +197,33 @@ export interface KnowledgeQueryResult {
   sources: KnowledgeSource[];
 }
 
+/** 学习复盘取数（GET /api/knowledge/:id）：单文档全部分块正文（按 seq 升序） */
+export interface KnowledgeChunkDetail {
+  id: string;
+  seq: number;
+  content: string;
+}
+
+/** GET /api/knowledge/:id 响应：文档元信息 + chunks + outline（Markdown 标题派生，无标题为 null） */
+export interface KnowledgeDocDetail extends KnowledgeDoc {
+  chunks: KnowledgeChunkDetail[];
+  outline: string | null;
+}
+
+/** POST /api/knowledge/search：纯检索命中块（BM25+向量，不调 LLM，与 query 的 sources 同源字段） */
+export interface KnowledgeSearchHit {
+  id: string;
+  docId: string;
+  content: string;
+  seq: number;
+  context: string;
+  docName: string;
+  score: number;
+  referenceId: string | null;
+  referenceTitle: string | null;
+}
+
+
 export interface ExtractedPaper {
   ref: string;
   title: string;

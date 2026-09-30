@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
   CalendarClock, Check, FilePen, Forward, Globe2, Library, Loader2, Mail, MessageSquareReply, Plus, Send, Trash2,
 } from 'lucide-react';
 import { api } from '../api/client';
+import { ToastContext } from '../App';
 import type { Doc, Journal, JournalMatchResult, ParseEmailResult, Project, ReviewComment, SubmissionStatus, SubmissionTrack } from '../types';
 import { Badge, Button, Card, ErrorBox, Input, Select, Spinner, Textarea } from '../components/ui';
 import { HBar } from '../components/charts';
@@ -88,6 +89,9 @@ export function SubmissionPage({ project }: { project: Project }) {
   const [parsing, setParsing] = useState(false);
   const [parseResult, setParseResult] = useState<ParseEmailResult | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // 任务2：每条投稿关联文档的 open 审稿意见数（预取，用于「从审稿意见记录事件」按钮禁用态）
+  const [openCounts, setOpenCounts] = useState<Record<string, number>>({});
+  const toast = useContext(ToastContext);
 
   // 拉取项目内文档，否则「选择项目内论文」下拉恒空
   useEffect(() => {
@@ -116,10 +120,27 @@ export function SubmissionPage({ project }: { project: Project }) {
     api.research.reviewComments(selDoc).then(setComments).catch(() => setComments([]));
   }, [selDoc]);
 
-  // 投稿跟踪列表加载
+  // 投稿跟踪列表加载（同时预取每条投稿关联文档的 open 审稿意见数）
   const loadTracks = useCallback(async () => {
     try {
-      setTracks(await api.submission.listTracks(project.id));
+      const list = await api.submission.listTracks(project.id);
+      setTracks(list);
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        list.map(async (t) => {
+          if (!t.documentId) {
+            counts[t.id] = 0;
+            return;
+          }
+          try {
+            const cs = await api.research.reviewComments(t.documentId);
+            counts[t.id] = cs.filter((c) => c.status === 'open').length;
+          } catch {
+            counts[t.id] = 0;
+          }
+        }),
+      );
+      setOpenCounts(counts);
     } catch (e: any) {
       setError(e?.message || '投稿列表加载失败');
     }
@@ -253,6 +274,62 @@ export function SubmissionPage({ project }: { project: Project }) {
       revDeadline: '',
     });
     setTab('track');
+  };
+
+  /** 任务1：选刊一键登记——把匹配到的期刊带入「投稿跟踪」登记表单并切 Tab */
+  const pickJournalToSubmit = (j: JournalMatchResult['journals'][number]) => {
+    // journalsMatch 结果不带 id；若已在期刊库，按名称反查 journalId 以关联一审周期
+    const libHit = j.isInLibrary ? lib.find((x) => x.name === j.name) : undefined;
+    setRegForm({
+      docId: selDoc, // 当前写作文档上下文（期刊推荐 Tab 所选文档）；无则留空由用户选
+      journalId: libHit?.id || '',
+      journalName: j.name,
+      date: todayISO(),
+      status: 'submitted',
+      note: `来自期刊推荐：${(j.reason || '').slice(0, 80)}`,
+      prevId: '',
+      revDeadline: '',
+    });
+    setTab('track');
+    toast('success', `已把「${j.name}」带入登记表单，核对后点「登记投稿」`);
+  };
+
+  /** 任务2：按 open 审稿意见的 category 推断应推进到的投稿状态（与既有 major/minor 枚举对齐） */
+  const inferStatusFromComments = (comments: ReviewComment[]): SubmissionStatus => {
+    const cats = comments.map((c) => (c.category || '').toLowerCase());
+    if (cats.some((c) => /major|大修|大改/.test(c))) return 'major_revision';
+    if (cats.some((c) => /minor|小修|小改/.test(c))) return 'minor_revision';
+    return 'external_review';
+  };
+
+  /** 任务2：从审稿意见直连投稿事件——读关联文档 open 意见，推断状态并追加一条事件 */
+  const recordFromReview = async (t: SubmissionTrack) => {
+    if (!t.documentId) {
+      setError('该投稿未关联论文文档，无法读取审稿意见');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const all = await api.research.reviewComments(t.documentId);
+      const open = all.filter((c) => c.status === 'open');
+      if (open.length === 0) {
+        setError('该稿件没有待处理（open）的审稿意见');
+        return;
+      }
+      const status = inferStatusFromComments(open);
+      await api.submission.addTrackEvent(t.id, {
+        status,
+        date: Date.now(),
+        note: `来自审稿意见：${open.length} 条 open`,
+      });
+      toast('success', `已按 ${open.length} 条 open 审稿意见记录「${STATUS_META[status].label}」事件`);
+      await loadTracks();
+    } catch (e: any) {
+      setError(e?.message || '记录审稿事件失败');
+    } finally {
+      setBusy(false);
+    }
   };
 
   /** 卡片上「设置/修改截止日」：PATCH revisionDeadline */
@@ -530,6 +607,18 @@ export function SubmissionPage({ project }: { project: Project }) {
                             )}
                           </div>
                         )}
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            onClick={() => pickJournalToSubmit(j)}
+                            className="inline-flex items-center gap-1 text-xs rounded-md bg-teal-600 text-white px-2.5 py-1 hover:bg-teal-700"
+                            title="把这本期刊带入「投稿跟踪」登记表单"
+                          >
+                            <Send size={12} /> 投它
+                          </button>
+                          {!j.isInLibrary && (
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500">未入期刊库，登记时可手动补录以获取一审周期</span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -612,6 +701,20 @@ export function SubmissionPage({ project }: { project: Project }) {
                     </button>
                     <button className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline" onClick={() => { setEmailFor(emailFor === t.id ? null : t.id); setParseResult(null); }}>
                       <Mail size={11} className="inline mr-0.5" />解析邮件
+                    </button>
+                    <button
+                      className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline disabled:text-slate-300 dark:disabled:text-slate-600 disabled:cursor-not-allowed disabled:no-underline"
+                      disabled={!t.documentId || (openCounts[t.id] || 0) === 0 || busy}
+                      title={
+                        !t.documentId
+                          ? '该投稿未关联论文文档'
+                          : (openCounts[t.id] || 0) === 0
+                            ? '该稿件文档没有待处理（open）的审稿意见'
+                            : `按 ${openCounts[t.id]} 条 open 审稿意见自动推断状态并记录事件`
+                      }
+                      onClick={() => recordFromReview(t)}
+                    >
+                      <MessageSquareReply size={11} className="inline mr-0.5" />审稿→事件{openCounts[t.id] ? `（${openCounts[t.id]}）` : ''}
                     </button>
                     <button className="text-slate-300 hover:text-rose-500" title="删除" onClick={() => removeTrack(t.id)}>
                       <Trash2 size={13} />

@@ -589,14 +589,16 @@ export class AiService {
   // ---------- Phase 1：Planner / ReAct / Reflexion ----------
 
   /** 研究计划生成（对标 GPT Researcher planner）：zod 校验失败时回退标准计划 */
-  async generatePlan(topic: string): Promise<{
+  async generatePlan(topic: string, preface = ''): Promise<{
     objective: string;
     researchQuestions: string[];
     searchStrategy: { keywords: string[]; minPapers: number; depth: string };
     draftingPlan: { sections: string[]; wordCount: number };
     risks: string[];
   }> {
-    const raw = await this.complete([{ role: 'user', content: prompts.PLAN_RESEARCH(topic) }], { temperature: 0.4, model: 'strong', context: 'generatePlan' });
+    // preface 为空时 effTopic === topic，行为与之前完全一致；仅 Planner 首轮注入项目要求（差距 #22）
+    const effTopic = preface ? `项目要求：${preface}\n\n研究主题：${topic}` : topic;
+    const raw = await this.complete([{ role: 'user', content: prompts.PLAN_RESEARCH(effTopic) }], { temperature: 0.4, model: 'strong', context: 'generatePlan' });
     const fallback = {
       objective: `围绕「${topic}」完成一篇系统性综述`,
       researchQuestions: [topic],

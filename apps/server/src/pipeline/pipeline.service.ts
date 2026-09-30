@@ -211,7 +211,8 @@ export class PipelineService {
     const { hits, trace } = await this.orchestrator.researchAgents(taskId, task.topic, plan);
     db.update(pipelineTasks).set({ trace: JSON.stringify(trace), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
     if (hits.length > 0) {
-      this.references.import(task.projectId, hits);
+      // 差距 #6：ResearchAgent hits 自动入库（source='pipeline-research'，标题指纹命中同项目则跳过，多轮重跑幂等）
+      this.references.importPipelineHits(task.projectId, hits);
     }
     const refs = this.references.list(task.projectId);
     const summary = refs.length

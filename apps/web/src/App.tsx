@@ -4,7 +4,7 @@ import {
   BookOpen, Brain, Beaker, FlaskConical, LayoutDashboard, Menu, MessageSquare, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
 } from 'lucide-react';
 import { api } from './api/client';
-import type { Project } from './types';
+import type { KnowledgeDoc, Project, Reference } from './types';
 import { Button, Input, Modal, Spinner, ErrorBox, ToastViewport, ConfirmDialog, type ToastItem, type ToastKind } from './components/ui';
 // 路由级代码分割：所有页面懒加载（首屏只加载当前视图，大厂 SPA 标准）
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
@@ -104,6 +104,7 @@ function AppInner() {
   const [projectQuery, setProjectQuery] = useState('');
   const [commandOpen, setCommandOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false); // 移动端抽屉侧栏
+  const [writingDocTitle, setWritingDocTitle] = useState(''); // 任务6：写作页当前文档名（面包屑第三段）
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('sciflow-theme') as 'light' | 'dark') || 'light');
 
   // ---- 全局 Toast 反馈 ----
@@ -130,6 +131,18 @@ function AppInner() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('sciflow-theme', theme);
   }, [theme]);
+
+  // 任务6：写作面包屑补文档层级——写作页且带 ?doc= 时拉取文档名；WritingPage 内部切文档会改 ?doc=，这里随参数变化刷新
+  useEffect(() => {
+    if (view === 'writing' && selectedDocId) {
+      api.documents
+        .get(selectedDocId)
+        .then((d) => setWritingDocTitle(d.title || ''))
+        .catch(() => setWritingDocTitle(''));
+    } else {
+      setWritingDocTitle('');
+    }
+  }, [view, selectedDocId]);
 
   const loadProjects = useCallback(async (attempt = 1) => {
     try {
@@ -381,9 +394,16 @@ function AppInner() {
               <span className="text-sm text-slate-700 dark:text-slate-200 font-medium">设置</span>
             ) : currentProject ? (
               <div className="flex items-center gap-1.5 text-sm min-w-0">
-                <span className="text-slate-400 truncate max-w-[220px]">{currentProject.name}</span>
+                <span className="text-slate-400 truncate max-w-[120px] sm:max-w-[220px]">{currentProject.name}</span>
                 <ChevronRight size={14} className="text-slate-300 shrink-0" />
                 <span className="text-slate-900 dark:text-slate-100 font-medium whitespace-nowrap">{VIEW_LABELS[view]}</span>
+                {/* 任务6：写作页补文档层级「{项目} > 论文写作 > {文档名}」 */}
+                {view === 'writing' && writingDocTitle && (
+                  <>
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                    <span className="text-slate-500 dark:text-slate-300 truncate max-w-[120px] sm:max-w-[260px]">{writingDocTitle}</span>
+                  </>
+                )}
               </div>
             ) : (
               <span className="text-sm text-slate-400">未选择项目</span>
@@ -434,7 +454,7 @@ function AppInner() {
         </div>
 
         {/* ============ Cmd+K 命令面板（大厂标配：搜索式快速跳转） ============ */}
-        {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} onNavigate={(v) => setView(v)} onNewProject={() => { setCommandOpen(false); setShowNewProject(true); }} />}
+        {commandOpen && <CommandPalette projectId={currentProjectId} onClose={() => setCommandOpen(false)} onNavigate={(v) => setView(v)} onNewProject={() => { setCommandOpen(false); setShowNewProject(true); }} />}
 
         {/* 全局 Toast 反馈 */}
         <ToastViewport items={toasts} onDone={(id) => setToasts((s) => s.filter((t) => t.id !== id))} />
@@ -481,8 +501,8 @@ function AppInner() {
   );
 }
 
-/** Cmd+K 命令面板：搜索导航项 + 快捷动作 */
-function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => void; onNavigate: (v: View) => void; onNewProject: () => void }) {
+/** Cmd+K 命令面板：搜索导航项 + 快捷动作 + 内容搜索（文献/知识库） */
+function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onClose: () => void; onNavigate: (v: View) => void; onNewProject: () => void; projectId: string | null }) {
   const [q, setQ] = useState('');
   const { theme, toggle } = useContext(ThemeContext);
   const commands = useMemo(() => {
@@ -496,6 +516,47 @@ function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => 
 
   const filtered = commands.filter((c) => !q.trim() || c.label.toLowerCase().includes(q.trim().toLowerCase()));
   const [active, setActive] = useState(0);
+
+  /* ---- 差距#18：内容搜索（文献 references.search + 知识库 list 前端过滤） ---- */
+  // 后端未暴露 knowledge.search 单端，知识库退化为 list 后按文档名前端过滤；
+  // 文献走 references.search（服务端检索）。两者并行，250ms 防抖。
+  const [docHits, setDocHits] = useState<Reference[]>([]);
+  const [kbHits, setKbHits] = useState<KnowledgeDoc[]>([]);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    const query = q.trim();
+    setDocHits([]);
+    setKbHits([]);
+    if (!projectId || query.length < 2) {
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      const [refRes, docRes] = await Promise.allSettled([
+        api.references.search(query, 6, projectId),
+        api.knowledge.list(projectId),
+      ]);
+      if (cancelled) return;
+      const refs = refRes.status === 'fulfilled' ? refRes.value : [];
+      const allDocs = docRes.status === 'fulfilled' ? docRes.value : [];
+      const kb = allDocs.filter((d) => d.name.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
+      setDocHits(refs);
+      setKbHits(kb);
+      setSearching(false);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [q, projectId]);
+
+  const goTo = (v: View) => {
+    onNavigate(v);
+    onClose();
+  };
+
   // 键盘导航：↑↓ 移动选中，Enter 执行（与底部提示一致）
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -526,8 +587,10 @@ function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => 
           />
           <kbd className="text-[10px] text-slate-400 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5">Esc</kbd>
         </div>
-        <div className="max-h-80 overflow-y-auto py-2">
-          {filtered.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-400">没有匹配的命令</div>}
+        <div className="max-h-96 overflow-y-auto py-2">
+          {filtered.length === 0 && docHits.length === 0 && kbHits.length === 0 && !searching && (
+            <div className="px-4 py-6 text-center text-sm text-slate-400">没有匹配的命令或内容</div>
+          )}
           {filtered.map((c, i) => (
             <button
               key={c.id}
@@ -539,6 +602,42 @@ function CommandPalette({ onClose, onNavigate, onNewProject }: { onClose: () => 
               <span className="text-[11px] text-slate-400">{c.group}</span>
             </button>
           ))}
+
+          {/* 差距#18：内容搜索结果（文献 / 知识库文档） */}
+          {searching && <div className="px-4 py-2 text-[11px] text-slate-400">搜索内容…</div>}
+          {!searching && q.trim().length >= 2 && (docHits.length > 0 || kbHits.length > 0) && (
+            <>
+              <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800 px-4 text-[10px] font-medium uppercase tracking-wider text-slate-400">
+                内容
+              </div>
+              {docHits.map((r) => (
+                <button
+                  key={`ref-${r.id}`}
+                  onClick={() => goTo('literature')}
+                  className="w-full flex items-center justify-between gap-2 px-4 py-1.5 text-left text-[13px] hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors"
+                >
+                  <span className="min-w-0">
+                    <span className="text-slate-700 dark:text-slate-200 truncate block">{r.title}</span>
+                    <span className="text-[11px] text-slate-400">{[r.venue, r.year].filter(Boolean).join(' · ')}</span>
+                  </span>
+                  <span className="text-[10px] text-teal-500 shrink-0">文献 → 文献调研</span>
+                </button>
+              ))}
+              {kbHits.map((d) => (
+                <button
+                  key={`kb-${d.id}`}
+                  onClick={() => goTo('knowledge')}
+                  className="w-full flex items-center justify-between gap-2 px-4 py-1.5 text-left text-[13px] hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors"
+                >
+                  <span className="min-w-0">
+                    <span className="text-slate-700 dark:text-slate-200 truncate block">{d.name}</span>
+                    <span className="text-[11px] text-slate-400">{d.type} · {d.chunkCount} 分块</span>
+                  </span>
+                  <span className="text-[10px] text-sky-500 shrink-0">知识库 → 知识库</span>
+                </button>
+              ))}
+            </>
+          )}
         </div>
         <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 flex items-center gap-3">
           <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">↑↓</kbd> 选择</span>

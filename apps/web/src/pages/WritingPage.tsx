@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { BookOpen, Bot, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Gauge, Languages, ListTree, Loader2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
+import { BookOpen, Bot, Check, ChevronRight, ClipboardCheck, Crosshair, Eye, FileText, FlaskConical, Gauge, History, Languages, ListTree, Loader2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, ArrowDownToLine, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { ChatPanel } from './ChatPanel';
 import { useContext } from 'react';
@@ -11,6 +11,94 @@ import { ToastContext } from '../App';
 import type { CitationRow, Doc, Experiment, Outline, Project, QualityReport, Reference, ResearchDesignResult, ReviewComment, SimulatedReviewResult } from '../types';
 import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Select, Spinner, Textarea, downloadBase64, downloadText, jsonText } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
+
+/* =====================================================================
+ * 前端自实现参考文献样式（零依赖；与后端 formatCitation 同构，扩展到 8 种）
+ * authors 为 JSON 字符串数组；加粗/斜体以纯文本近似
+ * ===================================================================== */
+type CiteStyleMeta = { value: string; label: string; inText: string; numbered: boolean };
+const CITE_STYLES: CiteStyleMeta[] = [
+  { value: 'apa', label: 'APA 7', inText: '(Author, Year)', numbered: false },
+  { value: 'ieee', label: 'IEEE', inText: '[n]', numbered: true },
+  { value: 'vancouver', label: 'Vancouver', inText: '[n]', numbered: true },
+  { value: 'gbt', label: 'GB/T 7714', inText: '[n]', numbered: true },
+  { value: 'nature', label: 'Nature', inText: '[n]', numbered: true },
+  { value: 'chicago', label: 'Chicago 著者-年', inText: '(Surname Year)', numbered: false },
+  { value: 'springer', label: 'Springer', inText: '[n]', numbered: true },
+  { value: 'acs', label: 'ACS', inText: '[n]', numbered: true },
+];
+
+function parseAuthorArr(authors: string): string[] {
+  try {
+    const a = JSON.parse(authors || '[]');
+    return Array.isArray(a) ? a.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+/** "First Middle Last" -> "Last" */
+function surnameOf(a: string): string {
+  const parts = a.trim().split(/\s+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : a;
+}
+/** "First Middle Last" -> "F. M." */
+function initialsOf(a: string): string {
+  const parts = a.trim().split(/\s+/).filter(Boolean);
+  parts.pop();
+  return parts.map((p) => p.charAt(0).toUpperCase()).join('. ') + (parts.length ? '.' : '');
+}
+
+type RefLite = { title: string; authors: string; year: number | null; venue: string; doi: string };
+
+/** 单条参考文献条目渲染（文末列表）。inText 由 CITE_STYLES 描述，正文锚点恒为 [n] */
+function formatRefEntry(ref: RefLite, format: string, index: number): string {
+  const arr = parseAuthorArr(ref.authors);
+  const year = ref.year ? `${ref.year}` : 'n.d.';
+  const venue = ref.venue || '';
+  const doi = ref.doi ? ` https://doi.org/${ref.doi}` : '';
+  const t = ref.title || 'Untitled';
+
+  // 作者串的几种约定
+  const apaAuthors = arr.length === 0 ? 'Anonymous' : arr.length === 1 ? arr[0] : `${arr[0]} et al.`;
+  const iniOf = (a: string) => initialsOf(a).replace(/\.\s?/g, '');
+  const ieeeAuthors = arr.map((a) => (iniOf(a) ? `${initialsOf(a)} ${surnameOf(a)}` : surnameOf(a))).join(', ');
+  const vanAuthors = arr.map((a) => `${surnameOf(a)} ${iniOf(a)}`.trim()).join(', ');
+  const semiAuthors = arr.map((a) => `${surnameOf(a)}${iniOf(a) ? `, ${initialsOf(a)}` : ''}`).join('; ');
+  const gbtAuthors = arr.length === 0 ? '佚名' : arr.length === 1 ? arr[0] : arr.length > 3 ? `${arr[0]} 等` : arr.join(', ');
+
+  switch (format) {
+    case 'ieee':
+      return `[${index}] ${ieeeAuthors || 'Anonymous'} "${t},"${venue ? ` ${venue},` : ''} ${year}.${doi}`;
+    case 'vancouver':
+      return `${index}. ${vanAuthors || 'Anonymous'} ${t}.${venue ? ` ${venue}.` : ''} ${year}.${doi}`;
+    case 'gbt':
+      return `[${index}] ${gbtAuthors}. ${t}[J].${venue ? ` ${venue},` : ''} ${year}.${doi}`;
+    case 'nature': {
+      const names = arr.slice(0, 6).map((a) => `${iniOf(a)} ${surnameOf(a)}`.trim()).join(', ');
+      return `[${index}] ${names || 'Anonymous'}${arr.length > 6 ? ' et al.' : ''}. ${t}. ${venue} ${year}.${doi}`;
+    }
+    case 'chicago': {
+      const names =
+        arr.length === 0 ? 'Anonymous' : arr.length === 1 ? arr[0] : arr.length === 2 ? `${arr[0]} and ${arr[1]}` : `${arr.slice(0, -1).join(', ')}, and ${arr[arr.length - 1]}`;
+      return `${names}. ${year}. "${t}."${venue ? ` ${venue}.` : ''}${doi}`;
+    }
+    case 'springer':
+    case 'acs':
+      return `[${index}] ${semiAuthors || 'Anonymous'}. ${t}. ${venue} ${year}.${doi}`;
+    case 'apa':
+    default:
+      return `${apaAuthors} (${year}). ${t}.${venue ? ` ${venue}.` : ''}${doi}`;
+  }
+}
+
+/** 版本快照类型与 diff 逻辑拆至独立 chunk（VersionDiffModal，仅打开对比时加载） */
+import type { VersionSnapshot } from './VersionDiffModal';
+const VersionDiffModal = lazy(() => import('./VersionDiffModal').then((m) => ({ default: m.VersionDiffModal })));
+
+/** 取编辑器 textarea DOM 节点（ui.tsx 的 Textarea 未透传 ref，用 id 定位，不改 ui.tsx） */
+function getEditorTa(): HTMLTextAreaElement | null {
+  return typeof document === 'undefined' ? null : (document.getElementById('sciflow-editor') as HTMLTextAreaElement | null);
+}
 
 export function WritingPage({ project, initialDocId }: { project: Project; initialDocId: string | null }) {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -56,6 +144,11 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [citePickerOpen, setCitePickerOpen] = useState(false);
   const [addingCiteId, setAddingCiteId] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* —— 版本历史 / 左右栏 diff —— */
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [diffModalOpen, setDiffModalOpen] = useState(false);
+  const [diffA, setDiffA] = useState('');
+  const [diffB, setDiffB] = useState('current');
   const [showNewDoc, setShowNewDoc] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState('');
   const [creatingDoc, setCreatingDoc] = useState(false);
@@ -194,6 +287,29 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     [qualityReport],
   );
 
+  /** 版本快照列表：doc.versions 历史快照 + 当前编辑态（v=doc.version）。历史快照 content 为旧正文 */
+  const snapshots = useMemo<VersionSnapshot[]>(() => {
+    if (!doc) return [];
+    const arr = jsonText<{ version: number; content: string; updatedAt: number }[]>(doc.versions || '[]', []);
+    const hist = arr.map((s) => ({ version: s.version, content: s.content ?? '', updatedAt: s.updatedAt }));
+    return [...hist, { version: doc.version, content, updatedAt: doc.updatedAt, current: true }];
+  }, [doc, content]);
+
+  const openDiffModal = () => {
+    setDiffModalOpen(true);
+    if (!diffA) {
+      const histKeys = snapshots.filter((s) => !s.current).map((s) => `v${s.version}`);
+      setDiffA(histKeys[histKeys.length - 1] || 'current');
+      setDiffB('current');
+    }
+  };
+
+  const restoreSnapshot = (s: VersionSnapshot) => {
+    setContent(s.content);
+    toast('success', `已恢复到 v${s.version}（防抖自动保存将写回）`);
+    setDiffModalOpen(false);
+  };
+
   const createDoc = async () => {
     const title = newDocTitle.trim();
     if (!title) return;
@@ -270,19 +386,115 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     setPolishResult(null);
   };
 
-  const addCitation = async (referenceId: string) => {
-    await run(async () => {
-      await api.documents.addCitation(docId!, { referenceId, location: 'current', context: content.slice(-200) });
-      setCitations(await api.documents.citations(docId!));
+  /** 在编辑器当前选区/光标处插入文本（锚点与实验结论共用），插入后光标落到插入内容末尾 */
+  const spliceIntoCursor = useCallback(
+    (insert: string): number => {
+      const ta = getEditorTa();
+      let start = ta?.selectionStart ?? content.length;
+      let end = ta?.selectionEnd ?? content.length;
+      if (Number.isNaN(start) || start < 0) start = end = content.length;
+      const sel = content.slice(start, end);
+      const next = content.slice(0, start) + sel + insert + content.slice(end);
+      setContent(next);
+      const caret = start + sel.length + insert.length;
+      requestAnimationFrame(() => {
+        if (ta) {
+          ta.focus();
+          ta.selectionStart = ta.selectionEnd = caret;
+        }
+      });
+      return caret;
+    },
+    [content],
+  );
+
+  /** 任务1：基于选区/光标插入引用锚点 [n]（n=citations 顺序号 1-based）。
+   *  - 未引用过：追加 citation 行（location=anchor:n，context=锚点前后各60字），n=追加后序号
+   *  - 已引用过：不重复加行，仅在正文补一个 [n]（同一引用可多次锚定） */
+  const insertCitationAnchor = async (referenceId: string) => {
+    if (!docId) return;
+    const ta = getEditorTa();
+    const start = ta?.selectionStart ?? content.length;
+    const end = ta?.selectionEnd ?? content.length;
+    const existing = citations.findIndex((c) => c.referenceId === referenceId);
+    const n = existing >= 0 ? existing + 1 : citations.length + 1;
+    const marker = `[${n}]`;
+    const sel = content.slice(start, end);
+    const next = content.slice(0, start) + sel + marker + content.slice(end);
+    const caret = start + sel.length + marker.length;
+    setContent(next);
+    requestAnimationFrame(() => {
+      if (ta) {
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = caret;
+      }
     });
+    if (existing < 0) {
+      setAddingCiteId(referenceId);
+      try {
+        const mIdx = next.indexOf(marker, start);
+        const ctx =
+          next.slice(Math.max(0, mIdx - 60), mIdx) + `⟦${marker}⟧` + next.slice(mIdx + marker.length, mIdx + marker.length + 60);
+        await api.references.addCitation({ documentId: docId, referenceId, location: `anchor:${n}`, context: ctx });
+        setCitations(await api.documents.citations(docId));
+        toast('success', `已加入引用并插入正文锚点 [${n}]`);
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setAddingCiteId(null);
+      }
+    } else {
+      toast('success', `已在光标处追加引用锚点 [${n}]`);
+    }
   };
 
-  const exportRefs = (format: string) =>
-    run(async () => {
-      const list = await api.documents.exportCitations(docId!, format);
-      setExported(list);
-      setExportFormat(format);
-    });
+  /** 任务4：把关联实验的结论（+首图 Markdown）插入正文光标处 */
+  const insertExperimentIntoBody = (exp: Experiment) => {
+    if (!exp.conclusion && !exp.figures?.[0]) {
+      toast('info', '该实验暂无结论或结果图可插入');
+      return;
+    }
+    let block = `\n\n**实验结论${exp.goal ? `（${exp.goal}）` : ''}**\n\n`;
+    if (exp.conclusion) block += `${exp.conclusion}\n\n`;
+    if (exp.figures?.[0]) block += `![实验结果图](${exp.figures[0]})\n\n`;
+    spliceIntoCursor(block);
+    toast('success', '实验结论已插入正文光标处');
+  };
+
+  /** 任务2：前端按所选样式渲染文末参考文献列表（8 种自实现，按 citations 顺序） */
+  const buildExportedList = useCallback(
+    (format: string): string[] =>
+      citations.map((c, i) =>
+        formatRefEntry(
+          { title: c.reference.title, authors: c.reference.authors, year: c.reference.year, venue: c.reference.venue, doi: c.reference.doi },
+          format,
+          i + 1,
+        ),
+      ),
+    [citations],
+  );
+
+  // 任务2：引用列表变化或切换样式时，自动按当前样式刷新文末列表预览（bibtex 仍手动拉后端）
+  useEffect(() => {
+    if (exportFormat !== 'bibtex' && citations.length > 0) {
+      setExported(buildExportedList(exportFormat));
+    }
+  }, [citations, exportFormat, buildExportedList]);
+
+  const exportRefs = async (format: string) => {
+    setExportFormat(format);
+    setError('');
+    // bibtex 是整块 .bib，仍交后端；其余 8 种样式纯前端按 citations 顺序渲染
+    if (format === 'bibtex') {
+      try {
+        setExported(await api.documents.exportCitations(docId!, 'bibtex'));
+      } catch (e: any) {
+        setError(e.message);
+      }
+      return;
+    }
+    setExported(buildExportedList(format));
+  };
 
   /** 导出 Word(.docx)——交稿/投稿刚需 */
   const exportWord = async () => {
@@ -677,6 +889,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           <div className={`flex-1 min-h-0 ${editorMode === 'split' ? 'flex' : ''}`}>
             {editorMode !== 'preview' && (
               <Textarea
+                id="sciflow-editor"
                 className={`flex-1 border-0 rounded-none focus:ring-0 focus:border-0 p-4 text-[13.5px] leading-relaxed ${editorMode === 'split' ? 'w-1/2 border-r border-slate-100 dark:border-slate-800' : 'w-full'}`}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
@@ -1074,9 +1287,41 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                         {exp.conclusion && (
                           <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{exp.conclusion}</div>
                         )}
+                        {(exp.conclusion || exp.figures?.[0]) && (
+                          <button
+                            className="mt-1.5 inline-flex items-center gap-1 text-teal-600 dark:text-teal-400 hover:underline text-[11px]"
+                            onClick={() => insertExperimentIntoBody(exp)}
+                            title="把结论与首图插入正文当前光标处"
+                          >
+                            <ArrowDownToLine size={11} /> 插入到正文光标处
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 版本历史（任务3：左右栏 diff 对比 + 命名 + 恢复） */}
+          <div className="mb-4">
+            <button
+              className="w-full flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5"
+              onClick={() => setVersionsOpen((v) => !v)}
+            >
+              <span className="flex items-center gap-1"><History size={12} className="text-teal-600" /> 版本历史</span>
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                {snapshots.length > 1 ? `${snapshots.length} 个快照 · ` : ''}{versionsOpen ? '收起 ▾' : '展开 ▸'}
+              </span>
+            </button>
+            {versionsOpen && (
+              <div className="text-xs space-y-1.5">
+                <Button variant="outline" className="text-xs w-full" onClick={openDiffModal} disabled={snapshots.length < 2}>
+                  <History size={12} /> 左右栏对比版本
+                </Button>
+                {snapshots.length < 2 && (
+                  <div className="text-slate-400 dark:text-slate-500">再保存一次内容变更后才会产生可对比的历史快照。</div>
                 )}
               </div>
             )}
@@ -1137,10 +1382,13 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             ) : (
               <select
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1.5 text-xs bg-white dark:bg-slate-900"
-                onChange={(e) => e.target.value && addCitation(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value) insertCitationAnchor(e.target.value);
+                  e.target.value = '';
+                }}
                 value=""
               >
-                <option value="">选择文献加入引用…</option>
+                <option value="">先在正文点光标，再选文献插入 [n]…</option>
                 {refs.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.title.slice(0, 40)}
@@ -1153,11 +1401,19 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             </Button>
             {citations.length > 0 && (
               <div className="mt-2">
-                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">已引用 {citations.length} 条</div>
-                <div className="max-h-24 overflow-y-auto space-y-1">
-                  {citations.map((c) => (
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">已引用 {citations.length} 条（序号即正文 [n]）</div>
+                <div className="max-h-28 overflow-y-auto space-y-1">
+                  {citations.map((c, i) => (
                     <div key={c.id} className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 rounded px-2 py-1">
+                      <span className="shrink-0 font-mono text-teal-600 dark:text-teal-400">[{i + 1}]</span>
                       <span className="truncate flex-1">{c.reference.title}</span>
+                      <button
+                        title="在正文光标处再插一个锚点"
+                        className="shrink-0 text-slate-400 hover:text-teal-600"
+                        onClick={() => insertCitationAnchor(c.referenceId)}
+                      >
+                        <Crosshair size={12} />
+                      </button>
                       {c.verified ? <Badge tone="green">DOI✓</Badge> : <Badge>未核验</Badge>}
                     </div>
                   ))}
@@ -1167,20 +1423,24 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             <div className="flex gap-1.5 mt-2">
               <Select
                 className="flex-1 text-xs"
-                options={[
-                  { value: 'apa', label: 'APA' },
-                  { value: 'ieee', label: 'IEEE' },
-                  { value: 'vancouver', label: 'Vancouver' },
-                  { value: 'gbt', label: 'GB/T 7714' },
-                  { value: 'bibtex', label: 'BibTeX (.bib)' },
-                ]}
+                options={[...CITE_STYLES.map((s) => ({ value: s.value, label: s.label })), { value: 'bibtex', label: 'BibTeX (.bib)' }]}
                 value={exportFormat}
                 onChange={(v) => exportRefs(v)}
               />
               <Button variant="outline" className="text-xs" onClick={() => exportRefs(exportFormat)} disabled={citations.length === 0}>
-                导出引用
+                渲染列表
               </Button>
             </div>
+            {(() => {
+              const meta = CITE_STYLES.find((s) => s.value === exportFormat);
+              if (!meta) return null;
+              return (
+                <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                  文中引用：<span className="font-mono text-slate-500 dark:text-slate-400">{meta.inText}</span>
+                  {!meta.numbered && '（锚点仍为 [n]，列表按引用序渲染）'}
+                </div>
+              );
+            })()}
             {exported.length > 0 && (
               <div className="mt-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded p-2 text-xs text-slate-600 dark:text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap">
                 {exported.map((e, i) => (
@@ -1231,32 +1491,33 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
         ) : (
           <div className="max-h-80 overflow-y-auto space-y-1.5 pr-0.5">
             {refs.map((r) => {
-              const cited = citations.some((c) => c.referenceId === r.id);
+              const citedIdx = citations.findIndex((c) => c.referenceId === r.id);
+              const cited = citedIdx >= 0;
               return (
                 <div key={r.id} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 p-2">
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs text-slate-700 dark:text-slate-200 truncate">{r.title}</div>
+                    <div className="text-xs text-slate-700 dark:text-slate-200 truncate">
+                      {cited && <span className="font-mono text-teal-600 dark:text-teal-400 mr-1">[{citedIdx + 1}]</span>}
+                      {r.title}
+                    </div>
                     <div className="text-[10px] text-slate-400 dark:text-slate-500">{[r.year, r.venue].filter(Boolean).join(' · ')}</div>
                   </div>
                   {cited ? (
-                    <Badge tone="green">已添加</Badge>
+                    <Button
+                      variant="outline"
+                      className="text-xs px-2 py-1 shrink-0"
+                      title="在正文光标处再插一个 [n] 锚点"
+                      onClick={() => insertCitationAnchor(r.id)}
+                    >
+                      <Crosshair size={11} /> 插锚点
+                    </Button>
                   ) : (
                     <Button
                       variant="outline"
                       className="text-xs px-2 py-1 shrink-0"
+                      title="加入引用并在正文光标处插入锚点"
                       disabled={addingCiteId === r.id || !docId}
-                      onClick={async () => {
-                        if (!docId) return;
-                        setAddingCiteId(r.id);
-                        try {
-                          await api.references.addCitation({ documentId: docId, referenceId: r.id, location: 'current', context: content.slice(-200) });
-                          setCitations(await api.documents.citations(docId));
-                        } catch (e: any) {
-                          setError(e.message);
-                        } finally {
-                          setAddingCiteId(null);
-                        }
-                      }}
+                      onClick={() => insertCitationAnchor(r.id)}
                     >
                       {addingCiteId === r.id ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
                     </Button>
@@ -1270,6 +1531,23 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
       {/* 新建文档弹窗（空态与主界面共用） */}
       {newDocDialog}
+
+      {/* 版本左右栏 Diff（独立 lazy chunk，打开时才加载）：两栏对比 + 命名 + 恢复 */}
+      <Suspense fallback={null}>
+        {diffModalOpen && docId && (
+          <VersionDiffModal
+            open={diffModalOpen}
+            onClose={() => setDiffModalOpen(false)}
+            docId={docId}
+            snapshots={snapshots}
+            diffA={diffA}
+            diffB={diffB}
+            onSelectA={setDiffA}
+            onSelectB={setDiffB}
+            onRestore={restoreSnapshot}
+          />
+        )}
+      </Suspense>
 
       {/* 删除文档确认弹窗 */}
       <ConfirmDialog

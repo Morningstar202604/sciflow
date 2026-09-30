@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { sql, eq, and } from 'drizzle-orm';
 import { randomUUID, createHash } from 'node:crypto';
+import { z } from 'zod';
 import { db } from '../db/database';
 import { references, screeningQueue, extractionFields, extractionValues, documents, citations } from '../db/schema';
 import { AiService } from '../ai/ai.service';
@@ -124,8 +125,8 @@ export class ReferencesService {
     return { ok: true };
   }
 
-  /** PATCH /:id：阅读状态 / 标签（tags 为 JSON 字符串） */
-  update(id: string, patch: { readingStatus?: string; tags?: string }) {
+  /** PATCH /:id：阅读状态 / 标签 / 文献笔记（notes 为 string|null，zod 校验） */
+  update(id: string, patch: { readingStatus?: string; tags?: string; notes?: string | null }) {
     const existing = this.get(id);
     const set: Record<string, unknown> = {};
     if (patch.readingStatus !== undefined) {
@@ -142,8 +143,98 @@ export class ReferencesService {
       }
       set.tags = patch.tags;
     }
+    if (patch.notes !== undefined) {
+      // 路线图差距 #11：笔记只接受 string|null（null 等价清空），其余类型 400
+      const r = z.union([z.string(), z.null()]).safeParse(patch.notes);
+      if (!r.success) throw new BadRequestException('notes 必须为字符串或 null');
+      set.notes = patch.notes ?? '';
+    }
     db.update(references).set(set).where(eq(references.id, id)).run();
     return this.get(id);
+  }
+
+  // ---------- 批量 DOI 本地核验（差距 #20，不调外部 API） ----------
+
+  /** 宽松 DOI 格式（满足 Crossref 常见形态即可，本地正则校验） */
+  static DOI_RE = /^10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+$/;
+
+  /**
+   * 批量核验文献 DOI 格式：
+   * - 合法：readingStatus 为 unread/reading/read 任一者置为 cited（已是 cited 不动）
+   * - 非法/空：不动状态，进 invalid
+   * - ids 中不存在的：进 skipped
+   * 幂等：重复调用对已是 cited 的合法文献不再写库。
+   */
+  verifyDois(ids: string[]) {
+    const valid: { id: string; title: string; doi: string }[] = [];
+    const invalid: { id: string; title: string; doi: string }[] = [];
+    const skipped: { id: string; title: string; doi: string }[] = [];
+    for (const id of ids || []) {
+      const row = db.select().from(references).where(eq(references.id, id)).get();
+      if (!row) {
+        skipped.push({ id, title: '', doi: '' });
+        continue;
+      }
+      const doi = (row.doi || '').trim();
+      if (doi && ReferencesService.DOI_RE.test(doi)) {
+        if (row.readingStatus && row.readingStatus !== 'cited') {
+          db.update(references).set({ readingStatus: 'cited' }).where(eq(references.id, id)).run();
+        }
+        valid.push({ id, title: row.title, doi });
+      } else {
+        invalid.push({ id, title: row.title, doi });
+      }
+    }
+    return { valid, invalid, skipped };
+  }
+
+  // ---------- 流水线研究 hits 自动入库（差距 #6） ----------
+
+  /**
+   * 流水线 ResearchAgent 命中入库：与手动 create 同款标题指纹，
+   * 但同项目指纹已存在则整条跳过（不产生 isDuplicateOf 副本），source 标记 pipeline-research。
+   * 幂等：多轮重跑因指纹命中恒为 skipped。
+   */
+  importPipelineHits(projectId: string, hits: { title: string; authors?: string[]; year?: number | null; venue?: string; doi?: string; url?: string; abstract?: string; citationCount?: number }[]) {
+    let imported = 0;
+    let skipped = 0;
+    for (const hit of hits || []) {
+      if (!hit.title) continue;
+      const fp = this.fingerprint(hit.title);
+      if (fp) {
+        const dup = db
+          .select()
+          .from(references)
+          .where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp)))
+          .get();
+        if (dup) {
+          skipped++;
+          continue;
+        }
+      }
+      db.insert(references)
+        .values({
+          id: randomUUID(),
+          projectId,
+          title: hit.title,
+          authors: JSON.stringify(hit.authors || []),
+          year: hit.year ?? null,
+          venue: hit.venue || '',
+          doi: hit.doi || '',
+          url: hit.url || '',
+          abstract: hit.abstract || '',
+          source: 'pipeline-research',
+          tags: '[]',
+          citationCount: hit.citationCount || 0,
+          readingStatus: 'unread',
+          fingerprint: fp,
+          isDuplicateOf: '',
+          createdAt: Date.now(),
+        })
+        .run();
+      imported++;
+    }
+    return { imported, skipped, total: (hits || []).length };
   }
 
   // ---------- 引用写入（幂等：document+reference 已存在则返回既有记录） ----------

@@ -30,10 +30,61 @@ const AGENT_MAP: Record<string, { role: string; tone: 'blue' | 'green' | 'teal' 
   complete: { role: 'Manager', tone: 'slate' },
 };
 
+/* =====================================================================
+ * 大纲模板（差距 #17）：前端常量，零 AI 依赖
+ * 流水线后端 create 只收 topic 文本，故选中模板后把章节结构
+ * 以纯文本形式追加到 topic 末尾，Planner/写作 Agent 自然遵循。
+ * ===================================================================== */
+interface OutlineTemplate {
+  label: string;
+  desc: string;
+  sections: { title: string; hint: string }[];
+}
+const OUTLINE_TEMPLATES: Record<string, OutlineTemplate> = {
+  review: {
+    label: '综述（Review）',
+    desc: '系统性梳理某领域研究现状，重综合轻实证',
+    sections: [
+      { title: '摘要', hint: '研究背景、范围与主要结论概览' },
+      { title: '引言与背景', hint: '问题由来、综述范围与意义' },
+      { title: '相关工作', hint: '按主题/方法脉络组织已有文献' },
+      { title: '综述方法', hint: '检索策略、纳入与排除标准' },
+      { title: '主题分类与讨论', hint: '横向归纳各流派观点与分歧' },
+      { title: '挑战与未来方向', hint: '未解决问题与研究机会' },
+      { title: '结论', hint: '总结领域图景与启示' },
+    ],
+  },
+  imrad: {
+    label: 'IMRaD 实证研究',
+    desc: '实证论文标准四段式结构',
+    sections: [
+      { title: '摘要', hint: '目的、方法、结果、结论浓缩' },
+      { title: '引言 Introduction', hint: '研究问题、假设与贡献' },
+      { title: '方法 Methods', hint: '数据、实验设置与评价指标（可复现）' },
+      { title: '结果 Results', hint: '客观呈现实验发现与图表' },
+      { title: '讨论 Discussion', hint: '结果解读、与前人工作对比、局限' },
+      { title: '结论 Conclusion', hint: '主要结论与未来工作' },
+    ],
+  },
+  grant: {
+    label: '基金提案',
+    desc: '科研项目申请书/开题论证结构',
+    sections: [
+      { title: '立项依据', hint: '研究背景、国内外现状与科学问题' },
+      { title: '研究目标与内容', hint: '总目标、具体目标与拟解决关键问题' },
+      { title: '研究方案与技术路线', hint: '方法路径、实验设计与可行性分析' },
+      { title: '预期成果与考核指标', hint: '论文/专利/数据集等可量化产出' },
+      { title: '研究基础与工作条件', hint: '前期积累、团队与平台条件' },
+      { title: '进度安排与经费预算', hint: '分年度计划与预算说明' },
+    ],
+  },
+};
+
 export function PipelinePage({ project }: { project: Project }) {
   const [tasks, setTasks] = useState<PipelineTask[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [topic, setTopic] = useState('');
+  const [templateKey, setTemplateKey] = useState<'' | keyof typeof OUTLINE_TEMPLATES>('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -120,8 +171,13 @@ export function PipelinePage({ project }: { project: Project }) {
     setCreating(true);
     setError('');
     try {
-      const t = await api.pipeline.create(project.id, topic.trim());
-      toast('success', '流水线已启动，Agent 编排开始执行');
+      // 差距#17：选中大纲模板后，把章节结构以文本形式追加到主题，供 Planner/写作 Agent 遵循
+      const tpl = templateKey ? OUTLINE_TEMPLATES[templateKey] : null;
+      const finalTopic = tpl
+        ? `${topic.trim()}\n\n[写作大纲模板：${tpl.label}] 请按以下章节结构组织全文：\n${tpl.sections.map((s, i) => `${i + 1}. ${s.title}——${s.hint}`).join('\n')}`
+        : topic.trim();
+      const t = await api.pipeline.create(project.id, finalTopic);
+      toast('success', tpl ? `流水线已启动（模板：${tpl.label}），Agent 编排开始执行` : '流水线已启动，Agent 编排开始执行');
       setTasks((s) => [t, ...s]);
       setActiveId(t.id);
       setTopic('');
@@ -182,6 +238,43 @@ export function PipelinePage({ project }: { project: Project }) {
         <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
           输入研究主题 → 多智能体自动完成 文献调研 → 大纲确认 → 分章起草 → 7 维质量门（&lt;80 自动回炉打磨）→ 润色定稿 → 引用格式化
         </div>
+
+        {/* 差距#17：大纲模板选择（前端常量，零 AI） */}
+        <div className="mb-3">
+          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">大纲模板（可选）</div>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(OUTLINE_TEMPLATES).map(([key, tpl]) => (
+              <button
+                key={key}
+                onClick={() => setTemplateKey((cur) => (cur === key ? '' : (key as typeof cur)))}
+                title={tpl.desc}
+                className={`rounded-lg border px-2.5 py-1.5 text-xs transition-all ${
+                  templateKey === key
+                    ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/25 text-teal-700 dark:text-teal-200 border-l-[3px] border-l-teal-500'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-teal-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                }`}
+              >
+                {tpl.label}
+              </button>
+            ))}
+          </div>
+          {templateKey && (
+            <div className="mt-2 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 px-2.5 py-2">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                已选择模板：<span className="font-medium text-teal-600 dark:text-teal-400">{OUTLINE_TEMPLATES[templateKey].label}</span>
+                <span className="text-slate-400 dark:text-slate-500">（{OUTLINE_TEMPLATES[templateKey].desc}）</span>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {OUTLINE_TEMPLATES[templateKey].sections.map((s, i) => (
+                  <span key={i} className="inline-flex items-center rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-600 dark:text-slate-300" title={s.hint}>
+                    {i + 1}. {s.title}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-col sm:flex-row gap-2">
           <Input placeholder="输入研究主题，如：大语言模型在生物医学中的应用" value={topic} onChange={(e) => setTopic(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createTask()} />
           <Button onClick={createTask} disabled={creating || !topic.trim()} className="shrink-0">

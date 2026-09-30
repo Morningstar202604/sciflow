@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
@@ -30,10 +30,14 @@ export class ProjectsService {
     return row;
   }
 
-  update(id: string, patch: { name?: string; description?: string }) {
-    const existing = this.get(id);
-    const row = { ...existing, ...patch, updatedAt: Date.now() };
-    db.update(projects).set(row).where(eq(projects.id, id)).run();
+  update(id: string, patch: { name?: string; description?: string; preface?: string }) {
+    this.get(id);
+    // preface（项目级系统提示，差距 #22）只接受字符串，其余字段维持既有透传行为
+    if (patch.preface !== undefined && typeof patch.preface !== 'string') {
+      throw new BadRequestException('preface 必须为字符串');
+    }
+    const clean: Record<string, unknown> = { ...patch, updatedAt: Date.now() };
+    db.update(projects).set(clean).where(eq(projects.id, id)).run();
     return this.get(id);
   }
 

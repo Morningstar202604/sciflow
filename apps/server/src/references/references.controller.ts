@@ -76,9 +76,15 @@ export class ReferencesController {
     return this.references.addCitation(body);
   }
 
-  /** 更新阅读状态 / 标签 */
+  /** 批量 DOI 本地格式核验（差距 #20）：合法者 readingStatus→cited；须声明在 :id 动态路由之前 */
+  @Post('verify-dois')
+  verifyDois(@Body() body: { ids: string[] }) {
+    return this.references.verifyDois(body.ids || []);
+  }
+
+  /** 更新阅读状态 / 标签 / 文献笔记 */
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: { readingStatus?: string; tags?: string }) {
+  update(@Param('id') id: string, @Body() body: { readingStatus?: string; tags?: string; notes?: string | null }) {
     return this.references.update(id, body);
   }
 

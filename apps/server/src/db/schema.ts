@@ -8,6 +8,8 @@ export const projects = sqliteTable('project', {
   status: text('status').default('active'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
+  /** 项目级系统提示（projectPreface）：写作/规划时注入 system prompt 开头（差距 #22） */
+  preface: text('preface').default(''),
 });
 
 /** 文档（论文草稿，多版本历史以 JSON 保存在 versions） */
@@ -42,6 +44,7 @@ export const references = sqliteTable('reference', {
   readingStatus: text('reading_status').default('unread'), // unread | reading | read | cited
   fingerprint: text('fingerprint').default(''), // 标题归一化后哈希（项目内去重依据）
   isDuplicateOf: text('is_duplicate_of').default(''), // 重复时指向已存在文献 id
+  notes: text('notes').default(''), // 文献笔记（路线图差距 #11）
   createdAt: integer('created_at').notNull(),
 });
 

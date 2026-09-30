@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { agentRuns } from '../db/schema';
+import { agentRuns, pipelineTasks, projects } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
 import { QualityService } from '../research/quality.service';
@@ -88,12 +88,26 @@ export class AgentOrchestratorService {
   }
 
   // ---------- ① Planner Agent：研究计划 ----------
+  /** 差距 #22：按 taskId → projectId 取项目级系统提示 projectPreface（空串表示不注入） */
+  private projectPreface(taskId: string): string {
+    try {
+      const task = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, taskId)).get();
+      if (!task) return '';
+      const proj = db.select().from(projects).where(eq(projects.id, task.projectId)).get();
+      return proj?.preface?.trim() || '';
+    } catch {
+      return '';
+    }
+  }
+
   async plannerAgent(taskId: string, topic: string): Promise<{ verifiedTopic: string; plan: ResearchPlan }> {
+    const preface = this.projectPreface(taskId);
     const res = await this.runAgent(taskId, 'planner', 'planner#research-plan', `主题：${topic}`, async () => {
       const verifiedTopic = await this.ai.chat(
         `请把以下研究主题提炼为一句可执行的研究题目（直接输出题目本身，不要解释）：\n${topic}`,
       );
-      const plan = await this.ai.generatePlan(topic);
+      // 仅 Planner 首轮系统提示注入项目要求（preface 为空时 generatePlan 行为完全不变）
+      const plan = await this.ai.generatePlan(topic, preface);
       return {
         output: `目标：${plan.objective}；子问题 ${plan.researchQuestions.length} 个；章节 ${plan.draftingPlan.sections.length} 个`,
         detail: { verifiedTopic, objective: plan.objective, researchQuestions: plan.researchQuestions, searchStrategy: plan.searchStrategy, draftingPlan: plan.draftingPlan, risks: plan.risks },

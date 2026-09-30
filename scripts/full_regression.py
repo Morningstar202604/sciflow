@@ -591,6 +591,119 @@ if pid and docid:
         st, cl = req("GET", f"/api/documents/{docid}/citations")
         check("连通·citations 写入后可在文档引用列表读到", st == 200 and any(c.get("reference", {}).get("id") == connRef for c in cl), f"st={st} n={len(cl) if isinstance(cl, list) else 0}")
 
+# ---------- 21. 路线图后端差距（#6/#7/#11/#20/#22 + 知识库上传自动建条目） ----------
+if pid:
+    # 21.1 文献笔记 notes（差距 #11）：PATCH 写入 + 列表返回 + null 清空
+    st, nr = req("POST", "/api/references", {"projectId": pid, "hit": {
+        "title": f"Notes Gap Smoke {int(time.time()) % 100000}", "authors": ["Note Author"], "year": 2024, "venue": "Note Venue"}})
+    noteRefId = nr.get("id") if st in (200, 201) else None
+    if noteRefId:
+        st, d = req("PATCH", f"/api/references/{noteRefId}", {"notes": "重点：需复核样本量与统计方法", "readingStatus": "reading"})
+        check("差距#11·PATCH notes 与既有字段并存", st == 200 and d.get("notes") == "重点：需复核样本量与统计方法" and d.get("readingStatus") == "reading", f"st={st} {str(d)[:140]}")
+        st, lst = req("GET", f"/api/references?projectId={pid}")
+        nrow = next((r for r in lst if r.get("id") == noteRefId), None) if st == 200 else None
+        check("差距#11·列表返回 notes", st == 200 and nrow and nrow.get("notes") == "重点：需复核样本量与统计方法", f"st={st} row={str(nrow)[:120] if nrow else None}")
+        st, d = req("PATCH", f"/api/references/{noteRefId}", {"notes": None})
+        check("差距#11·notes=null 接受并清空", st == 200 and d.get("notes") == "", f"st={st} {str(d)[:100]}")
+
+    # 21.2 项目级 preface（差距 #22）：PATCH 落库 + GET 返回（system prompt 注入为运行时行为，无 AI key 黑盒仅验字段）
+    st, d = req("PATCH", f"/api/projects/{pid}", {"preface": "项目要求：必须引用近三年中文核心文献"})
+    check("差距#22·PATCH preface 写入", st == 200 and d.get("preface") == "项目要求：必须引用近三年中文核心文献", f"st={st} {str(d)[:140]}")
+    st, pl = req("GET", "/api/projects")
+    prow = next((p for p in pl if p.get("id") == pid), None)
+    check("差距#22·项目列表返回 preface", st == 200 and prow and prow.get("preface") == "项目要求：必须引用近三年中文核心文献", f"st={st}")
+
+    # 21.3 批量 DOI 本地核验（差距 #20）：合法置 cited / 非法不动 / 不存在进 skipped
+    st, ok = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "DOI Valid Gap Paper", "authors": ["V Auth"], "year": 2023, "doi": "10.1234/abcd.2024.x"}})
+    vId = ok.get("id") if st in (200, 201) else None
+    st, bad = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "DOI Bad Gap Paper", "authors": ["B Auth"], "year": 2023, "doi": "not-a-doi"}})
+    bId = bad.get("id") if st in (200, 201) else None
+    if vId and bId:
+        st, d = req("POST", "/api/references/verify-dois", {"ids": [vId, bId, "__no_such_ref__"]})
+        check("差距#20·verify-dois 合法/非法/不存在三分桶",
+              st in (200, 201) and len(d.get("valid", [])) == 1 and d["valid"][0]["id"] == vId
+              and len(d.get("invalid", [])) == 1 and d["invalid"][0]["id"] == bId
+              and len(d.get("skipped", [])) == 1 and d["skipped"][0]["id"] == "__no_such_ref__",
+              f"st={st} {str(d)[:200]}")
+        st, r = req("GET", f"/api/references/{vId}")
+        check("差距#20·合法 DOI 文献 readingStatus→cited", st == 200 and r.get("readingStatus") == "cited", f"st={st} {str(r)[:120]}")
+        st, r = req("GET", f"/api/references/{bId}")
+        check("差距#20·非法 DOI 文献状态不动", st == 200 and r.get("readingStatus") != "cited", f"st={st} {str(r)[:120]}")
+
+    # 21.4 质量 feedback 拆条进 review_comment（差距 #7，幂等）
+    # 无 AI key 时直接向冒烟 SQLite 种一条 quality_report 做确定性验证（SCIFLOW_DB_PATH 指向冒烟库）
+    db_path = os.environ.get("SCIFLOW_DB_PATH", "")
+    if docid and db_path and os.path.exists(db_path):
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.execute("DELETE FROM review_comment WHERE document_id=? AND reviewer='AI 质量评审'", (docid,))
+        conn.execute(
+            "INSERT INTO quality_report (id, document_id, total_score, scores, feedback, created_at) VALUES (?,?,?,?,?,?)",
+            (f"seed-g21-{int(time.time())}", docid, 62,
+             json.dumps({"literature": 80, "logic": 75, "citation": 70, "language": 72, "novelty": 45, "figures": 68, "format": 74}),
+             "文献综述部分缺少近三年工作；\n创新性不足，对比基线不充分；\n图表标注不规范，建议统一配色。",
+             int(time.time() * 1000)))
+        conn.commit(); conn.close()
+        st, d1 = req("POST", f"/api/quality/export-comments?documentId={docid}")
+        check("差距#7·export-comments 首次拆条创建", st in (200, 201) and d1.get("created", 0) >= 1 and d1.get("existing") == 0, f"st={st} {str(d1)[:160]}")
+        st, d2 = req("POST", f"/api/quality/export-comments?documentId={docid}")
+        check("差距#7·export-comments 二次幂等不重复插", st in (200, 201) and d2.get("created") == 0 and d2.get("existing", 0) >= 1, f"st={st} {str(d2)[:160]}")
+    else:
+        st, d = req("POST", f"/api/quality/export-comments?documentId={docid or ''}")
+        info("差距#7·export-comments（无报告/未设 SCIFLOW_DB_PATH）", f"st={st} {str(d)[:120]}")
+
+    # 21.5 知识库上传自动建文献条目（差距 #6 补全）
+    st, d = req("POST", "/api/knowledge/upload", {"projectId": pid, "name": "Attention Is All You Need Deep Read.pdf", "type": "text",
+        "content": "本文深入解读 Transformer 架构的自注意力机制。多头注意力并行计算不同子空间的表示，位置编码注入顺序信息，在机器翻译任务上取得了当时最优的结果并显著加速训练。"})
+    check("差距#6b·上传论文名自动建文献并回填 referenceId", st in (200, 201) and d.get("referenceId"), f"st={st} {str(d)[:180]}")
+    autoRef = d.get("referenceId") if st in (200, 201) else None
+    if autoRef:
+        st, r = req("GET", f"/api/references/{autoRef}")
+        check("差距#6b·自动条目 source=knowledge-upload 且标题已去扩展名",
+              st == 200 and r.get("source") == "knowledge-upload" and r.get("title") == "Attention Is All You Need Deep Read",
+              f"st={st} {str(r)[:160]}")
+    st, d = req("POST", "/api/knowledge/upload", {"projectId": pid, "name": "本周工作笔记汇总", "type": "text",
+        "content": "本周工作记录与会议讨论要点随手记。内容较长以保证分块成功，多写一些关于项目进展的流水账文字凑够分块阈值。"})
+    check("差距#6b·笔记类文件名不误建（referenceId 为空）", st in (200, 201) and not d.get("referenceId"), f"st={st} {str(d)[:180]}")
+
+# ---------- 22. 本轮新增：知识库 chunk 取数（GET /:id）与纯检索（POST /search） ----------
+if pid:
+    # 22.1 上传一份带 Markdown 标题的资料，用于验证 chunks + outline 派生
+    st, ku = req("POST", "/api/knowledge/upload", {"projectId": pid, "name": "R5C 分块取数样本.md", "type": "text",
+        "content": "## 引言\n图神经网络通过消息传递聚合邻居节点特征，近年来被广泛应用于推荐与风控。\n\n## 方法\n我们设计了一种新的消息传递聚合算子，在表示能力与计算效率之间取得平衡。\n\n## 实验\n在节点分类与链接预测任务上进行了充分实验，与主流基线对比均有提升。"})
+    kbid = ku.get("id") if st in (200, 201) else None
+    check("R5C·样本资料上传成功供取数验证", st in (200, 201) and bool(kbid), f"st={st} id={kbid}")
+
+    # 22.2 GET /:id：返回 chunks 数组 + outline（从 ## 标题派生）
+    if kbid:
+        st, det = req("GET", f"/api/knowledge/{kbid}")
+        check("R5C·GET /knowledge/:id 200 且含 chunks 数组", st == 200 and isinstance(det, dict) and isinstance(det.get("chunks"), list) and len(det.get("chunks", [])) >= 1,
+              f"st={st} keys={list(det.keys()) if isinstance(det, dict) else det} nchunks={len(det.get('chunks', [])) if isinstance(det, dict) else '?'}")
+        # chunks 按 seq 升序
+        seqs = [c.get("seq") for c in det.get("chunks", [])] if st == 200 else []
+        check("R5C·GET /:id chunks 按 seq 升序", seqs == sorted(seqs) and len(seqs) >= 1, f"seqs={seqs}")
+        # outline 抽取到真实章节标题
+        outline = det.get("outline") if st == 200 else None
+        check("R5C·GET /:id outline 抽到 ## 标题（引言/方法/实验）",
+              bool(outline) and all(h in outline for h in ("引言", "方法", "实验")), f"outline={str(outline)[:120]}")
+
+    # 22.3 POST /search：纯本地 BM25 检索（无 AI key 也应返回，不依赖 LLM）
+    st, hits = req("POST", "/api/knowledge/search", {"projectId": pid, "query": "消息传递聚合算子"})
+    check("R5C·POST /knowledge/search 返回命中文块数组",
+          st in (200, 201) and isinstance(hits, list) and len(hits) >= 1, f"st={st} n={len(hits) if isinstance(hits, list) else hits}")
+    if st in (200, 201) and isinstance(hits, list) and hits:
+        h0 = hits[0]
+        check("R5C·search 命中块含 docName/score/referenceId 字段",
+              all(k in h0 for k in ("docName", "score", "referenceId")), f"keys={list(h0.keys())}")
+
+    # 22.4 POST /search 空项目：空数组不报错
+    st, hits2 = req("POST", "/api/knowledge/search", {"projectId": "__no_such_project_r5c__", "query": "聚合"})
+    check("R5C·search 空项目返回空数组不报错", st in (200, 201) and isinstance(hits2, list) and len(hits2) == 0, f"st={st} {str(hits2)[:80]}")
+
+    # 22.5 GET /:id 不存在：404 不崩
+    st, nf = req("GET", "/api/knowledge/__no_such_doc_r5c__")
+    check("R5C·GET /:id 不存在返回 404", st == 404, f"st={st} {str(nf)[:80]}")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL}")
 if FAILED:

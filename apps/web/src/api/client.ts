@@ -1,6 +1,6 @@
 import type {
   Project, Doc, Reference, ReferenceInput, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
-  KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
+  KnowledgeDoc, KnowledgeQueryResult, KnowledgeDocDetail, KnowledgeSearchHit, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
   AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool, PipelineStepConfig, QualityWeightItem,
   ScreeningItem, ExtractionField, ExtractionTableResult, ReviewComment, Journal, JournalMatchResult, Experiment,
   SubmissionTrack, SubmissionStatus, ParseEmailResult, ReferenceGraph, BibtexImportResult, DashboardOverview,
@@ -211,6 +211,11 @@ export const api = {
       request<KnowledgeDoc>(`/api/knowledge/upload`, { method: 'POST', body: JSON.stringify({ projectId, name, type, content }) }),
     query: (projectId: string, question: string) =>
       request<KnowledgeQueryResult>(`/api/knowledge/query`, { method: 'POST', body: JSON.stringify({ projectId, question }) }),
+    /** 学习复盘取数：单文档全部分块正文（按 seq 升序）+ outline（Markdown 标题派生） */
+    get: (id: string) => request<KnowledgeDocDetail>(`/api/knowledge/${id}`),
+    /** 纯检索（不调 LLM，本地 BM25+向量）：返回命中文块，供来源卡片「引用到论文」/命令面板使用 */
+    search: (projectId: string, query: string) =>
+      request<KnowledgeSearchHit[]>(`/api/knowledge/search`, { method: 'POST', body: JSON.stringify({ projectId, query }) }),
     /** 文献库↔知识库打通（#5）：绑定/解除文献，referenceId 传 null 解除 */
     bind: (id: string, referenceId: string | null) =>
       request<KnowledgeDoc>(`/api/knowledge/${id}/bind`, { method: 'PATCH', body: JSON.stringify({ referenceId }) }),

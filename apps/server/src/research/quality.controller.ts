@@ -21,6 +21,12 @@ export class QualityController {
     return this.quality.latest(documentId);
   }
 
+  /** 差距 #7：把最新报告 feedback 结构化拆条写入 review_comment（幂等：同报告重复导出不新增） */
+  @Post('export-comments')
+  exportComments(@Query('documentId') documentId: string) {
+    return this.quality.exportComments(documentId);
+  }
+
   @Get(':id')
   get(@Param('id') id: string) {
     return this.quality.get(id);

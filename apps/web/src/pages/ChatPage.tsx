@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import {
-  Brain, Check, Copy, FileText, Loader2, MessageSquare, Navigation, Pencil, PlayCircle, RotateCcw, Send, Sparkles, Square, X,
+  Brain, Check, Copy, Download, FileText, Loader2, MessageSquare, Navigation, Pencil, PlayCircle, Quote, RotateCcw, Send, Sparkles, Square, X,
 } from 'lucide-react';
 import { api, streamChat } from '../api/client';
-import type { IntentResult, Project } from '../types';
-import { Card, ErrorBox } from '../components/ui';
+import { ToastContext } from '../App';
+import type { Doc, IntentResult, KnowledgeDoc, Project } from '../types';
+import { Card, ErrorBox, Modal } from '../components/ui';
 
 /** 消息结构（含主流智能体范式的附加字段：思考流/来源/用量/follow-up/状态） */
 interface Msg {
@@ -73,8 +74,17 @@ export function ChatPage({ project }: { project: Project }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const stopRef = useRef<(() => void) | null>(null);
+  const toast = useContext(ToastContext);
+  // RAG 一键引用：知识库文档名→referenceId 映射（SSE 来源只带 docName/score，按名反查绑定文献）
+  const [kbByName, setKbByName] = useState<Map<string, KnowledgeDoc>>(new Map());
+  // 引用目标选择弹层 + 已引用标记
+  const [citeSource, setCiteSource] = useState<{ docName: string; score: number } | null>(null);
+  const [citing, setCiting] = useState(false);
+  const [citedKeys, setCitedKeys] = useState<Record<string, boolean>>({});
 
-  // 加载项目文档列表（关联上下文用）+ 模型列表（模型选择器）
+  const hasConversation = messages.some((m) => m.role === 'user');
+
+  // 加载项目文档列表（关联上下文用）+ 模型列表（模型选择器）+ 知识库文档名→绑定文献映射（来源卡引用）
   useEffect(() => {
     api.documents
       .list(project.id)
@@ -83,6 +93,10 @@ export function ChatPage({ project }: { project: Project }) {
     api.settings
       .get()
       .then((s) => setModels(s.ai.models || []))
+      .catch(() => undefined);
+    api.knowledge
+      .list(project.id)
+      .then((list) => setKbByName(new Map(list.map((d) => [d.name, d]))))
       .catch(() => undefined);
   }, [project.id]);
 
@@ -218,6 +232,76 @@ export function ChatPage({ project }: { project: Project }) {
     }
   };
 
+  /** RAG 一键引用：打开目标文档选择弹层（docName 已在 kbByName 中查到 referenceId） */
+  const openCite = (s: { docName: string; score: number }) => {
+    if (!kbByName.get(s.docName)?.referenceId) return; // 未绑定文献：按钮已禁用
+    setCiteSource(s);
+  };
+
+  /** 选定目标文档 → 幂等写入引用（location 标记为 RAG 来源） */
+  const doCite = async (docId: string) => {
+    if (!citeSource) return;
+    const refId = kbByName.get(citeSource.docName)?.referenceId;
+    if (!refId) return;
+    setCiting(true);
+    try {
+      await api.references.addCitation({
+        documentId: docId,
+        referenceId: refId,
+        location: 'rag:' + citeSource.docName,
+        context: '',
+      });
+      setCitedKeys((m) => ({ ...m, [citeSource.docName]: true }));
+      toast('success', `已引用「${citeSource.docName}」到论文`);
+      setCiteSource(null);
+    } catch (e: any) {
+      setError(e?.message || '引用失败');
+    } finally {
+      setCiting(false);
+    }
+  };
+
+  /** 任务7：把当前会话（用户/助手文本 + 各消息来源）序列化为自包含 Markdown 并前端 Blob 下载 */
+  const exportSnapshot = () => {
+    const lines: string[] = [];
+    lines.push(`# 科研问答快照 · ${project.name}`);
+    lines.push('');
+    lines.push(`导出时间：${new Date().toLocaleString('zh-CN')} ｜ 共 ${messages.filter((m) => m.role === 'user').length} 轮提问`);
+    lines.push('');
+    for (const m of messages) {
+      if (m.role === 'user') {
+        lines.push('## 👤 提问');
+        lines.push('');
+        lines.push(m.content);
+        lines.push('');
+      } else {
+        lines.push('## 🤖 回答');
+        lines.push('');
+        if (m.reasoning) lines.push(`> **思考过程**：${m.reasoning.slice(0, 600)}`);
+        lines.push(m.content || '（空）');
+        lines.push('');
+        if (m.sources && m.sources.length > 0) {
+          lines.push('**参考来源：**');
+          for (const s of m.sources) {
+            const pct = Math.round(s.score > 1 ? s.score : s.score * 100);
+            lines.push(`- ${s.docName}（相关度 ${pct}%）`);
+          }
+          lines.push('');
+        }
+      }
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `科研问答快照-${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('success', '已导出 Markdown 会话快照');
+  };
+
   // Slash 命令下拉
   const slashFiltered = input.startsWith('/') ? SLASH_COMMANDS.filter((c) => c.name.includes(input.slice(1))).slice(0, 5) : [];
 
@@ -235,6 +319,15 @@ export function ChatPage({ project }: { project: Project }) {
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">科研问答</span>
           <span className="text-xs text-slate-400 dark:text-slate-500 hidden sm:inline">流式 · 可停止重试 · 思考可见 · 上下文感知</span>
           <div className="ml-auto flex items-center gap-1.5 min-w-0 flex-wrap">
+            {/* 导出会话快照（任务7）：无实际问答时禁用 */}
+            <button
+              onClick={exportSnapshot}
+              disabled={!hasConversation}
+              className="flex items-center gap-1 text-xs rounded-md px-1.5 py-1 border text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:text-teal-600 hover:border-teal-400 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="把当前会话（问答 + 来源）导出为只读 Markdown"
+            >
+              <Download size={12} /> <span className="hidden sm:inline">导出快照</span>
+            </button>
             {/* 模型选择器（主流范式：切换模型） */}
             {models.length > 0 && (
               <select
@@ -311,7 +404,7 @@ export function ChatPage({ project }: { project: Project }) {
           {messages.map((m, i) =>
             m.role === 'user' ? (
               <div key={i} className="flex justify-end group page-in">
-                <div className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap bg-teal-600 text-white rounded-br-sm">
+                <div className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words bg-teal-600 text-white rounded-br-sm">
                   {m.content}
                 </div>
                 {/* 编辑上一条用户消息（主流范式：编辑分叉重发） */}
@@ -326,7 +419,7 @@ export function ChatPage({ project }: { project: Project }) {
             ) : (
               <div key={i} className="flex justify-start group page-in">
                 <div className="max-w-[85%] min-w-0">
-                  <div className="rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">
+                  <div className="rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words">
                     {/* 思维链展示：折叠式思考块（默认展开流式过程，可手动收起） */}
                     {m.reasoning ? (
                       <details open={m.streaming} className="mb-2">
@@ -341,18 +434,34 @@ export function ChatPage({ project }: { project: Project }) {
                     {m.content}
                     {m.streaming && <span className="inline-block w-1.5 h-4 bg-current opacity-60 ml-0.5 align-middle pulse-dot" />}
                   </div>
-                  {/* 来源引用 chips（知识库 RAG 命中） */}
+                  {/* 来源引用 chips（知识库 RAG 命中）：每张可一键引用到论文 */}
                   {m.sources && m.sources.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      {m.sources.map((s, si) => (
-                        <span
-                          key={si}
-                          className="inline-flex items-center gap-1 text-[11px] bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-full px-2 py-0.5 border border-teal-200 dark:border-teal-800"
-                          title="回答引用了知识库中的该资料"
-                        >
-                          <FileText size={10} /> {s.docName} · {Math.round((s.score > 1 ? s.score : s.score * 100))}%
-                        </span>
-                      ))}
+                      {m.sources.map((s, si) => {
+                        const refId = kbByName.get(s.docName)?.referenceId;
+                        const cited = !!citedKeys[s.docName];
+                        const pct = Math.round(s.score > 1 ? s.score : s.score * 100);
+                        return (
+                          <span
+                            key={si}
+                            className="inline-flex items-center gap-1 text-[11px] bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-full px-2 py-0.5 border border-teal-200 dark:border-teal-800"
+                          >
+                            <FileText size={10} /> {s.docName} · {pct}%
+                            {cited ? (
+                              <span className="inline-flex items-center gap-0.5 text-teal-700 dark:text-teal-300"><Check size={10} />已引用</span>
+                            ) : (
+                              <button
+                                onClick={() => openCite(s)}
+                                disabled={!refId}
+                                title={refId ? '把该来源引用进论文草稿' : '先在知识库把这份资料绑定到文献，再引用'}
+                                className="ml-0.5 inline-flex items-center gap-0.5 underline underline-offset-2 disabled:text-slate-400 disabled:no-underline disabled:cursor-not-allowed"
+                              >
+                                <Quote size={10} />引用
+                              </button>
+                            )}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                   {/* 用量小字 */}
@@ -424,7 +533,7 @@ export function ChatPage({ project }: { project: Project }) {
           <div className="flex gap-2">
             <input
               ref={inputRef}
-              className="flex-1 rounded-xl border border-slate-300 dark:border-slate-700 px-4 py-2.5 text-sm outline-none focus:border-teal-500 bg-white dark:bg-slate-900"
+              className="flex-1 min-w-0 rounded-xl border border-slate-300 dark:border-slate-700 px-3 sm:px-4 py-2.5 text-sm outline-none focus:border-teal-500 bg-white dark:bg-slate-900"
               placeholder={'问任何科研问题…（输入 "/" 唤出快捷指令）'}
               value={input}
               onChange={(e) => {
@@ -470,7 +579,7 @@ export function ChatPage({ project }: { project: Project }) {
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
+          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-400 dark:text-slate-500 overflow-x-auto whitespace-nowrap">
             <span>⌘/Ctrl+Enter 发送</span>
             <span className="text-slate-200 dark:text-slate-700">·</span>
             <span>Esc 停止</span>
@@ -482,6 +591,31 @@ export function ChatPage({ project }: { project: Project }) {
           </div>
         </div>
       </Card>
+
+      {/* RAG 一键引用：选择目标论文草稿 */}
+      <Modal open={!!citeSource} onClose={() => !citing && setCiteSource(null)} title="引用到论文">
+        <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+          把来源「{citeSource?.docName}」引用进哪篇论文草稿？
+        </div>
+        {docs.length === 0 ? (
+          <div className="text-xs text-slate-400 py-4 text-center">本项目暂无论文草稿，请到「论文写作」新建一篇</div>
+        ) : (
+          <div className="max-h-72 overflow-y-auto space-y-1.5">
+            {docs.map((d) => (
+              <button
+                key={d.id}
+                disabled={citing}
+                onClick={() => doCite(d.id)}
+                className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 flex items-center gap-2"
+              >
+                <FileText size={13} className="text-teal-500 shrink-0" />
+                <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{d.title}</span>
+                {citing && citeSource?.docName && <Loader2 size={13} className="animate-spin ml-auto" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -941,6 +941,93 @@ export function LiteraturePage({ project }: { project: Project }) {
     }
   };
 
+  /* ============================================================
+   * 系统综述：一键产出（差距 #9，纯前端文本生成，零新增依赖）
+   * - 导出编码表 CSV（Blob 下载）
+   * - 纳入文献 Markdown 对比表（下载 / 复制剪贴板）
+   * - 纳入文献综述段落草稿（[作者 年份] 引用，下载 / 复制）
+   * ============================================================ */
+  /** 纳入状态文献（按年份升序） */
+  const includedRefs = useMemo(
+    () => screenItems.filter((s) => s.status === 'included').sort((a, b) => (a.year ?? 0) - (b.year ?? 0)),
+    [screenItems],
+  );
+
+  /** CSV 单元格转义：双引号包裹，内部双引号翻倍；BOM 前缀保证 Excel 中文不乱码 */
+  const csvEscape = (v: string | number | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  /** 编码单元格取值：select 多选值按 ;/；/换行切分后以「; 」连接，text 原样 */
+  const extCellValue = (f: ExtractionField, raw: string) => {
+    const v = (raw ?? '').trim();
+    if (!v) return '';
+    if (f.kind === 'select') return v.split(/[;；\n]/).map((s) => s.trim()).filter(Boolean).join('; ');
+    return v;
+  };
+
+  /** 导出编码抽取表为 CSV：行=文献，列=字段 label */
+  const exportExtractionCsv = () => {
+    if (!extTable || extTable.rows.length === 0 || extFields.length === 0) {
+      setExtError('暂无编码数据可导出：请先定义字段并完成至少一篇文献的编码');
+      return;
+    }
+    const header = ['文献标题', '年份', '期刊', ...extFields.map((f) => f.label)];
+    const lines = [header.map(csvEscape).join(',')];
+    extTable.rows.forEach((row) => {
+      const base = [row.title, row.year ?? '', row.venue ?? ''].map((x) => String(x ?? ''));
+      const cells = extFields.map((f) => extCellValue(f, row.values[f.key] ?? row.values[f.id] ?? ''));
+      lines.push([...base, ...cells].map(csvEscape).join(','));
+    });
+    downloadText(`编码抽取表_${project.name || 'references'}.csv`, '﻿' + lines.join('\r\n'), 'text/csv;charset=utf-8');
+    toast('success', '已导出编码表 CSV');
+  };
+
+  /** 取第一作者（authors 兼容 JSON 数组 / 分号分隔字符串） */
+  const authorShort = (s: ScreeningItem) => {
+    let names: string[] = [];
+    try {
+      names = jsonText<string[]>(s.authors, []);
+    } catch {
+      names = [];
+    }
+    if (!Array.isArray(names) || names.length === 0) {
+      names = String(s.authors || '').split(/[,;；]/).map((x) => x.trim()).filter(Boolean);
+    }
+    return names[0] || '佚名';
+  };
+
+  /** 纳入文献 Markdown 对比表（| 标题 | 年份 | 期刊 | 结论/备注 |） */
+  const buildCompareMd = () => {
+    const lines = ['# 纳入文献对比表（PRISMA）', '', `> 共 ${includedRefs.length} 篇纳入文献`, '', '| 标题 | 年份 | 期刊 | 结论/备注 |', '| --- | --- | --- | --- |'];
+    includedRefs.forEach((s) => {
+      const pipe = (v: string) => String(v ?? '').replace(/\|/g, '\\|');
+      lines.push(`| ${pipe(s.title)} | ${s.year || 'n.d.'} | ${pipe(s.venue || '未标注')} | ${pipe(s.reason || '')} |`);
+    });
+    return lines.join('\n');
+  };
+
+  /** 纳入文献综述段落草稿（[作者 年份] 引用风格，按年份排序） */
+  const buildReviewDraft = () => {
+    const parts = includedRefs.map(
+      (s) => `${authorShort(s)}等（${s.year || 'n.d.'}）在《${s.venue || '相关期刊'}》发表的「${s.title}」[${authorShort(s)} ${s.year || 'n.d.'}]，为该方向提供了实证与理论依据。`,
+    );
+    return [
+      '## 文献综述草稿（自动生成，待润色）',
+      '',
+      `围绕本研究主题，共纳入 ${includedRefs.length} 篇代表性文献。${parts.join('')}`,
+      '',
+      '综上，现有研究已积累一定基础，但仍存在可进一步深化之处（请结合各文献真实结论与分歧点手动润色）。',
+    ].join('\n');
+  };
+
+  const copyToClipboard = async (text: string, okMsg: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('success', okMsg);
+    } catch {
+      setError('复制失败：浏览器未授权剪贴板，请改用下载');
+    }
+  };
+
   /* ================= 可视化聚合 ================= */
   const authors = (a: string) => jsonText<string[]>(a, []).join(', ') || '佚名';
   const stanceTone = (s: string) => (s.includes('支持') && !s.includes('部分') ? 'green' : s.includes('矛盾') ? 'red' : s.includes('部分') ? 'amber' : 'slate');
@@ -1564,7 +1651,32 @@ export function LiteraturePage({ project }: { project: Project }) {
             />
             全选当前（已选 {screenSelected.size}）
           </label>
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex flex-wrap gap-2">
+            {/* 差距#9：纳入文献一键产出（纯前端） */}
+            <Button
+              variant="outline"
+              className="text-xs"
+              disabled={includedRefs.length === 0}
+              title="把「纳入」状态文献渲染为 Markdown 对比表并下载"
+              onClick={() => downloadText(`纳入文献对比表_${project.name || 'references'}.md`, buildCompareMd(), 'text/markdown;charset=utf-8')}
+            >
+              <Table2 size={13} /> 对比表 MD
+            </Button>
+            <Button variant="outline" className="text-xs" disabled={includedRefs.length === 0} title="复制对比表到剪贴板" onClick={() => copyToClipboard(buildCompareMd(), '对比表 Markdown 已复制')}>
+              复制对比表
+            </Button>
+            <Button
+              variant="outline"
+              className="text-xs"
+              disabled={includedRefs.length === 0}
+              title="把纳入文献按年份拼成带 [作者 年份] 引用的综述草稿"
+              onClick={() => downloadText(`综述草稿_${project.name || 'references'}.md`, buildReviewDraft(), 'text/markdown;charset=utf-8')}
+            >
+              <FileDown size={13} /> 综述草稿
+            </Button>
+            <Button variant="outline" className="text-xs" disabled={includedRefs.length === 0} title="复制综述草稿到剪贴板" onClick={() => copyToClipboard(buildReviewDraft(), '综述草稿已复制')}>
+              复制草稿
+            </Button>
             <Button variant="success" className="text-xs" disabled={screenSelected.size === 0 || screenBusy} onClick={() => doScreenBulk('included')}>
               {screenBusy ? <Loader2 size={13} className="animate-spin" /> : null} 一键纳入
             </Button>
@@ -1616,6 +1728,14 @@ export function LiteraturePage({ project }: { project: Project }) {
         onToggle={() => setShowExtraction((v) => !v)}
       >
         <ErrorBox message={extError} />
+
+        {/* 差距#9：导出编码表 CSV（纯前端 Blob 下载） */}
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[11px] text-slate-400 dark:text-slate-500">行=文献，列=字段；select 多选值以「; 」连接，UTF-8 BOM 可直接用 Excel 打开</span>
+          <Button variant="outline" className="text-xs shrink-0" disabled={!extTable || extTable.rows.length === 0} onClick={exportExtractionCsv}>
+            <Download size={13} /> 导出编码表 CSV
+          </Button>
+        </div>
 
         {/* 字段管理 */}
         <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 mb-3">

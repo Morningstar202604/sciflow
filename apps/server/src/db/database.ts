@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS project (
   description TEXT DEFAULT '',
   status TEXT DEFAULT 'active',
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  preface TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS document (
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS reference (
   source TEXT DEFAULT 'manual',
   tags TEXT DEFAULT '[]',
   citation_count INTEGER DEFAULT 0,
+  notes TEXT DEFAULT '',
   created_at INTEGER NOT NULL
 );
 
@@ -364,6 +366,10 @@ ensureColumn('knowledge_doc', 'reference_id', "TEXT");
 ensureColumn('reference', 'reading_status', "TEXT DEFAULT 'unread'");
 ensureColumn('reference', 'fingerprint', "TEXT DEFAULT ''");
 ensureColumn('reference', 'is_duplicate_of', "TEXT DEFAULT ''");
+// 路线图差距 #11：文献笔记
+ensureColumn('reference', 'notes', "TEXT DEFAULT ''");
+// 路线图差距 #22：项目级系统提示 projectPreface
+ensureColumn('project', 'preface', "TEXT DEFAULT ''");
 
 /** 期刊库种子：内置国内主流期刊（仅写领域定位等事实描述；ISSN/IF/分区等不确定指标一律 NULL，禁止编造） */
 const seedJournals = [
