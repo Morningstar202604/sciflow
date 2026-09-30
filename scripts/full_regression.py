@@ -549,6 +549,48 @@ bib_sample = """@article{gr2099,
 st, d = req("POST", "/api/references/import-bibtex", {"projectId": pid, "text": bib_sample})
 check("导入·BibTeX imported/skipped 计数", st in (200, 201) and d.get("imported") == 1 and d.get("skipped") == 1, f"st={st} {d}")
 
+# ---------- 20. 连贯连通后端打通：by-document / quality latest / dashboard overview / 幂等引用 ----------
+if pid and docid:
+    # 20.1 实验按文档回流：跑一个带 documentId 的实验，by-document 应返回它；不存在文档返回空数组
+    st, exp = req("POST", "/api/experiments/run", {"projectId": pid, "goal": "连贯连通 by-document 验证", "code": "print('conn')", "documentId": docid})
+    connEid = exp.get("id") if st in (200, 201) else None
+    st, lst = req("GET", f"/api/experiments/by-document/{docid}")
+    check("连通·实验按文档 by-document 返回关联实验",
+          st == 200 and isinstance(lst, list) and (any(x.get("id") == connEid for x in lst) if connEid else True),
+          f"st={st} n={len(lst) if isinstance(lst, list) else 0}")
+    st, lst = req("GET", "/api/experiments/by-document/__no_such_doc__")
+    check("连通·by-document 不存在文档返回空数组不报错", st == 200 and isinstance(lst, list) and len(lst) == 0, f"st={st} {str(lst)[:80]}")
+
+    # 20.2 质量分 latest：200 不崩；有记录时含 totalScore/scores/createdAt（无记录时空，不 404）
+    st, q = req("GET", f"/api/quality/latest?documentId={docid}")
+    check("连通·quality/latest 200 不崩", st == 200, f"st={st} {str(q)[:120]}")
+    if isinstance(q, dict) and q:
+        check("连通·quality/latest 含 totalScore/scores/createdAt", all(k in q for k in ("totalScore", "scores", "createdAt")), f"keys={list(q.keys())}")
+    else:
+        info("连通·quality/latest 该文档暂无评分（空响应，符合预期）", f"st={st}")
+
+    # 20.3 Dashboard overview 全链路聚合：7 字段齐全、列表类为 list、计数类为 int
+    st, ov = req("GET", "/api/dashboard/overview")
+    need = ("pendingOutline", "overdueSubmissions", "openReviewComments", "lowQualityDocs", "experimentCount", "docCount", "refCount")
+    check("连通·dashboard/overview 200 且 7 字段齐全", st == 200 and isinstance(ov, dict) and all(k in ov for k in need), f"st={st} keys={list(ov.keys()) if isinstance(ov, dict) else ov}")
+    if st == 200 and isinstance(ov, dict):
+        check("连通·overview 列表类为 list、计数类为 int",
+              isinstance(ov.get("overdueSubmissions"), list) and isinstance(ov.get("lowQualityDocs"), list)
+              and isinstance(ov.get("pendingOutline"), int) and isinstance(ov.get("openReviewComments"), int)
+              and isinstance(ov.get("experimentCount"), int) and isinstance(ov.get("docCount"), int) and isinstance(ov.get("refCount"), int),
+              f"{ {k: type(v).__name__ for k, v in ov.items()} }")
+
+    # 20.4 幂等引用写入：同 document+reference 第二次返回同一行；写入后可在文档引用列表读到
+    st, rdoc = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "Conn Cite Paper", "authors": ["Conn"], "year": 2025, "doi": "10.1/conn"}})
+    connRef = rdoc.get("id") if st in (200, 201) else None
+    if connRef:
+        st, c1 = req("POST", "/api/references/citations", {"documentId": docid, "referenceId": connRef, "location": "引言", "context": "连通验证"})
+        check("连通·POST references/citations 首次写入（有 DOI verified=1）", st in (200, 201) and c1.get("id") and c1.get("verified") == 1, f"st={st} {str(c1)[:120]}")
+        st, c2 = req("POST", "/api/references/citations", {"documentId": docid, "referenceId": connRef, "location": "别处", "context": "不应覆盖"})
+        check("连通·POST references/citations 幂等（第二次返回同一行）", st in (200, 201) and c2.get("id") == c1.get("id"), f"st={st} {str(c2)[:120]}")
+        st, cl = req("GET", f"/api/documents/{docid}/citations")
+        check("连通·citations 写入后可在文档引用列表读到", st == 200 and any(c.get("reference", {}).get("id") == connRef for c in cl), f"st={st} n={len(cl) if isinstance(cl, list) else 0}")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL}")
 if FAILED:

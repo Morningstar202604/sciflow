@@ -3,12 +3,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { BookOpen, Bot, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Languages, ListTree, Loader2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
+import { BookOpen, Bot, Check, ChevronRight, ClipboardCheck, Eye, FileText, FlaskConical, Gauge, Languages, ListTree, Loader2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { ChatPanel } from './ChatPanel';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { CitationRow, Doc, Outline, Project, Reference, ResearchDesignResult, ReviewComment, SimulatedReviewResult } from '../types';
+import type { CitationRow, Doc, Experiment, Outline, Project, QualityReport, Reference, ResearchDesignResult, ReviewComment, SimulatedReviewResult } from '../types';
 import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Select, Spinner, Textarea, downloadBase64, downloadText, jsonText } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
 
@@ -48,6 +48,13 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [letter, setLetter] = useState<string | null>(null);
   const [generatingLetter, setGeneratingLetter] = useState(false);
   const [importingComments, setImportingComments] = useState(false);
+  /* —— 连贯连通：最新质量评分 / 关联实验 / 文献库引用弹层 —— */
+  const [qualityReport, setQualityReport] = useState<QualityReport | null>(null);
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const [docExperiments, setDocExperiments] = useState<Experiment[]>([]);
+  const [experimentsOpen, setExperimentsOpen] = useState(false);
+  const [citePickerOpen, setCitePickerOpen] = useState(false);
+  const [addingCiteId, setAddingCiteId] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showNewDoc, setShowNewDoc] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState('');
@@ -94,8 +101,13 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
         .then(setReviewComments)
         .catch(() => setReviewComments([]))
         .finally(() => setCommentsLoading(false));
+      // 连贯连通：最新质量评分（null/失败→空态）与本文档关联实验（失败→空列表）
+      api.quality.latest(docId).then(setQualityReport).catch(() => setQualityReport(null));
+      api.experiments.byDocument(docId).then(setDocExperiments).catch(() => setDocExperiments([]));
     } else {
       setReviewComments([]);
+      setQualityReport(null);
+      setDocExperiments([]);
     }
   }, [docId]);
 
@@ -166,6 +178,21 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       })
       .filter((c) => c.value > 0);
   }, [content]);
+
+  /** 7 维质量评分维度（与 QualityPage 同口径；窄面板用 HBar 展示，不引雷达） */
+  const QUALITY_DIMS = [
+    { key: 'literature', label: '文献充分性' },
+    { key: 'logic', label: '逻辑一致性' },
+    { key: 'citation', label: '引用规范' },
+    { key: 'language', label: '语言质量' },
+    { key: 'novelty', label: '创新性' },
+    { key: 'figures', label: '图表' },
+    { key: 'format', label: '格式' },
+  ];
+  const qualityScores = useMemo(
+    () => (qualityReport ? jsonText<Record<string, number>>(qualityReport.scores, {}) : {}),
+    [qualityReport],
+  );
 
   const createDoc = async () => {
     const title = newDocTitle.trim();
@@ -966,6 +993,95 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
             )}
           </div>
 
+          {/* 质量评分（折叠卡片：最新一次 7 维评分；null/失败显示空态，不白屏） */}
+          <div className="mb-4">
+            <button
+              className="w-full flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5"
+              onClick={() => setQualityOpen((v) => !v)}
+            >
+              <span className="flex items-center gap-1"><Gauge size={12} className="text-teal-600" /> 质量评分</span>
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                {qualityReport ? `总分 ${qualityReport.totalScore} · ` : ''}{qualityOpen ? '收起 ▾' : '展开 ▸'}
+              </span>
+            </button>
+            {qualityOpen && (
+              <div className="text-xs">
+                {!qualityReport ? (
+                  <div className="text-slate-400 dark:text-slate-500">暂无质量评分记录，可到「质量评分」页对本文档运行 7 维评分。</div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                          最新总分 · {new Date(qualityReport.createdAt).toLocaleDateString()}
+                        </span>
+                        <span className={`text-base font-semibold leading-none ${qualityReport.totalScore >= 80 ? 'text-emerald-600 dark:text-emerald-400' : qualityReport.totalScore >= 60 ? 'text-amber-500 dark:text-amber-400' : 'text-rose-500 dark:text-rose-400'}`}>
+                          {qualityReport.totalScore}
+                        </span>
+                      </div>
+                      <HBar
+                        max={100}
+                        barHeight={5}
+                        showValue={false}
+                        items={QUALITY_DIMS.map((d) => {
+                          const v = Math.round(qualityScores[d.key] ?? 0);
+                          return { label: d.label, value: v, color: v < 60 ? '#f87171' : v < 75 ? '#f59e0b' : undefined };
+                        })}
+                      />
+                    </div>
+                    {qualityReport.totalScore < 60 && (
+                      <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/10 p-2 text-amber-600 dark:text-amber-400">
+                        总分偏低，建议返回润色后再投稿。
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 关联实验（折叠卡片：只读展示，不做一键插入正文） */}
+          <div className="mb-4">
+            <button
+              className="w-full flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5"
+              onClick={() => setExperimentsOpen((v) => !v)}
+            >
+              <span className="flex items-center gap-1"><FlaskConical size={12} className="text-teal-600" /> 关联实验</span>
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                {docExperiments.length > 0 && `${docExperiments.length} 条 · `}{experimentsOpen ? '收起 ▾' : '展开 ▸'}
+              </span>
+            </button>
+            {experimentsOpen && (
+              <div className="text-xs">
+                {docExperiments.length === 0 ? (
+                  <div className="text-slate-400 dark:text-slate-500">暂无关联实验，可到「实验记录」页运行并关联本文档。</div>
+                ) : (
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
+                    {docExperiments.map((exp) => (
+                      <div key={exp.id} className="rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="font-medium text-slate-700 dark:text-slate-200 truncate flex-1">{exp.goal || '未命名实验'}</span>
+                          <Badge tone={exp.status === 'ok' ? 'green' : exp.status === 'error' ? 'red' : 'amber'}>
+                            {exp.status === 'ok' ? '成功' : exp.status === 'error' ? '失败' : '超时'}
+                          </Badge>
+                        </div>
+                        <div className="text-[10px] text-slate-400 dark:text-slate-500 mb-1">
+                          {(exp.runtimeMs / 1000).toFixed(1)}s · {new Date(exp.createdAt).toLocaleDateString()}
+                        </div>
+                        {exp.figures?.[0] && (
+                          <img src={exp.figures[0]} alt="实验结果图" className="w-24 h-auto rounded border border-slate-100 dark:border-slate-800 mb-1" />
+                        )}
+                        {exp.conclusion && (
+                          <div className="text-slate-600 dark:text-slate-300 leading-relaxed">{exp.conclusion}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* 润色结果对比 */}
           {polishResult && (
             <Card className="p-3 mb-4 bg-slate-50 dark:bg-slate-900/50 border-teal-200">
@@ -1032,6 +1148,9 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
                 ))}
               </select>
             )}
+            <Button variant="outline" className="text-xs w-full mt-1.5" onClick={() => setCitePickerOpen(true)} disabled={refs.length === 0}>
+              <Plus size={12} /> 从文献库添加引用
+            </Button>
             {citations.length > 0 && (
               <div className="mt-2">
                 <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">已引用 {citations.length} 条</div>
@@ -1104,6 +1223,50 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
           )}
         </Card>
       </div>
+
+      {/* 从文献库添加引用弹层：点选后幂等写入，成功后刷新引用列表/Donut，弹层保持打开可继续选 */}
+      <Modal open={citePickerOpen} title="从文献库添加引用" onClose={() => setCitePickerOpen(false)} width="max-w-lg">
+        {refs.length === 0 ? (
+          <div className="text-xs text-slate-400 dark:text-slate-500">文献库为空，请先到「文献调研」检索导入。</div>
+        ) : (
+          <div className="max-h-80 overflow-y-auto space-y-1.5 pr-0.5">
+            {refs.map((r) => {
+              const cited = citations.some((c) => c.referenceId === r.id);
+              return (
+                <div key={r.id} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 p-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs text-slate-700 dark:text-slate-200 truncate">{r.title}</div>
+                    <div className="text-[10px] text-slate-400 dark:text-slate-500">{[r.year, r.venue].filter(Boolean).join(' · ')}</div>
+                  </div>
+                  {cited ? (
+                    <Badge tone="green">已添加</Badge>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="text-xs px-2 py-1 shrink-0"
+                      disabled={addingCiteId === r.id || !docId}
+                      onClick={async () => {
+                        if (!docId) return;
+                        setAddingCiteId(r.id);
+                        try {
+                          await api.references.addCitation({ documentId: docId, referenceId: r.id, location: 'current', context: content.slice(-200) });
+                          setCitations(await api.documents.citations(docId));
+                        } catch (e: any) {
+                          setError(e.message);
+                        } finally {
+                          setAddingCiteId(null);
+                        }
+                      }}
+                    >
+                      {addingCiteId === r.id ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Modal>
 
       {/* 新建文档弹窗（空态与主界面共用） */}
       {newDocDialog}

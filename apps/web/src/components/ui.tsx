@@ -197,8 +197,9 @@ export function CollapsibleCard({
 }
 
 export function SectionTitle({ children, extra }: { children: ReactNode; extra?: ReactNode }) {
+  // 窄屏：标题与右侧操作纵向堆叠（sm+ 恢复原左右布局，桌面端不变）
   return (
-    <div className="flex items-center justify-between mb-3">
+    <div className="flex flex-col gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between">
       <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{children}</h2>
       {extra}
     </div>

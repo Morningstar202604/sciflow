@@ -367,7 +367,7 @@ function AppInner() {
         {/* ============ 右侧主区 ============ */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* 顶部面包屑：项目名 / 当前页（玻璃质感 header） */}
-          <header className="glass-header border-b border-slate-200/60 dark:border-slate-800 px-4 md:px-6 py-2.5 flex items-center gap-2 shrink-0">
+          <header className="glass-header border-b border-slate-200/60 dark:border-slate-800 px-3 sm:px-4 md:px-6 py-2.5 flex items-center gap-2 shrink-0">
             {/* 移动端抽屉开关 */}
             <button
               className="md:hidden p-1.5 -ml-1.5 rounded-md text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -397,7 +397,7 @@ function AppInner() {
             </div>
           </header>
 
-          <main key={view} className="flex-1 overflow-y-auto p-4 md:p-6 page-in relative z-[1]">
+          <main key={view} className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 page-in relative z-[1]">
             {error && (
               <div className="mb-4">
                 <ErrorBox message={error} />

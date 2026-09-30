@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, Beaker, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
-import type { Doc, Project, Reference } from '../types';
+import type { DashboardOverview, Doc, Project, Reference } from '../types';
 import { Button, Card, Empty, Spinner, Skeleton, Badge, jsonText, SectionTitle } from '../components/ui';
 import { Donut, HBar, MetricCard } from '../components/charts';
 import { useContext } from 'react';
@@ -19,6 +19,8 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
   const [pipelineCount, setPipelineCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [newTitle, setNewTitle] = useState('');
+  /** 科研全链路总览：后端未就绪/失败时为 null，前端降级为小字提示，不白屏 */
+  const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const toast = useContext(ToastContext);
 
   useEffect(() => {
@@ -36,6 +38,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
         setPipelineCount(p.length);
       })
       .finally(() => setLoading(false));
+    api.dashboard.overview().then(setOverview).catch(() => setOverview(null));
   }, [project.id]);
 
   const createDoc = async () => {
@@ -58,7 +61,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
   return (
     <div className="max-w-5xl mx-auto">
       {/* 项目总览（大厂式：白底 + 数据统计，去渐变去重色） */}
-      <Card className="p-6 mb-6">
+      <Card className="p-4 sm:p-6 mb-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-lg font-semibold text-slate-900 dark:text-slate-100 tracking-tight">{project.name}</div>
@@ -74,6 +77,62 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
         <MetricCard label="知识库资料" value={knowledgeCount} icon={<BookOpen size={14} />} hint="RAG 可问答资料数" tone="slate" />
         <MetricCard label="流水线任务" value={pipelineCount} icon={<Workflow size={14} />} hint="历史全自动任务数" tone="slate" />
       </div>
+
+      {/* 科研全链路总览：待办计数 + 卡点跳转（后端未就绪时 catch 为 null，降级小字提示） */}
+      <Card className="p-4 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">科研全链路</div>
+          <span className="text-[11px] text-slate-400 dark:text-slate-500">待办与卡点一览</span>
+        </div>
+        {overview === null ? (
+          <div className="text-xs text-slate-400 dark:text-slate-500">全链路总览暂不可用（接口未就绪或加载失败）。</div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+              <MiniStat label="待确认大纲" value={overview.pendingOutline} tone="amber" onClick={() => onNavigate('pipeline')} />
+              <MiniStat label="超期投稿" value={overview.overdueSubmissions.length} tone="red" onClick={() => onNavigate('submission')} />
+              <MiniStat label="待处理审稿意见" value={overview.openReviewComments} tone="amber" />
+              <MiniStat
+                label="低分文档"
+                value={overview.lowQualityDocs.length}
+                tone="red"
+                onClick={() => overview.lowQualityDocs[0] && openDoc(overview.lowQualityDocs[0].id)}
+              />
+            </div>
+            {overview.overdueSubmissions.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-rose-500 dark:text-rose-400">超期投稿</div>
+                {overview.overdueSubmissions.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2 rounded-lg border border-rose-200 dark:border-rose-900/50 bg-rose-50/50 dark:bg-rose-900/10 p-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs text-slate-700 dark:text-slate-200 truncate">{s.journalName} · {s.title}</div>
+                      <div className="text-[11px] text-rose-500 dark:text-rose-400">已超 {s.overdueDays} 天 · 建议询问编辑部</div>
+                    </div>
+                    <Button variant="outline" className="text-xs shrink-0" onClick={() => onNavigate('submission')}>前往投稿</Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {overview.lowQualityDocs.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-amber-500 dark:text-amber-400">低分文档</div>
+                {overview.lowQualityDocs.map((d) => (
+                  <div key={d.id} className="flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-900/10 p-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs text-slate-700 dark:text-slate-200 truncate">{d.title}</div>
+                      <div className="text-[11px] text-amber-500 dark:text-amber-400">总分 {d.score} · 建议润色</div>
+                    </div>
+                    <Button variant="outline" className="text-xs shrink-0" onClick={() => openDoc(d.id)}>前往写作</Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {overview.pendingOutline === 0 && overview.overdueSubmissions.length === 0 && overview.lowQualityDocs.length === 0 && (
+              <div className="text-xs text-slate-400 dark:text-slate-500">暂无卡点，全链路运转正常。</div>
+            )}
+          </div>
+        )}
+      </Card>
 
       {docs.length > 0 && (
         <Card className="p-4 mb-6">
@@ -114,9 +173,9 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
 
       <SectionTitle
         extra={
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full sm:w-auto">
             <input
-              className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm w-52 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-50"
+              className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm w-full sm:w-52 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-50"
               placeholder="新建论文草稿标题"
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
@@ -183,5 +242,20 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
         </div>
       )}
     </div>
+  );
+}
+
+/** 全链路待办小卡：可点击跳转对应页面，不可点击时为纯展示 */
+function MiniStat({ label, value, tone, onClick }: { label: string; value: number; tone: 'amber' | 'red' | 'slate'; onClick?: () => void }) {
+  const toneCls = tone === 'red' ? 'text-rose-600 dark:text-rose-400' : tone === 'amber' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200';
+  return (
+    <button
+      onClick={onClick}
+      disabled={!onClick}
+      className={`rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 text-left ${onClick ? 'hover:border-teal-300 dark:hover:border-teal-700 cursor-pointer' : 'cursor-default'}`}
+    >
+      <div className={`text-xl font-semibold leading-none ${toneCls}`}>{value}</div>
+      <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{label}</div>
+    </button>
   );
 }

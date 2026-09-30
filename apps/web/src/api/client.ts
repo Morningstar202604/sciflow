@@ -3,7 +3,7 @@ import type {
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
   AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool, PipelineStepConfig, QualityWeightItem,
   ScreeningItem, ExtractionField, ExtractionTableResult, ReviewComment, Journal, JournalMatchResult, Experiment,
-  SubmissionTrack, SubmissionStatus, ParseEmailResult, ReferenceGraph, BibtexImportResult,
+  SubmissionTrack, SubmissionStatus, ParseEmailResult, ReferenceGraph, BibtexImportResult, DashboardOverview,
 } from '../types';
 
 /** 友好错误转译：后端中文业务错误原样保留；英文/状态码/网络错误转为清晰中文提示 */
@@ -195,6 +195,14 @@ export const api = {
     /* —— BibTeX 导入（指纹去重，返回 imported/skipped） —— */
     importBibtex: (projectId: string, text: string) =>
       request<BibtexImportResult>('/api/references/import-bibtex', { method: 'POST', body: JSON.stringify({ projectId, text }) }),
+    /* —— 引用打通：为某文档幂等添加引用（与 documents.citations 读路径分离写入口） —— */
+    addCitation: (body: { documentId: string; referenceId: string; location?: string; context?: string }) =>
+      request<{ id?: string; ok?: boolean }>('/api/references/citations', { method: 'POST', body: JSON.stringify(body) }),
+  },
+
+  dashboard: {
+    /** 科研全链路总览（待办计数 + 卡点列表；接口未就绪时前端 catch 降级为小字提示） */
+    overview: () => request<DashboardOverview>('/api/dashboard/overview'),
   },
 
   knowledge: {
@@ -269,6 +277,9 @@ export const api = {
     review: (documentId: string, title: string, content: string) =>
       request<QualityReport>('/api/quality', { method: 'POST', body: JSON.stringify({ documentId, title, content }) }),
     history: (documentId: string) => request<QualityReport[]>(`/api/quality?documentId=${documentId}`),
+    /** 最新一次质量评分（无记录时后端返回 null；接口未就绪时前端 catch 降级为空态） */
+    latest: (documentId: string) =>
+      request<QualityReport | null>(`/api/quality/latest?documentId=${encodeURIComponent(documentId)}`),
   },
 
   pipeline: {
@@ -290,6 +301,9 @@ export const api = {
     run: (body: { projectId: string; goal?: string; code: string; documentId?: string | null }) =>
       request<Experiment>('/api/experiments/run', { method: 'POST', body: JSON.stringify(body) }),
     list: (projectId: string) => request<Experiment[]>(`/api/experiments?projectId=${projectId}`),
+    /** 按文档关联的实验（updatedAt 倒序；接口未就绪时前端 catch 降级为空态） */
+    byDocument: (documentId: string) =>
+      request<Experiment[]>(`/api/experiments/by-document/${encodeURIComponent(documentId)}`),
     get: (id: string) => request<Experiment>(`/api/experiments/${id}`),
     update: (id: string, patch: { goal?: string; conclusion?: string }) =>
       request<Experiment>(`/api/experiments/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),

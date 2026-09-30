@@ -169,7 +169,7 @@ export function KnowledgePage({ project }: { project: Project }) {
       <ErrorBox message={error} />
 
       {/* 上传区 */}
-      <Card className="p-5 mb-4">
+      <Card className="p-4 sm:p-5 mb-4">
         <SectionTitle>
           <span className="flex items-center gap-2">
             <Upload size={16} className="text-teal-600" /> 上传研究资料
@@ -317,15 +317,15 @@ export function KnowledgePage({ project }: { project: Project }) {
       </Card>
 
       {/* RAG 问答 */}
-      <Card className="p-5">
+      <Card className="p-4 sm:p-5">
         <SectionTitle>
           <span className="flex items-center gap-2">
             <MessageSquare size={16} className="brand-gradient-text" /> 基于资料问答
           </span>
         </SectionTitle>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <Input placeholder="例如：Transformer 的核心机制是什么？" value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ask()} />
-          <Button onClick={ask} disabled={busy === 'query' || !question.trim()}>
+          <Button onClick={ask} disabled={busy === 'query' || !question.trim()} className="shrink-0">
             {busy === 'query' ? <Loader2 size={15} className="animate-spin" /> : <MessageSquare size={15} />} 提问
           </Button>
         </div>

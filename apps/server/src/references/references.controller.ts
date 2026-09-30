@@ -70,6 +70,12 @@ export class ReferencesController {
     return this.references.importBibtex(body.projectId, body.text || '');
   }
 
+  /** 幂等引用写入：给某文档引用一篇文献；同 document+reference 已存在则返回既有记录 */
+  @Post('citations')
+  addCitation(@Body() body: { documentId: string; referenceId: string; location?: string; context?: string; format?: string }) {
+    return this.references.addCitation(body);
+  }
+
   /** 更新阅读状态 / 标签 */
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: { readingStatus?: string; tags?: string }) {

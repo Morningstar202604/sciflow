@@ -117,7 +117,7 @@ export function QualityPage({ project }: { project: Project }) {
           <Gauge size={16} className="brand-gradient-text" />
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 mr-2">选择文档进行 7 维质量评分</span>
           <Select
-            className="w-64"
+            className="w-full sm:w-64"
             options={[{ value: '', label: '选择文档…' }, ...docs.map((d) => ({ value: d.id, label: d.title }))]}
             value={docId}
             onChange={setDocId}

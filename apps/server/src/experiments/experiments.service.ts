@@ -89,6 +89,18 @@ export class ExperimentsService {
       .map((row) => this.toDto(row));
   }
 
+  /** 按文档回流：关联到某篇论文草稿的实验列表（updatedAt 倒序；文档不存在自然返回空数组，不报错） */
+  byDocument(documentId: string) {
+    if (!documentId) return [];
+    return db
+      .select()
+      .from(experiments)
+      .where(eq(experiments.documentId, documentId))
+      .orderBy(desc(experiments.updatedAt))
+      .all()
+      .map((row) => this.toDto(row));
+  }
+
   get(id: string) {
     const row = db.select().from(experiments).where(eq(experiments.id, id)).get();
     if (!row) throw new NotFoundException('实验记录不存在');

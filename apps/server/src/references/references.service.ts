@@ -146,6 +146,38 @@ export class ReferencesService {
     return this.get(id);
   }
 
+  // ---------- 引用写入（幂等：document+reference 已存在则返回既有记录） ----------
+
+  /**
+   * 给某文档引用一篇文献（前端 RAG 来源卡 / 写作页通用入口）。
+   * 幂等：同一 (documentId, referenceId) 已存在则直接返回既有记录，不重复插入。
+   * verified 与 documents.addCitation 对齐：有 DOI 视为可核验。
+   */
+  addCitation(body: { documentId: string; referenceId: string; location?: string; context?: string; format?: string }) {
+    const ref = db.select().from(references).where(eq(references.id, body.referenceId)).get();
+    if (!ref) throw new NotFoundException('引用的文献不存在，请先加入文献库');
+    const doc = db.select().from(documents).where(eq(documents.id, body.documentId)).get();
+    if (!doc) throw new NotFoundException('文档不存在');
+    const existing = db
+      .select()
+      .from(citations)
+      .where(and(eq(citations.documentId, body.documentId), eq(citations.referenceId, body.referenceId)))
+      .get();
+    if (existing) return existing;
+    const row = {
+      id: randomUUID(),
+      documentId: body.documentId,
+      referenceId: body.referenceId,
+      location: body.location || '',
+      context: body.context || '',
+      format: body.format || 'apa',
+      verified: ref.doi ? 1 : 0,
+      createdAt: Date.now(),
+    };
+    db.insert(citations).values(row).run();
+    return row;
+  }
+
   // ---------- 系统综述·筛选队列 ----------
 
   /** 单条筛选：同 (project, reference) 已存在则更新，否则新建 */

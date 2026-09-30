@@ -334,7 +334,7 @@ export function SubmissionPage({ project }: { project: Project }) {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800">
+      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -342,7 +342,7 @@ export function SubmissionPage({ project }: { project: Project }) {
               setTab(t.key);
               setOutput('');
             }}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px ${
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px whitespace-nowrap shrink-0 ${
               tab === t.key ? 'border-teal-600 text-teal-700 font-medium' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800'
             }`}
           >
@@ -647,9 +647,10 @@ export function SubmissionPage({ project }: { project: Project }) {
                   </div>
                 )}
 
-                {/* 横向 Stepper：当前状态在链路中的位置 */}
+                {/* 横向 Stepper：当前状态在链路中的位置（窄屏可横向滚动，避免 9 节点挤压换行） */}
                 {stepIdx >= 0 && (
-                  <div className="mt-3 flex items-center">
+                  <div className="mt-3 overflow-x-auto">
+                  <div className="flex items-center min-w-[620px]">
                     {STEPPER_CHAIN.map((s, i) => (
                       <div key={s} className="flex items-center flex-1 last:flex-none">
                         <div className="flex flex-col items-center">
@@ -663,6 +664,7 @@ export function SubmissionPage({ project }: { project: Project }) {
                         {i < STEPPER_CHAIN.length - 1 && <div className={`h-px flex-1 mx-0.5 mb-3 ${i < stepIdx ? 'bg-teal-400' : 'bg-slate-200 dark:bg-slate-700'}`} />}
                       </div>
                     ))}
+                  </div>
                   </div>
                 )}
 

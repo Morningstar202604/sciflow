@@ -32,6 +32,19 @@ export class QualityService {
     return db.select().from(qualityReports).where(eq(qualityReports.documentId, documentId)).orderBy(desc(qualityReports.createdAt));
   }
 
+  /** 某文档最新一次评分（写作页侧边栏/写作现场展示用）；无记录返回 null，不 404 */
+  latest(documentId: string) {
+    if (!documentId) return null;
+    const row = db
+      .select()
+      .from(qualityReports)
+      .where(eq(qualityReports.documentId, documentId))
+      .orderBy(desc(qualityReports.createdAt))
+      .get();
+    if (!row) return null;
+    return { ...row, scores: JSON.parse(row.scores || '{}') };
+  }
+
   get(id: string) {
     const row = db.select().from(qualityReports).where(eq(qualityReports.id, id)).get();
     if (!row) throw new NotFoundException('评分报告不存在');

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs , pipelineConfigs} from '../db/schema';
+import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs , pipelineConfigs, citations } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
 import { QualityService } from '../research/quality.service';
@@ -341,12 +341,18 @@ export class PipelineService {
       }
       db.update(documents).set({ content: writerRes.content, updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
       // Phase 4：Writer Agent 补充检索到的文献回填文献库（Agentic RAG 闭环，带完整元数据）
+      // 保留命中下标 → 入库文献 id 的对齐（create 空元数据守卫会跳过该条，返回 null），供引用回填 references.id
       const agenticHits = this.orchestrator.extractWriterHits(taskId);
-      if (agenticHits.length > 0) {
-        this.references.import(task.projectId, agenticHits);
-      }
-      // 引用渲染：占位符 [Ref:N] → 顺序编码制 [N] + 文末参考文献列表（含补充文献）
-      const rendered = this.renderCitations(task.projectId, writerRes.content, refPool, agenticHits);
+      const suppRefIds: (string | null)[] = agenticHits.map((h) => {
+        try {
+          const row = this.references.create(task.projectId, h);
+          return row ? row.id : null;
+        } catch {
+          return null;
+        }
+      });
+      // 引用渲染：占位符 [Ref:N] → 顺序编码制 [N] + 文末参考文献列表（含补充文献），并幂等回填 citations 表
+      const rendered = this.renderCitations(task.projectId, documentId, writerRes.content, refPool, agenticHits, suppRefIds);
       // 自动配图：生成 2-3 个 mermaid 学术图表（仅首次起草，回炉复用省额度）
       let finalContent = rendered + prevFigures;
       if (retry === 0 && this.stepEnabled('figures')) {
@@ -538,9 +544,18 @@ export class PipelineService {
    * 并在文末生成"参考文献"列表（GB/T 7714 顺序编码制）。
    * 修复：① 两次取池排序不同导致编号错位——改用调用方传入的同一池；② 补充引用按正文实际引用续编并纳入文末列表。
    */
-  private renderCitations(projectId: string, content: string, refPool: ReturnType<PipelineService['refsForDraft']>, supplementHits: PaperHit[] = []): string {
+  private renderCitations(
+    projectId: string,
+    documentId: string,
+    content: string,
+    refPool: ReturnType<PipelineService['refsForDraft']>,
+    supplementHits: PaperHit[] = [],
+    suppRefIds: (string | null)[] = [],
+  ): string {
     if (!content) return content;
     const refs = refPool;
+    // 先在原文上扫描每个被引文献首次出现的章节位置与上下文（须在占位符被替换前做），供 citations 回填
+    const { poolSpot, suppSpot } = this.scanCitationSpots(content, refs.length, supplementHits.length);
     // 第一遍：收集正文被引用的 [Ref:N]（顺序编码制按出现先后统一编号）
     const used = new Set<number>();
     content.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => {
@@ -590,7 +605,97 @@ export class PipelineService {
     if (list.length) {
       out += `\n\n## 参考文献\n\n${list.join('\n')}`;
     }
+    // 把正文实际引用到的文献幂等写入 citations 表（同一 document+reference 只留一条），
+    // 让写作页引用管理 / 核验率 / 共引网络图 / 结构化导出一次性点亮，无需手工重新 addCitation。
+    this.backfillCitations(documentId, refs, order, suppOrder, suppRefIds, poolSpot, suppSpot);
     return out;
+  }
+
+  /**
+   * 扫描原文，记录每个被引文献（池文献 [Ref:N] / 补充文献 [补充Ref:M]）首次出现的章节与上下文。
+   * 用一个交替正则同时识别章节标题（## ）与引用占位符，边扫描边维护「当前章节」。
+   */
+  private scanCitationSpots(content: string, poolSize: number, suppSize: number) {
+    const poolSpot = new Map<number, { location: string; context: string }>();
+    const suppSpot = new Map<number, { location: string; context: string }>();
+    const tokenRe = /(#{1,6}\s+[^\n]+)|\[Ref:(\d+)\]|\[补充Ref:(\d+)\]/g;
+    let m: RegExpExecArray | null;
+    let section = '';
+    while ((m = tokenRe.exec(content)) !== null) {
+      if (m[1] !== undefined) {
+        section = m[1].replace(/^#{1,6}\s+/, '').trim();
+      } else if (m[2] !== undefined) {
+        const idx = Number(m[2]) - 1;
+        if (idx >= 0 && idx < poolSize && !poolSpot.has(idx)) {
+          poolSpot.set(idx, { location: section, context: this.contextAround(content, m.index, m[0].length) });
+        }
+      } else if (m[3] !== undefined) {
+        const idx = Number(m[3]) - 1;
+        if (idx >= 0 && idx < suppSize && !suppSpot.has(idx)) {
+          suppSpot.set(idx, { location: section, context: this.contextAround(content, m.index, m[0].length) });
+        }
+      }
+    }
+    return { poolSpot, suppSpot };
+  }
+
+  /** 取引用占位符前后各 ~40 字作为上下文片段（压成单行） */
+  private contextAround(text: string, at: number, len: number): string {
+    const start = Math.max(0, at - 40);
+    const end = Math.min(text.length, at + len + 40);
+    return text.slice(start, end).replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * 流水线引用回填 citations 表（幂等）：
+   * - 池文献：refs[idx].id 直接可用；补充文献：经 suppRefIds[idx] 取入库后的 references.id。
+   * - 同一 (documentId, referenceId) 已存在则跳过——回炉重写多轮也不会产生重复行。
+   * - verified：有 DOI 记 1；format='pipeline' 标记来源，便于与手工 apa/ieee 区分。
+   */
+  private backfillCitations(
+    documentId: string,
+    refs: ReturnType<PipelineService['refsForDraft']>,
+    order: number[],
+    suppOrder: number[],
+    suppRefIds: (string | null)[],
+    poolSpot: Map<number, { location: string; context: string }>,
+    suppSpot: Map<number, { location: string; context: string }>,
+  ) {
+    try {
+      const existing = db.select().from(citations).where(eq(citations.documentId, documentId)).all();
+      const have = new Set(existing.map((c) => c.referenceId));
+      const now = Date.now();
+      const insertOne = (referenceId: string, spot: { location: string; context: string } | undefined, doi: string) => {
+        if (!referenceId || have.has(referenceId)) return;
+        db.insert(citations)
+          .values({
+            id: randomUUID(),
+            documentId,
+            referenceId,
+            location: spot?.location || '',
+            context: spot?.context || '',
+            format: 'pipeline',
+            verified: doi ? 1 : 0,
+            createdAt: now,
+          })
+          .run();
+        have.add(referenceId);
+      };
+      for (const idx of order) {
+        const r = refs[idx];
+        if (!r) continue;
+        insertOne(r.id, poolSpot.get(idx), r.doi || '');
+      }
+      for (const idx of suppOrder) {
+        const refId = suppRefIds[idx];
+        if (!refId) continue;
+        const ref = db.select().from(references).where(eq(references.id, refId)).get();
+        insertOne(refId, suppSpot.get(idx), ref?.doi || '');
+      }
+    } catch (e: any) {
+      // 回填失败不阻断流水线主流程（正文已渲染好）
+      this.logger.warn(`citations 回填失败（不影响流水线产物）: ${e?.message || e}`);
+    }
   }
 
   /** Reflexion 指令（最新一条）：回炉起草时注入 */

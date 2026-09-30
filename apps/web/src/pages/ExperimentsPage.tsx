@@ -147,7 +147,7 @@ export function ExperimentsPage({ project }: { project: Project }) {
       <ErrorBox message={error} />
       <div className="grid lg:grid-cols-5 gap-4">
         {/* 左：新建实验表单 */}
-        <Card className="p-5 lg:col-span-2 h-fit">
+        <Card className="p-4 sm:p-5 lg:col-span-2 h-fit">
           <SectionTitle>
             <span className="flex items-center gap-2">
               <Beaker size={16} className="text-teal-600" /> 新建实验
@@ -183,7 +183,7 @@ export function ExperimentsPage({ project }: { project: Project }) {
 
         {/* 右：历史列表 + 详情 */}
         <div className="lg:col-span-3 space-y-4">
-          <Card className="p-5">
+          <Card className="p-4 sm:p-5">
             <SectionTitle extra={<span className="text-xs text-slate-400">{exps.length} 条记录</span>}>
               <span className="flex items-center gap-2">
                 <Beaker size={16} className="brand-gradient-text" /> 实验记录
@@ -217,7 +217,7 @@ export function ExperimentsPage({ project }: { project: Project }) {
           </Card>
 
           {selected && (
-            <Card className="p-5">
+            <Card className="p-4 sm:p-5">
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 {statusBadge(selected.status)}
                 <span className="text-[11px] text-slate-400">

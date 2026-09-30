@@ -538,3 +538,35 @@ export interface BibtexImportResult {
   skipped: number;
   total: number;
 }
+
+/* =====================================================================
+ * 连贯连通：Dashboard 全链路总览聚合（GET /api/dashboard/overview）
+ * ===================================================================== */
+
+/** 超期投稿卡点条目（后端 join 投稿记录） */
+export interface OverdueSubmissionItem {
+  id: string;
+  journalName: string;
+  title: string;
+  status: string;
+  overdueDays: number;
+}
+
+/** 低分文档卡点条目（后端取最新一次 QualityReport） */
+export interface LowQualityDocItem {
+  id: string;
+  title: string;
+  score: number;
+  date: number;
+}
+
+/** 科研全链路总览（待办计数 + 卡点列表；后端未就绪时前端优雅降级为 null） */
+export interface DashboardOverview {
+  pendingOutline: number;
+  overdueSubmissions: OverdueSubmissionItem[];
+  openReviewComments: number;
+  lowQualityDocs: LowQualityDocItem[];
+  experimentCount: number;
+  docCount: number;
+  refCount: number;
+}

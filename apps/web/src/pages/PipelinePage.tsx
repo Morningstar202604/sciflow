@@ -182,9 +182,9 @@ export function PipelinePage({ project }: { project: Project }) {
         <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
           输入研究主题 → 多智能体自动完成 文献调研 → 大纲确认 → 分章起草 → 7 维质量门（&lt;80 自动回炉打磨）→ 润色定稿 → 引用格式化
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <Input placeholder="输入研究主题，如：大语言模型在生物医学中的应用" value={topic} onChange={(e) => setTopic(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createTask()} />
-          <Button onClick={createTask} disabled={creating || !topic.trim()}>
+          <Button onClick={createTask} disabled={creating || !topic.trim()} className="shrink-0">
             {creating ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />} 启动流水线
           </Button>
         </div>

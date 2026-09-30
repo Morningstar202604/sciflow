@@ -379,7 +379,7 @@ function ReferenceNetwork({ graph, onViewRef }: { graph: ReferenceGraph; onViewR
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
-            className="w-full h-[420px] rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 touch-none select-none"
+            className="w-full h-[300px] sm:h-[420px] rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 touch-none select-none"
             onPointerDown={(e) => {
               pannedRef.current = false;
               panRef.current = { px: e.clientX, py: e.clientY, tx: viewRef.current.tx, ty: viewRef.current.ty, moved: false };
