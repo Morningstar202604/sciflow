@@ -4,9 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs , pipelineConfigs} from '../db/schema';
 import { AiService } from '../ai/ai.service';
-import { LiteratureService, PaperHit } from '../literature/literature.service';
-import { ReferencesService } from '../references/references.service';
-import { QualityService } from '../quality/quality.service';
+import { ReferencesService, PaperHit } from '../references/references.service';
+import { QualityService } from '../research/quality.service';
 import { AgentOrchestratorService } from '../orchestrator/orchestrator.service';
 
 export interface PipelineStepState {
@@ -38,7 +37,6 @@ export class PipelineService {
 
   constructor(
     private readonly ai: AiService,
-    private readonly literature: LiteratureService,
     private readonly references: ReferencesService,
     private readonly quality: QualityService,
     private readonly orchestrator: AgentOrchestratorService,

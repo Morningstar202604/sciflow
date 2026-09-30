@@ -3,10 +3,8 @@ import { AiModule } from './ai/ai.module';
 import { ProjectsModule } from './projects/projects.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ReferencesModule } from './references/references.module';
-import { QualityModule } from './quality/quality.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { ChatModule } from './chat/chat.module';
-import { SubmissionModule } from './submission/submission.module';
 import { SettingsModule } from './settings/settings.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { McpModule } from './mcp/mcp.module';
@@ -14,7 +12,6 @@ import { MemoryModule } from './memory/memory.module';
 import { ResearchModule } from './research/research.module';
 import { JudgmentModule } from './judgment/judgment.module';
 import { CustomizationModule } from './settings/customization.module';
-import { UsageModule } from './usage/usage.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -23,10 +20,8 @@ import { HealthController } from './health.controller';
     ProjectsModule,
     DocumentsModule,
     ReferencesModule,
-    QualityModule,
     PipelineModule,
     ChatModule,
-    SubmissionModule,
     SettingsModule,
     KnowledgeModule,
     McpModule,
@@ -34,7 +29,6 @@ import { HealthController } from './health.controller';
     ResearchModule,
     JudgmentModule,
     CustomizationModule,
-    UsageModule,
   ],
   controllers: [HealthController],
 })

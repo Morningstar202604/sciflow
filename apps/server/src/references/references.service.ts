@@ -1,21 +1,61 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { sql, eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { references } from '../db/schema';
-import { LiteratureService, PaperHit } from '../literature/literature.service';
 import { AiService } from '../ai/ai.service';
+
+/** 文献命中条目（本地文献库检索/入库共用） */
+export interface PaperHit {
+  id?: string;
+  title: string;
+  authors: string[];
+  year: number | null;
+  venue: string;
+  doi: string;
+  url: string;
+  abstract: string;
+  source: 'manual';
+  citationCount: number;
+}
 
 @Injectable()
 export class ReferencesService {
-  constructor(
-    private readonly literature: LiteratureService,
-    private readonly ai: AiService,
-  ) {}
+  constructor(private readonly ai: AiService) {}
 
-  /** 本地文献库检索（projectId 可选限定项目范围） */
-  search(query: string, limit = 8, projectId?: string) {
-    return this.literature.search(query, limit, projectId);
+  /** 本地文献库检索（标题/作者/摘要模糊匹配，已移除国外在线源，零外部网络依赖） */
+  search(query: string, limit = 8, projectId?: string): PaperHit[] {
+    const q = query.trim();
+    if (!q) return [];
+    const q2 = `%${q}%`;
+    const cond = sql`${references.title} LIKE ${q2} OR COALESCE(${references.authors}, '') LIKE ${q2} OR COALESCE(${references.abstract}, '') LIKE ${q2}`;
+    const rows = db
+      .select()
+      .from(references)
+      .where(projectId ? sql`${references.projectId} = ${projectId} AND (${cond})` : cond)
+      .all();
+    return rows.slice(0, limit).map((r) => ({
+      id: r.id,
+      title: r.title,
+      authors: this.parseAuthors(r.authors),
+      year: r.year,
+      venue: r.venue ?? '',
+      doi: r.doi ?? '',
+      url: r.url || (r.doi ? `https://doi.org/${r.doi}` : ''),
+      abstract: r.abstract ?? '',
+      source: 'manual' as const,
+      citationCount: r.citationCount ?? 0,
+    }));
+  }
+
+  private parseAuthors(json: string | null): string[] {
+    if (!json) return [];
+    try {
+      const arr = JSON.parse(json);
+      return Array.isArray(arr) ? arr.map(String) : [];
+    } catch {
+      return json ? [json] : [];
+    }
   }
 
   list(projectId: string) {

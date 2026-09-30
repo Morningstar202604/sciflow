@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { agentRuns } from '../db/schema';
 import { AiService } from '../ai/ai.service';
-import { LiteratureService, PaperHit } from '../literature/literature.service';
-import { QualityService } from '../quality/quality.service';
+import { ReferencesService, PaperHit } from '../references/references.service';
+import { QualityService } from '../research/quality.service';
 
 export interface ResearchPlan {
   objective: string;
@@ -36,7 +36,7 @@ export class AgentOrchestratorService {
 
   constructor(
     private readonly ai: AiService,
-    private readonly literature: LiteratureService,
+    private readonly references: ReferencesService,
     private readonly quality: QualityService,
   ) {}
 
@@ -180,7 +180,7 @@ export class AgentOrchestratorService {
     const hits: PaperHit[] = [];
     for (const q of seeds) {
       try {
-        const res = await this.literature.search(q, 5);
+        const res = await this.references.search(q, 5);
         for (const h of res) {
           if (!seen.has(h.title)) {
             seen.add(h.title);
@@ -201,7 +201,7 @@ export class AgentOrchestratorService {
         break;
       }
       try {
-        const res = await this.literature.search(decision.query, 6);
+        const res = await this.references.search(decision.query, 6);
         const added = res.filter((h) => !seen.has(h.title));
         for (const h of added) {
           seen.add(h.title);
@@ -344,7 +344,7 @@ export class AgentOrchestratorService {
       rounds += 1;
       let res: PaperHit[] = [];
       try {
-        res = await this.literature.search(question, 5);
+        res = await this.references.search(question, 5);
       } catch {
         /* 源限流时跳过本路 */
       }
@@ -358,7 +358,7 @@ export class AgentOrchestratorService {
         try {
           const decision = await this.ai.reactThink(`${topic}（当前章节：${question}）`, [], [{ round: r + 1, query: question, found: hits.length }]);
           if (decision.action === 'done' || decision.coverage >= 85 || !decision.query) break;
-          const next = await this.literature.search(decision.query, 4);
+          const next = await this.references.search(decision.query, 4);
           for (const h of next) {
             if (h.title && !seen.has(h.title)) {
               seen.add(h.title);

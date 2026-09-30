@@ -1,6 +1,5 @@
 import { Controller, Get, Post, Delete, Body, Param, Query } from '@nestjs/common';
-import { ReferencesService } from './references.service';
-import { PaperHit } from '../literature/literature.service';
+import { ReferencesService, PaperHit } from './references.service';
 
 @Controller('references')
 export class ReferencesController {

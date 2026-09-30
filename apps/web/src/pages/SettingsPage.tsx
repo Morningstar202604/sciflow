@@ -11,6 +11,16 @@ interface UsageSummary {
   byDay: { day: string; calls: number; total_tokens: number }[];
 }
 
+/** 国内厂商 / 本地模型一键填充预设（OpenAI 兼容协议，Ollama 无需 API Key） */
+const QUICK_PROVIDERS = [
+  { name: '豆包·火山方舟', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'agnes-3.0-flash' },
+  { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { name: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  { name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+  { name: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  { name: 'Ollama 本地', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:7b' },
+];
+
 export function SettingsPage() {
   const toast = useContext(ToastContext);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -286,7 +296,19 @@ export function SettingsPage() {
           </span>
         </SectionTitle>
         <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
-          配置任意 OpenAI 兼容厂商（OpenAI / DeepSeek / 通义 / 豆包 / Agnes…），激活后立即切换所有 AI 调用的模型
+          配置任意 OpenAI 兼容厂商（国内 / 本地一键填充），激活后立即切换所有 AI 调用的模型
+        </div>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {QUICK_PROVIDERS.map((q) => (
+            <button
+              key={q.name}
+              type="button"
+              className="text-xs rounded-full border border-teal-200 dark:border-teal-800/60 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 px-2.5 py-1 hover:bg-teal-100 dark:hover:bg-teal-900/40"
+              onClick={() => setProvForm((f) => ({ ...f, name: q.name, baseUrl: q.baseUrl, model: q.model }))}
+            >
+              {q.name}
+            </button>
+          ))}
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
           <input className="rounded-md border border-slate-300 dark:border-slate-700 px-2 py-1.5 text-sm" placeholder="厂商名（如 DeepSeek）" value={provForm.name} onChange={(e) => setProvForm({ ...provForm, name: e.target.value })} />

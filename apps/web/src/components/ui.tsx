@@ -261,6 +261,26 @@ export function jsonText<T>(raw: string, fallback: T): T {
   }
 }
 
+/* ---------- 文件下载公共工具（base64 二进制 / 文本，各页面导出复用） ---------- */
+export function downloadBase64(filename: string, base64: string, mime: string) {
+  const bytes = atob(base64);
+  const buf = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: mime }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+export function downloadText(filename: string, text: string, mime = 'text/plain;charset=utf-8') {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: mime }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 /* ---------- 全局 Toast 反馈系统（品牌交互层） ---------- */
 export type ToastKind = 'success' | 'error' | 'info';
 export interface ToastItem {

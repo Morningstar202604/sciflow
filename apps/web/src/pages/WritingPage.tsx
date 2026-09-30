@@ -9,7 +9,7 @@ import { ChatPanel } from './ChatPanel';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { CitationRow, Doc, Outline, Project, Reference, ResearchDesignResult, SimulatedReviewResult } from '../types';
-import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Select, Spinner, Textarea, jsonText } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Select, Spinner, Textarea, downloadBase64, downloadText, jsonText } from '../components/ui';
 
 export function WritingPage({ project, initialDocId }: { project: Project; initialDocId: string | null }) {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -230,15 +230,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     try {
       setAiBusy(true);
       const { base64, filename } = await api.documents.exportDocx(doc.id);
-      const bytes = atob(base64);
-      const buf = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
-      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      downloadBase64(filename, base64, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
       toast('success', 'Word 文档已导出（含标题/大纲/正文/参考文献）');
     } catch {
       toast('error', 'Word 导出失败');
@@ -251,12 +243,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const exportFullDoc = () =>
     run(async () => {
       const { markdown, filename } = await api.documents.exportMarkdown(docId!);
-      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      downloadText(filename, markdown, 'text/markdown;charset=utf-8');
       setError('');
     });
 
@@ -329,12 +316,7 @@ ${cites.map((c, i) => `\\bibitem{ref${i + 1}} ${esc(c)}`).join('\n')}
 
 \\end{document}
 `;
-      const blob = new Blob([tex], { type: 'application/x-tex;charset=utf-8' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${doc?.title || 'paper'}.tex`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      downloadText(`${doc?.title || 'paper'}.tex`, tex, 'application/x-tex;charset=utf-8');
       toast('success', 'LaTeX 文件已导出（可用 Overleaf / TeXStudio 编译）');
     } catch (e: any) {
       setError(e.message);
