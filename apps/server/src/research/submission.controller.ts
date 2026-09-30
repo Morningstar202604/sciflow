@@ -69,6 +69,8 @@ export class SubmissionController {
       submittedAt: body.submittedAt || undefined,
       currentStatus: body.currentStatus || 'submitted',
       note: body.note || '',
+      previousSubmissionId: body.previousSubmissionId || '',
+      revisionDeadline: typeof body.revisionDeadline === 'number' ? body.revisionDeadline : null,
     });
   }
 
@@ -94,10 +96,10 @@ export class SubmissionController {
     });
   }
 
-  /** 修改 note / currentStatus */
+  /** 修改 note / currentStatus / revisionDeadline */
   @Patch('track/:id')
-  updateTrack(@Param('id') id: string, @Body() body: { notes?: string; currentStatus?: string }) {
-    return this.submission.updateTrack(id, { notes: body.notes, currentStatus: body.currentStatus });
+  updateTrack(@Param('id') id: string, @Body() body: { notes?: string; currentStatus?: string; revisionDeadline?: number | null }) {
+    return this.submission.updateTrack(id, { notes: body.notes, currentStatus: body.currentStatus, revisionDeadline: body.revisionDeadline });
   }
 
   /** 删除投稿（级联清事件） */

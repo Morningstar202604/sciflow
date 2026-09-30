@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { KnowledgeDoc, KnowledgeQueryResult, Project, Reference } from '../types';
-import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Select, Textarea, Badge, Spinner } from '../components/ui';
+import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
 
 function fileToBase64(file: File): Promise<string> {
@@ -33,6 +33,8 @@ export function KnowledgePage({ project }: { project: Project }) {
   // 文献库↔知识库打通（#5）：项目内可选文献 + 正在展开绑定下拉的文档
   const [refs, setRefs] = useState<Reference[]>([]);
   const [bindingDocId, setBindingDocId] = useState<string | null>(null);
+  // 绑定下拉的标题搜索关键词（前端过滤 title/venue/年份）
+  const [bindQuery, setBindQuery] = useState('');
   // RAG 引用可点（#17）：已展开原文的来源块（按 chunkId 记录）
   const [openChunks, setOpenChunks] = useState<Record<string, boolean>>({});
 
@@ -71,6 +73,18 @@ export function KnowledgePage({ project }: { project: Project }) {
   };
 
   const toggleChunk = (key: string) => setOpenChunks((m) => ({ ...m, [key]: !m[key] }));
+
+  // 绑定文献搜索：前端实时过滤 title / venue / 年份（数据已在 refs）
+  const filteredRefs = useMemo(() => {
+    const q = bindQuery.trim().toLowerCase();
+    if (!q) return refs;
+    return refs.filter(
+      (r) =>
+        r.title.toLowerCase().includes(q) ||
+        (r.venue || '').toLowerCase().includes(q) ||
+        (r.year ? String(r.year).includes(q) : false),
+    );
+  }, [refs, bindQuery]);
 
   // 文档类型分布 Donut（pdf/markdown/text）
   const typeDist = useMemo(() => {
@@ -244,27 +258,48 @@ export function KnowledgePage({ project }: { project: Project }) {
                         </button>
                       </div>
                     ) : bindingDocId === d.id ? (
-                      <div className="mt-1.5 flex items-center gap-2">
+                      <div className="mt-1.5 w-full max-w-md">
+                        <Input
+                          autoFocus
+                          placeholder="搜索文献标题 / 期刊 / 年份…"
+                          value={bindQuery}
+                          onChange={(e) => setBindQuery(e.target.value)}
+                          className="h-8 text-[12px]"
+                        />
                         {refs.length > 0 ? (
-                          <Select
-                            className="flex-1 max-w-sm"
-                            value=""
-                            onChange={(v) => v && bindRef(d, v)}
-                            options={[
-                              { value: '', label: '选择本项目文献…' },
-                              ...refs.map((r) => ({ value: r.id, label: `${r.title}${r.year ? ` (${r.year})` : ''}` })),
-                            ]}
-                          />
+                          filteredRefs.length > 0 ? (
+                            <div className="mt-1.5 max-h-32 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                              {filteredRefs.map((r) => (
+                                <button
+                                  key={r.id}
+                                  onClick={() => bindRef(d, r.id)}
+                                  className="w-full text-left px-2.5 py-1.5 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors"
+                                >
+                                  <div className="text-[12px] text-slate-700 dark:text-slate-200 truncate">{r.title}</div>
+                                  {(r.year || r.venue) && (
+                                    <div className="text-[10px] text-slate-400 truncate">
+                                      {[r.venue, r.year].filter(Boolean).join(' · ')}
+                                    </div>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">未找到文献？可先在文献调研页录入</div>
+                          )
                         ) : (
-                          <span className="text-[11px] text-slate-400 dark:text-slate-500">本项目暂无文献，请到「文献库」录入后再绑定</span>
+                          <span className="mt-1.5 block text-[11px] text-slate-400 dark:text-slate-500">本项目暂无文献，请到「文献库」录入后再绑定</span>
                         )}
-                        <button onClick={() => setBindingDocId(null)} className="text-[11px] text-slate-400 hover:text-slate-600 shrink-0">
+                        <button onClick={() => setBindingDocId(null)} className="mt-1 text-[11px] text-slate-400 hover:text-slate-600 shrink-0">
                           取消
                         </button>
                       </div>
                     ) : (
                       <button
-                        onClick={() => setBindingDocId(d.id)}
+                        onClick={() => {
+                          setBindQuery('');
+                          setBindingDocId(d.id);
+                        }}
                         className="mt-1 inline-flex items-center gap-1 text-[11px] text-teal-500 hover:underline"
                       >
                         <Link2 size={11} /> 绑定文献
@@ -321,10 +356,17 @@ export function KnowledgePage({ project }: { project: Project }) {
                     const key = s.chunkId || `src-${i}`;
                     const open = !!openChunks[key];
                     const long = s.chunkText && s.chunkText.length > s.snippet.length;
+                    const totalChunks = docs.find((d) => d.name === s.docName)?.chunkCount;
+                    const chunkNo = typeof s.chunkSeq === 'number' ? s.chunkSeq + 1 : null;
                     return (
                       <div key={key} className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-slate-600 dark:text-slate-300 font-medium">「{s.docName}」</span>
+                          {chunkNo !== null && (
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                              分块 {chunkNo}{totalChunks ? `/${totalChunks}` : ''}
+                            </span>
+                          )}
                           {long && (
                             <button
                               onClick={() => toggleChunk(key)}
@@ -335,16 +377,24 @@ export function KnowledgePage({ project }: { project: Project }) {
                             </button>
                           )}
                         </div>
-                        {s.referenceTitle && (
-                          <div className="text-teal-600/90 dark:text-teal-400/90 mt-0.5">📄 对应文献：{s.referenceTitle}</div>
-                        )}
                         <div>
                           {s.snippet}
                           {!open && long ? '…' : ''}
                         </div>
                         {open && s.chunkText && (
-                          <div className="mt-1 rounded bg-slate-100 dark:bg-slate-800/60 p-2 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                            {s.chunkText}
+                          <div className="mt-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
+                            <div className="flex items-center gap-2 border-l-[3px] border-l-teal-500 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1.5">
+                              <FileText size={12} className="text-teal-500 shrink-0" />
+                              <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate">
+                                来源：{s.docName} · 分块 {chunkNo ?? '?'}{totalChunks ? `/${totalChunks}` : ''}
+                              </span>
+                            </div>
+                            {s.referenceTitle && (
+                              <div className="px-2.5 pt-1.5 text-[11px] text-teal-600/90 dark:text-teal-400/90">📄 对应文献：{s.referenceTitle}</div>
+                            )}
+                            <div className="px-2.5 py-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
+                              {s.chunkText}
+                            </div>
                           </div>
                         )}
                       </div>

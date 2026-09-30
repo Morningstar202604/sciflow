@@ -313,11 +313,22 @@ info("期刊结构化匹配 journals-match", f"st={st} {str(d2)[:120]}")
 
 # ---------- 17. 轻量实验沙箱（本机 python3） ----------
 import shutil
-if not shutil.which("python3"):
+SANDBOX_PYTHON_OVERRIDE = os.environ.get("SANDBOX_PYTHON", "")
+if SANDBOX_PYTHON_OVERRIDE:
+    # 服务器以 SANDBOX_PYTHON=/nonexistent 启动 → 验证无 Python 降级路径
+    print(f"  ℹ 检测到 SANDBOX_PYTHON={SANDBOX_PYTHON_OVERRIDE}，验证无 Python 降级路径")
+    st, d = req("POST", "/api/experiments/run", {"projectId": pid, "goal": "无 python3 降级", "code": "print('should not run')"})
+    check("实验沙箱·无 Python 降级 status=error", st in (200, 201) and d.get("status") == "error", f"st={st} {str(d)[:200]}")
+    check("实验沙箱·无 Python 引导文案含『未检测到 Python』", "未检测到 Python" in (d.get("stderr") or ""), f"stderr={str(d.get('stderr'))[:200]}")
+    check("实验沙箱·无 Python 引导含安装提示", "安装" in (d.get("stderr") or "") and ("brew" in (d.get("stderr") or "") or "apt" in (d.get("stderr") or "") or "python.org" in (d.get("stderr") or "")), f"stderr={str(d.get('stderr'))[:200]}")
+    check("实验沙箱·无 Python 降级 memoryMonitored=False", d.get("memoryMonitored") is False, f"memoryMonitored={d.get('memoryMonitored')}")
+    check("实验沙箱·无 Python 不执行用户代码（stdout 为空）", not (d.get("stdout") or "").strip(), f"stdout={str(d.get('stdout'))[:120]}")
+elif not shutil.which("python3"):
     print("  ⏭ 未检测到 python3，实验沙箱用例跳过（不失败）")
 else:
     st, d = req("POST", "/api/experiments/run", {"projectId": pid, "goal": "验证沙箱执行", "code": "print('hello-sandbox'); print(2+3)"})
     check("实验沙箱·正常执行 run", st in (200, 201) and d.get("status") == "ok" and "hello-sandbox" in (d.get("stdout") or "") and (d.get("stdout") or "").count("5") >= 1, f"st={st} {str(d)[:180]}")
+    check("实验沙箱·正常运行返回 memoryMonitored 布尔字段", isinstance(d.get("memoryMonitored"), bool), f"memoryMonitored={d.get('memoryMonitored')!r}")
     eid = d.get("id") if st in (200, 201) else None
     # 异常脚本 → status=error
     st, d = req("POST", "/api/experiments/run", {"projectId": pid, "code": "raise RuntimeError('boom')"})
@@ -394,6 +405,37 @@ if pid:
     if trackJid:
         req("DELETE", f"/api/submission/journals-lib/{trackJid}")
 
+# ---------- 17b. 投稿跟踪：转投他刊串联 + 修回截止日 ----------
+if pid:
+    # 旧记录（终态拒稿）
+    st, d = req("POST", "/api/submission/track", {"projectId": pid, "journalName": "回归转投旧刊", "currentStatus": "rejected"})
+    old_id = d.get("id") if st in (200, 201) else None
+    # 转投新记录：带 previousSubmissionId + revisionDeadline
+    st, d = req("POST", "/api/submission/track", {
+        "projectId": pid, "journalName": "回归转投新刊", "currentStatus": "minor_revision",
+        "previousSubmissionId": old_id or "", "revisionDeadline": int((time.time() + 10 * 24 * 3600) * 1000),
+        "note": "转投自 回归转投旧刊（拒稿）",
+    })
+    check("投稿跟踪·转投创建（previousSubmissionId + revisionDeadline 落库返回）",
+          st in (200, 201) and d.get("id") and d.get("previousSubmissionId") == old_id
+          and isinstance(d.get("revisionDeadline"), int) and d.get("currentStatus") == "minor_revision",
+          f"st={st} {str(d)[:200]}")
+    new_id = d.get("id") if st in (200, 201) else None
+    if new_id:
+        # PATCH 设置/修改截止日，返回新值
+        new_dl = int((time.time() + 20 * 24 * 3600) * 1000)
+        st, d2 = req("PATCH", f"/api/submission/track/{new_id}", {"revisionDeadline": new_dl})
+        check("投稿跟踪·PATCH revisionDeadline 返回新值",
+              st == 200 and d2.get("revisionDeadline") == new_dl, f"st={st} {str(d2)[:160]}")
+        # 列表反查：新记录指回旧记录
+        st, d2 = req("GET", f"/api/submission/track?projectId={pid}")
+        mine = next((x for x in d2 if x.get("id") == new_id), None) if st == 200 else None
+        check("投稿跟踪·列表反查 previousSubmissionId",
+              st == 200 and mine and mine.get("previousSubmissionId") == old_id, f"st={st} {str(mine)[:200]}")
+        req("DELETE", f"/api/submission/track/{new_id}")
+    if old_id:
+        req("DELETE", f"/api/submission/track/{old_id}")
+
 # ---------- 18. 文献库↔知识库打通（#5）+ RAG 引用可点（#17） ----------
 if pid:
     # 造一条文献，标题与知识库文档同名 → 上传时应自动按标题指纹/忽略大小写命中并回填 referenceId
@@ -440,6 +482,7 @@ if pid:
         if st in (200, 201) and d.get("sources"):
             src0 = d["sources"][0]
             check("RAG 引用可点·sources 带 chunkId/chunkText", bool(src0.get("chunkId")) and bool(src0.get("chunkText")), f"keys={list(src0.keys())}")
+            check("RAG 来源卡片·sources 带 chunkSeq（分块序号）", all(isinstance(s.get("chunkSeq"), int) for s in d["sources"]), f"chunkSeq={[s.get('chunkSeq') for s in d['sources']]}")
             bound_src = next((s for s in d["sources"] if s.get("referenceTitle")), None)
             check("打通·命中来源带 referenceTitle", bound_src is not None
                   and bound_src.get("referenceTitle") == "Knowledge RAG Binding Paper",

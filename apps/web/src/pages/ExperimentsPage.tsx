@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from 'react';
-import { Beaker, Loader2, Play, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, Beaker, Check, Copy, Loader2, Play, Save, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import { ToastContext } from '../App';
 import type { Doc, Experiment, Project } from '../types';
@@ -25,6 +25,17 @@ function statusBadge(s: Experiment['status']) {
   return <Badge tone="red">失败</Badge>;
 }
 
+/** 后端 NO_PYTHON_MESSAGE 的标记子串；命中则渲染专门引导卡片而非红色 stderr 框 */
+const NO_PYTHON_MARKER = '未检测到 Python';
+const isNoPythonError = (exp: Experiment | null) =>
+  !!exp && exp.status === 'error' && !!exp.stderr && exp.stderr.includes(NO_PYTHON_MARKER);
+
+const INSTALL_CMDS: { platform: string; cmd: string; hint: string }[] = [
+  { platform: 'Windows', cmd: 'winget install Python.Python.3.12', hint: '或从 python.org 下载安装包，安装时勾选 Add to PATH' },
+  { platform: 'macOS', cmd: 'brew install python3', hint: '需先安装 Homebrew' },
+  { platform: 'Linux (Debian/Ubuntu)', cmd: 'sudo apt install python3', hint: 'Fedora/RHEL 用 sudo dnf install python3' },
+];
+
 export function ExperimentsPage({ project }: { project: Project }) {
   const [exps, setExps] = useState<Experiment[]>([]);
   const [selected, setSelected] = useState<Experiment | null>(null);
@@ -37,7 +48,23 @@ export function ExperimentsPage({ project }: { project: Project }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<Experiment | null>(null);
   const [error, setError] = useState('');
+  const [copiedCmd, setCopiedCmd] = useState<string>('');
+  /**
+   * 仅缓存「最近一次 run() 响应」里的 memoryMonitored（运行时字段，不入库）。
+   * 历史记录从 list() 加载时该字段恒为 undefined，不显示标注（数据不可回溯）。
+   */
+  const [lastRunMem, setLastRunMem] = useState<{ id: string; value: boolean } | null>(null);
   const toast = useContext(ToastContext);
+
+  const copyCmd = async (cmd: string) => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopiedCmd(cmd);
+      setTimeout(() => setCopiedCmd(''), 1500);
+    } catch {
+      /* 剪贴板不可用则静默 */
+    }
+  };
 
   const load = async () => {
     try {
@@ -70,6 +97,9 @@ export function ExperimentsPage({ project }: { project: Project }) {
       setExps((s) => [exp, ...s]);
       setSelected(exp);
       setConclusionDraft(exp.conclusion);
+      if (typeof exp.memoryMonitored === 'boolean') {
+        setLastRunMem({ id: exp.id, value: exp.memoryMonitored });
+      }
       toast(exp.status === 'ok' ? 'success' : 'info', `实验执行${exp.status === 'ok' ? '成功' : `：${exp.status}`}`);
     } catch (e: any) {
       setError(e.message);
@@ -188,11 +218,18 @@ export function ExperimentsPage({ project }: { project: Project }) {
 
           {selected && (
             <Card className="p-5">
-              <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
                 {statusBadge(selected.status)}
                 <span className="text-[11px] text-slate-400">
                   {new Date(selected.createdAt).toLocaleString()} · 耗时 {(selected.runtimeMs / 1000).toFixed(2)}s
                 </span>
+              {/* memoryMonitored 是 run() 响应的运行时字段（不入库）；仅当选中的是最近一次刚跑完的记录时才显示标注 */}
+              {(() => {
+                const mem = lastRunMem && lastRunMem.id === selected.id ? lastRunMem.value : undefined;
+                if (mem === true) return <span className="text-[11px] text-teal-600 dark:text-teal-400">内存监控：可用（上限 1GB）</span>;
+                if (mem === false && !isNoPythonError(selected)) return <span className="text-[11px] text-amber-500">内存监控：本环境不可用（超时仍生效）</span>;
+                return null;
+              })()}
                 <button onClick={() => setDeleting(selected)} className="ml-auto text-slate-400 hover:text-rose-500" title="删除记录">
                   <Trash2 size={15} />
                 </button>
@@ -207,16 +244,52 @@ export function ExperimentsPage({ project }: { project: Project }) {
               <pre className="rounded-lg bg-slate-950 text-emerald-300 text-xs font-mono p-3 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap">
                 {selected.stdout || '（空）'}
               </pre>
-              {/* stderr */}
-              {selected.stderr && (
-                <>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 mt-3">
-                    标准错误{selected.stderrTruncated && <span className="text-amber-500">（已截断）</span>}
+              {/* 无 Python 解释器：专门引导卡片（替代红色 stderr 框） */}
+              {isNoPythonError(selected) ? (
+                <div className="mt-3 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10 p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-1">
+                        本机未检测到可用的 Python 3
+                      </div>
+                      <div className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed mb-3">
+                        实验沙箱需要本机 Python 3 才能运行代码。请按你的系统安装后重启应用：
+                      </div>
+                      <div className="space-y-2">
+                        {INSTALL_CMDS.map((item) => (
+                          <div key={item.platform} className="flex items-center gap-2">
+                            <span className="text-[11px] text-amber-700 dark:text-amber-300 w-28 shrink-0">{item.platform}</span>
+                            <code className="flex-1 text-[11px] font-mono bg-amber-100/70 dark:bg-amber-900/30 text-amber-900 dark:text-amber-100 rounded px-2 py-1 truncate">
+                              {item.cmd}
+                            </code>
+                            <button
+                              onClick={() => copyCmd(item.cmd)}
+                              className="text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 shrink-0"
+                              title="复制安装命令"
+                            >
+                              {copiedCmd === item.cmd ? <Check size={14} /> : <Copy size={14} />}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-[11px] text-amber-600/80 dark:text-amber-400/80 mt-3">
+                        安装完成后重启 SciFlow 应用即可。若已安装但仍提示，请确认 python 已加入 PATH。
+                      </div>
+                    </div>
                   </div>
-                  <pre className="rounded-lg bg-rose-950/60 text-rose-200 text-xs font-mono p-3 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap">
-                    {selected.stderr}
-                  </pre>
-                </>
+                </div>
+              ) : (
+                selected.stderr && (
+                  <>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 mt-3">
+                      标准错误{selected.stderrTruncated && <span className="text-amber-500">（已截断）</span>}
+                    </div>
+                    <pre className="rounded-lg bg-rose-950/60 text-rose-200 text-xs font-mono p-3 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre-wrap">
+                      {selected.stderr}
+                    </pre>
+                  </>
+                )
               )}
 
               {/* figures */}

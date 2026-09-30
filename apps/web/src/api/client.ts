@@ -318,13 +318,15 @@ export const api = {
       submittedAt?: number;
       currentStatus?: string;
       note?: string;
+      previousSubmissionId?: string;
+      revisionDeadline?: number | null;
     }) => request<SubmissionTrack>('/api/submission/track', { method: 'POST', body: JSON.stringify(body) }),
     listTracks: (projectId: string) => request<SubmissionTrack[]>(`/api/submission/track?projectId=${encodeURIComponent(projectId)}`),
     addTrackEvent: (id: string, body: { status: string; date?: number; note?: string }) =>
       request<SubmissionTrack>(`/api/submission/track/${id}/event`, { method: 'POST', body: JSON.stringify(body) }),
     parseEmail: (emailText: string, currentStatus: string) =>
       request<ParseEmailResult>('/api/submission/track/parse-email', { method: 'POST', body: JSON.stringify({ emailText, currentStatus }) }),
-    updateTrack: (id: string, patch: Partial<{ notes: string; currentStatus: SubmissionStatus }>) =>
+    updateTrack: (id: string, patch: Partial<{ notes: string; currentStatus: SubmissionStatus; revisionDeadline: number | null }>) =>
       request<SubmissionTrack>(`/api/submission/track/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     removeTrack: (id: string) => request<{ ok: boolean }>(`/api/submission/track/${id}`, { method: 'DELETE' }),
   },

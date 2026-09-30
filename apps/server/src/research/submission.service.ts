@@ -191,12 +191,15 @@ export class SubmissionService {
     return { ...row, journalName: row.journalName, events, ...this.infer(row, journal?.firstDecisionWeeks ?? null) };
   }
 
-  /** L1 登记投稿：创建记录并写入首条状态事件 */
-  createTrack(body: { projectId: string; journalId?: string; journalName: string; documentId?: string; submittedAt?: number; currentStatus?: string; note?: string }) {
+  /** L1 登记投稿：创建记录并写入首条状态事件（可选：转投串联 previousSubmissionId / 修回截止日 revisionDeadline） */
+  createTrack(body: { projectId: string; journalId?: string; journalName: string; documentId?: string; submittedAt?: number; currentStatus?: string; note?: string; previousSubmissionId?: string; revisionDeadline?: number | null }) {
     if (!body.projectId?.trim()) throw new BadRequestException('projectId 必填');
     if (!body.journalName?.trim()) throw new BadRequestException('期刊名必填');
     const status = body.currentStatus || 'submitted';
     if (!statusEnum.safeParse(status).success) throw new BadRequestException('未知投稿状态');
+    if (body.revisionDeadline !== undefined && body.revisionDeadline !== null && typeof body.revisionDeadline !== 'number') {
+      throw new BadRequestException('revisionDeadline 必须为时间戳或 null');
+    }
     const now = Date.now();
     const submittedAt = body.submittedAt || now;
     const id = randomUUID();
@@ -212,6 +215,8 @@ export class SubmissionService {
         currentStatus: status,
         statusUpdatedAt: now,
         notes: body.note || '',
+        revisionDeadline: typeof body.revisionDeadline === 'number' ? body.revisionDeadline : null,
+        previousSubmissionId: body.previousSubmissionId || '',
         source: 'manual',
         createdAt: now,
         updatedAt: now,
@@ -300,11 +305,20 @@ export class SubmissionService {
     };
   }
 
-  /** PATCH：改 notes / currentStatus（状态变化同步写一条历史事件） */
-  updateTrack(id: string, patch: { notes?: string; currentStatus?: string }) {
+  /** PATCH：改 notes / currentStatus（状态变化同步写一条历史事件）/ revisionDeadline（修回截止日） */
+  updateTrack(id: string, patch: { notes?: string; currentStatus?: string; revisionDeadline?: number | null }) {
     const row = this.getTrackOrThrow(id);
     const set: Record<string, unknown> = { updatedAt: Date.now() };
     if (typeof patch.notes === 'string') set.notes = patch.notes;
+    if (patch.revisionDeadline !== undefined) {
+      if (patch.revisionDeadline === null) {
+        set.revisionDeadline = null;
+      } else if (typeof patch.revisionDeadline === 'number') {
+        set.revisionDeadline = patch.revisionDeadline;
+      } else {
+        throw new BadRequestException('revisionDeadline 必须为时间戳或 null');
+      }
+    }
     if (typeof patch.currentStatus === 'string' && patch.currentStatus !== row.currentStatus) {
       if (!statusEnum.safeParse(patch.currentStatus).success) throw new BadRequestException('未知投稿状态');
       set.currentStatus = patch.currentStatus;

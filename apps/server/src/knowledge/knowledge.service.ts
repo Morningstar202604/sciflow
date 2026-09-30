@@ -265,6 +265,8 @@ export class KnowledgeService {
         // RAG 引用可点（#17）：chunkId + 完整块文本，前端"展开原文"查看（不跳 PDF）
         chunkId: h.id,
         chunkText: h.content,
+        // 来源卡片：该块在所属文档内的分块序号（0 起，来自 knowledge_chunk.seq）
+        chunkSeq: h.seq,
         // 文献库↔知识库打通（#5）：命中块若绑定文献，前端显示"对应文献"
         referenceId: h.referenceId ?? null,
         referenceTitle: h.referenceTitle ?? null,

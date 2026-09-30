@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
-  CalendarClock, Check, FilePen, Globe2, Library, Loader2, Mail, MessageSquareReply, Plus, Send, Trash2,
+  CalendarClock, Check, FilePen, Forward, Globe2, Library, Loader2, Mail, MessageSquareReply, Plus, Send, Trash2,
 } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Journal, JournalMatchResult, ParseEmailResult, Project, ReviewComment, SubmissionStatus, SubmissionTrack } from '../types';
@@ -32,9 +32,20 @@ const STATUS_OPTIONS = (Object.keys(STATUS_META) as SubmissionStatus[]).map((s) 
 /** 活跃链路 Stepper 节点（终态不展示步进条） */
 const STEPPER_CHAIN: SubmissionStatus[] = ['submitted', 'initial_review', 'external_review', 'review_returned', 'minor_revision', 're_review', 'final_review', 'accepted', 'in_production'];
 const TERMINAL = new Set<SubmissionStatus>(['rejected', 'withdrawn', 'transferred']);
+/** 返修链路状态：出现时需要录入/展示修回截止日 */
+const REVISION_STATUSES = new Set<SubmissionStatus>(['minor_revision', 'major_revision']);
 
 const fmtDate = (ts?: number | null) => (ts ? new Date(ts).toLocaleDateString('zh-CN') : '—');
 const todayISO = () => new Date().toISOString().slice(0, 10);
+/** 修回截止日倒计时徽章：>=7 天绿，<7 琥珀，<3 红，超期红 + 提醒 */
+function revisionBadge(deadline: number | null): ReactNode {
+  if (!deadline) return null;
+  const ms = deadline - Date.now();
+  const days = Math.ceil(ms / 86400000);
+  if (ms < 0) return <Badge tone="red">修回已超期 {-days} 天 · 建议联系编辑部</Badge>;
+  const tone: 'green' | 'amber' | 'red' = days < 3 ? 'red' : days < 7 ? 'amber' : 'green';
+  return <Badge tone={tone}>修回剩 {days} 天</Badge>;
+}
 
 export function SubmissionPage({ project }: { project: Project }) {
   const [tab, setTab] = useState<Tab>('journals');
@@ -64,11 +75,14 @@ export function SubmissionPage({ project }: { project: Project }) {
 
   // 投稿跟踪
   const [tracks, setTracks] = useState<SubmissionTrack[]>([]);
-  const [regForm, setRegForm] = useState({ docId: '', journalId: '', journalName: '', date: todayISO(), status: 'submitted' as SubmissionStatus, note: '' });
+  const [regForm, setRegForm] = useState({ docId: '', journalId: '', journalName: '', date: todayISO(), status: 'submitted' as SubmissionStatus, note: '', prevId: '', revDeadline: '' });
   const [openTrackId, setOpenTrackId] = useState<string | null>(null);
   const [eventFor, setEventFor] = useState<string | null>(null);
   const [evStatus, setEvStatus] = useState<SubmissionStatus>('minor_revision');
   const [evNote, setEvNote] = useState('');
+  const [evDeadline, setEvDeadline] = useState('');
+  const [deadlineFor, setDeadlineFor] = useState<string | null>(null);
+  const [deadlineVal, setDeadlineVal] = useState('');
   const [emailFor, setEmailFor] = useState<string | null>(null);
   const [emailText, setEmailText] = useState('');
   const [parsing, setParsing] = useState(false);
@@ -216,8 +230,37 @@ export function SubmissionPage({ project }: { project: Project }) {
         submittedAt: regForm.date ? new Date(regForm.date + 'T00:00:00').getTime() : Date.now(),
         currentStatus: regForm.status,
         note: regForm.note,
+        previousSubmissionId: regForm.prevId || undefined,
+        revisionDeadline: regForm.revDeadline ? new Date(regForm.revDeadline + 'T23:59:59').getTime() : null,
       });
-      setRegForm({ docId: '', journalId: '', journalName: '', date: todayISO(), status: 'submitted', note: '' });
+      setRegForm({ docId: '', journalId: '', journalName: '', date: todayISO(), status: 'submitted', note: '', prevId: '', revDeadline: '' });
+      await loadTracks();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  /** 终态记录点「转投他刊」：预填登记表单，提交时带 previousSubmissionId 串联 */
+  const transferToNew = (t: SubmissionTrack) => {
+    setRegForm({
+      docId: t.documentId || '',
+      journalId: '',
+      journalName: '',
+      date: todayISO(),
+      status: 'submitted',
+      note: `转投自 ${t.journalName}（${STATUS_META[t.currentStatus]?.label || t.currentStatus}）`,
+      prevId: t.id,
+      revDeadline: '',
+    });
+    setTab('track');
+  };
+
+  /** 卡片上「设置/修改截止日」：PATCH revisionDeadline */
+  const saveDeadline = async (id: string) => {
+    try {
+      await api.submission.updateTrack(id, { revisionDeadline: deadlineVal ? new Date(deadlineVal + 'T23:59:59').getTime() : null });
+      setDeadlineFor(null);
+      setDeadlineVal('');
       await loadTracks();
     } catch (e: any) {
       setError(e.message);
@@ -227,8 +270,12 @@ export function SubmissionPage({ project }: { project: Project }) {
   const confirmEvent = async (id: string) => {
     try {
       await api.submission.addTrackEvent(id, { status: evStatus, note: evNote });
+      if (REVISION_STATUSES.has(evStatus) && evDeadline) {
+        await api.submission.updateTrack(id, { revisionDeadline: new Date(evDeadline + 'T23:59:59').getTime() });
+      }
       setEventFor(null);
       setEvNote('');
+      setEvDeadline('');
       await loadTracks();
     } catch (e: any) {
       setError(e.message);
@@ -414,6 +461,9 @@ export function SubmissionPage({ project }: { project: Project }) {
               <Input placeholder="期刊名（库内没有可自由输入）" value={regForm.journalName} onChange={(e) => setRegForm((f) => ({ ...f, journalName: e.target.value }))} />
               <Input type="date" value={regForm.date} onChange={(e) => setRegForm((f) => ({ ...f, date: e.target.value }))} />
               <Select options={STATUS_OPTIONS} value={regForm.status} onChange={(v) => setRegForm((f) => ({ ...f, status: v as SubmissionStatus }))} />
+              {REVISION_STATUSES.has(regForm.status) && (
+                <Input type="date" value={regForm.revDeadline} onChange={(e) => setRegForm((f) => ({ ...f, revDeadline: e.target.value }))} />
+              )}
               <Input placeholder="备注（可选）" value={regForm.note} onChange={(e) => setRegForm((f) => ({ ...f, note: e.target.value }))} />
             </div>
             <Button onClick={submitTrack}>
@@ -538,14 +588,28 @@ export function SubmissionPage({ project }: { project: Project }) {
             const meta = STATUS_META[t.currentStatus] || STATUS_META.submitted;
             const docTitle = t.documentId ? docs.find((d) => d.id === t.documentId)?.title : '';
             const stepIdx = STEPPER_CHAIN.indexOf(t.currentStatus);
+            const forward = tracks.find((x) => x.previousSubmissionId === t.id);
             return (
               <Card key={t.id} className="p-4 mb-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t.journalName}</span>
                   <Badge tone={meta.tone}>{meta.label}</Badge>
                   <span className="text-[11px] text-slate-400 dark:text-slate-500">{meta.group}</span>
-                  <div className="ml-auto flex gap-1.5">
+                  {forward && (
+                    <span className="text-[11px] text-teal-700 dark:text-teal-400">
+                      已转投 → {forward.journalName}
+                    </span>
+                  )}
+                  <div className="ml-auto flex gap-1.5 items-center">
                     <button className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline" onClick={() => setEventFor(eventFor === t.id ? null : t.id)}>更新状态</button>
+                    {TERMINAL.has(t.currentStatus) && (
+                      <button className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline" title="用同一稿件登记新期刊（自动串联旧记录）" onClick={() => transferToNew(t)}>
+                        <Forward size={11} className="inline mr-0.5" />转投他刊
+                      </button>
+                    )}
+                    <button className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline" onClick={() => { setDeadlineFor(deadlineFor === t.id ? null : t.id); setDeadlineVal(t.revisionDeadline ? new Date(t.revisionDeadline).toISOString().slice(0, 10) : ''); }}>
+                      {t.revisionDeadline ? '改截止日' : '设截止日'}
+                    </button>
                     <button className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline" onClick={() => { setEmailFor(emailFor === t.id ? null : t.id); setParseResult(null); }}>
                       <Mail size={11} className="inline mr-0.5" />解析邮件
                     </button>
@@ -557,6 +621,20 @@ export function SubmissionPage({ project }: { project: Project }) {
                 <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
                   {docTitle || t.title || '（未命名稿件）'} · 投稿于 {fmtDate(t.submittedAt)}
                 </div>
+
+                {/* 修回截止日倒计时 */}
+                {t.revisionDeadline && (
+                  <div className="mt-1.5 text-[11px]">
+                    {revisionBadge(t.revisionDeadline)}
+                    <span className="ml-1.5 text-slate-400 dark:text-slate-500">截止 {fmtDate(t.revisionDeadline)}</span>
+                  </div>
+                )}
+                {deadlineFor === t.id && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <Input type="date" value={deadlineVal} onChange={(e) => setDeadlineVal(e.target.value)} />
+                    <Button className="text-xs px-2 py-1" onClick={() => saveDeadline(t.id)}>保存</Button>
+                  </div>
+                )}
 
                 {/* L3 周期推断提示 */}
                 {t.dueAt && !TERMINAL.has(t.currentStatus) && (
@@ -593,6 +671,12 @@ export function SubmissionPage({ project }: { project: Project }) {
                   <div className="mt-3 rounded-lg border border-slate-100 dark:border-slate-800 p-3 space-y-2">
                     <Select options={STATUS_OPTIONS} value={evStatus} onChange={(v) => setEvStatus(v as SubmissionStatus)} />
                     <Input placeholder="备注（可选）" value={evNote} onChange={(e) => setEvNote(e.target.value)} />
+                    {REVISION_STATUSES.has(evStatus) && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500 shrink-0">修回截止日期</span>
+                        <Input type="date" value={evDeadline} onChange={(e) => setEvDeadline(e.target.value)} />
+                      </div>
+                    )}
                     <Button className="text-xs px-2 py-1" onClick={() => confirmEvent(t.id)}>确认追加状态</Button>
                   </div>
                 )}

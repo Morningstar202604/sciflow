@@ -185,6 +185,8 @@ export interface KnowledgeSource {
   /** RAG 引用可点（#17）：块 id + 完整块文本，前端"展开原文" */
   chunkId: string;
   chunkText: string;
+  /** 命中块在所属文档内的分块序号（0 起，来源卡片显示 分块 seq+1） */
+  chunkSeq: number;
   /** 命中块绑定的文献（#5） */
   referenceId: string | null;
   referenceTitle: string | null;
@@ -427,6 +429,8 @@ export interface Experiment {
   conclusion: string;
   runtimeMs: number;
   status: 'ok' | 'error' | 'timeout';
+  /** 运行时字段（不入库）：本次执行是否启用了 /proc RSS 内存监控 */
+  memoryMonitored?: boolean;
   createdAt: number;
   updatedAt: number;
 }

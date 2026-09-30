@@ -39,16 +39,44 @@ function sandboxEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+/** 未检测到 Python 时的友好引导文案（前端据此识别并展示专门引导卡片） */
+const NO_PYTHON_MESSAGE =
+  '本机未检测到 Python 3 解释器。实验沙箱需要 Python 3 才能运行代码。' +
+  '安装方式示例：Windows 安装 python.org 安装包（勾选 Add to PATH）；' +
+  'macOS 执行 brew install python3；Linux（Debian/Ubuntu）执行 sudo apt install python3。' +
+  '安装后重启应用即可。';
+
 @Injectable()
 export class ExperimentsService {
-  private pythonAvailable: boolean | null = null;
+  /** 已解析出的可用 python 解释器路径；undefined=未探测，null=无可用解释器 */
+  private resolvedPython: string | null | undefined = undefined;
 
-  /** 探测本机 python3（结果缓存；无则返回友好错误） */
-  private hasPython(): boolean {
-    if (this.pythonAvailable !== null) return this.pythonAvailable;
-    const r = spawnSync('python3', ['--version'], { timeout: 3000, env: sandboxEnv() });
-    this.pythonAvailable = !r.error;
-    return this.pythonAvailable;
+  /**
+   * 探测本机可用的 Python 3 解释器（结果缓存）。
+   * 优先级：SANDBOX_PYTHON 环境变量覆盖 > python3 > python。
+   * 返回可执行文件路径（字符串），全部不可用则返回 null。
+   */
+  private detectPython(): string | null {
+    if (this.resolvedPython !== undefined) return this.resolvedPython;
+
+    // 1. 显式覆盖（便于 CI / 无 python3 环境测试降级路径）
+    const override = process.env.SANDBOX_PYTHON;
+    if (override) {
+      const r = spawnSync(override, ['--version'], { timeout: 3000, env: sandboxEnv() });
+      this.resolvedPython = r.error ? null : override;
+      return this.resolvedPython;
+    }
+
+    // 2. 依次探测 python3 / python
+    for (const candidate of ['python3', 'python']) {
+      const r = spawnSync(candidate, ['--version'], { timeout: 3000, env: sandboxEnv() });
+      if (!r.error) {
+        this.resolvedPython = candidate;
+        return candidate;
+      }
+    }
+    this.resolvedPython = null;
+    return null;
   }
 
   list(projectId: string) {
@@ -92,15 +120,17 @@ export class ExperimentsService {
       updatedAt: now,
     };
 
-    // 无 python3：落一条 error 行，友好降级而非 500
-    if (!this.hasPython()) {
+    // 无可用 Python：落一条 error 行，友好降级而非 500
+    const pythonPath = this.detectPython();
+    if (!pythonPath) {
       row.status = 'error';
-      row.stderr = '未检测到 python3：请先在本机安装 Python 3（沙箱依赖本机解释器）。';
+      row.stderr = NO_PYTHON_MESSAGE;
       db.insert(experiments).values(row).run();
-      return this.get(row.id);
+      const dto = this.get(row.id);
+      return { ...dto, memoryMonitored: false };
     }
 
-    const result = await this.executePython(parsed.code);
+    const result = await this.executePython(parsed.code, pythonPath);
     row.stdout = result.stdout;
     row.stderr = result.stderr;
     row.stdoutTruncated = result.stdoutTruncated ? 1 : 0;
@@ -110,7 +140,8 @@ export class ExperimentsService {
     row.status = result.status;
     row.updatedAt = Date.now();
     db.insert(experiments).values(row).run();
-    return this.get(row.id);
+    const dto = this.get(row.id);
+    return { ...dto, memoryMonitored: result.memoryMonitored };
   }
 
   /** PATCH：仅允许改 goal / conclusion（zod 校验） */
@@ -141,7 +172,7 @@ export class ExperimentsService {
     return r.data;
   }
 
-  private async executePython(code: string): Promise<{
+  private async executePython(code: string, pythonPath: string): Promise<{
     stdout: string;
     stderr: string;
     stdoutTruncated: boolean;
@@ -149,15 +180,18 @@ export class ExperimentsService {
     figures: string[];
     runtimeMs: number;
     status: 'ok' | 'error' | 'timeout';
+    memoryMonitored: boolean;
   }> {
     const workDir = mkdtempSync(path.join(tmpdir(), 'sciflow-exp-'));
     writeFileSync(path.join(workDir, 'main.py'), code, 'utf-8');
     const started = Date.now();
     let status: 'ok' | 'error' | 'timeout' = 'ok';
     let memoryKilled = false;
+    let memoryMonitored = false;
+    let memTimer: NodeJS.Timeout | null = null;
 
     try {
-      const child = spawn('python3', ['main.py'], {
+      const child = spawn(pythonPath, ['main.py'], {
         cwd: workDir,
         env: sandboxEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -207,29 +241,37 @@ export class ExperimentsService {
         killGroup();
       }, RUN_TIMEOUT_MS);
 
-      // RSS 内存监控（Linux /proc；其他平台静默跳过）
-      const memTimer = setInterval(() => {
-        try {
-          const s = readFileSync(`/proc/${child.pid}/status`, 'utf-8');
-          const m = s.match(/VmRSS:\s+(\d+)\s+kB/);
-          if (m && Number(m[1]) > MAX_MEMORY_MB * 1024) {
-            memoryKilled = true;
-            killGroup();
+      // RSS 内存监控（Linux /proc）：先探测一次是否可用，不可用则跳过（不报错，超时仍兜底）
+      try {
+        readFileSync(`/proc/${child.pid}/status`, 'utf-8');
+        memoryMonitored = true;
+      } catch {
+        memoryMonitored = false;
+      }
+      if (memoryMonitored) {
+        memTimer = setInterval(() => {
+          try {
+            const s = readFileSync(`/proc/${child.pid}/status`, 'utf-8');
+            const m = s.match(/VmRSS:\s+(\d+)\s+kB/);
+            if (m && Number(m[1]) > MAX_MEMORY_MB * 1024) {
+              memoryKilled = true;
+              killGroup();
+            }
+          } catch {
+            /* 进程已退出 */
           }
-        } catch {
-          /* 非 Linux / 进程已退出 */
-        }
-      }, 400);
+        }, 400);
+      }
 
       const exitCode = await new Promise<number | null>((resolve) => {
         child.on('close', (codeNum) => {
           clearTimeout(timer);
-          clearInterval(memTimer);
+          if (memTimer) clearInterval(memTimer);
           resolve(codeNum);
         });
         child.on('error', () => {
           clearTimeout(timer);
-          clearInterval(memTimer);
+          if (memTimer) clearInterval(memTimer);
           resolve(null);
         });
       });
@@ -253,6 +295,7 @@ export class ExperimentsService {
         figures: this.collectFigures(workDir),
         runtimeMs: Date.now() - started,
         status,
+        memoryMonitored,
       };
     } finally {
       rmSync(workDir, { recursive: true, force: true });
