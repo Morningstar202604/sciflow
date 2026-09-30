@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { KnowledgeService } from './knowledge.service';
 
 @Controller('knowledge')
@@ -21,6 +21,12 @@ export class KnowledgeController {
   @Post('query')
   query(@Body() body: { projectId: string; question: string }) {
     return this.knowledge.query(body.projectId, body.question);
+  }
+
+  /** 文献库↔知识库打通（#5）：手动绑定/解除文献，入参 {referenceId | null} */
+  @Patch(':id/bind')
+  bind(@Param('id') id: string, @Body() body: { referenceId: string | null }) {
+    return this.knowledge.bind(id, body.referenceId ?? null);
   }
 
   @Delete(':id')

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Header } from '@nestjs/common';
 import { ReferencesService, PaperHit } from './references.service';
 
 @Controller('references')
@@ -34,6 +34,19 @@ export class ReferencesController {
     return this.references.extractionTable(projectId);
   }
 
+  /** 引用网络图聚合（共引边 + 去重边），须声明在 :id 之前 */
+  @Get('graph')
+  graph(@Query('projectId') projectId: string) {
+    return this.references.graph(projectId);
+  }
+
+  /** 导出项目全部文献为 BibTeX / RIS 纯文本（前端 fetch 后 Blob 下载） */
+  @Get('export')
+  @Header('Content-Type', 'text/plain; charset=utf-8')
+  exportRefs(@Query('projectId') projectId: string, @Query('format') format?: string) {
+    return this.references.exportRefs(projectId, format || 'bibtex');
+  }
+
   @Get(':id')
   get(@Param('id') id: string) {
     return this.references.get(id);
@@ -49,6 +62,12 @@ export class ReferencesController {
   @Post('import')
   import(@Body() body: { projectId: string; hits: (Partial<PaperHit> & { title: string })[] }) {
     return this.references.import(body.projectId, body.hits);
+  }
+
+  /** 导入 BibTeX 文本（指纹去重，返回 imported/skipped） */
+  @Post('import-bibtex')
+  importBibtex(@Body() body: { projectId: string; text: string }) {
+    return this.references.importBibtex(body.projectId, body.text || '');
   }
 
   /** 更新阅读状态 / 标签 */

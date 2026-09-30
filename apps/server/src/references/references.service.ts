@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { sql, eq, and } from 'drizzle-orm';
 import { randomUUID, createHash } from 'node:crypto';
 import { db } from '../db/database';
-import { references, screeningQueue, extractionFields, extractionValues } from '../db/schema';
+import { references, screeningQueue, extractionFields, extractionValues, documents, citations } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 
 /** 文献命中条目（本地文献库检索/入库共用） */
@@ -309,6 +309,254 @@ export class ReferencesService {
       options,
       createdAt: row.createdAt,
     };
+  }
+
+  /** 解析 tags JSON 字符串为数组（导出/网络图共用） */
+  private parseTags(json: string | null): string[] {
+    try {
+      const t = JSON.parse(json || '[]');
+      return Array.isArray(t) ? t.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // ---------- 引用网络图（共引 + 去重边，前端自研力导向布局） ----------
+
+  /**
+   * 聚合项目引用网络：
+   * - nodes：项目全部文献的布局所需元数据
+   * - edges：①共引边（同一 document 的 citations 内出现的文献对，每文档计一次，weight=共引文档数）
+   *          ②重复边（isDuplicateOf 指向，type='dup'，weight 固定高亮）
+   * 效率：先取项目全部文档 id，再按 documentId 批量取 citations（避免逐文档查询）。
+   */
+  graph(projectId: string) {
+    const refs = this.list(projectId);
+    const nodes = refs.map((r) => ({
+      id: r.id,
+      title: r.title,
+      year: r.year,
+      venue: r.venue || '',
+      citationCount: r.citationCount ?? 0,
+      tags: this.parseTags(r.tags),
+      readingStatus: r.readingStatus || 'unread',
+      isDuplicateOf: r.isDuplicateOf || '',
+    }));
+    const refIds = new Set(refs.map((r) => r.id));
+
+    // 共引边：项目文档 -> citations -> 同文档内同项目文献两两配对
+    const docRows = db.select({ id: documents.id }).from(documents).where(eq(documents.projectId, projectId)).all();
+    const docIds = docRows.map((d) => d.id);
+    const coCite = new Map<string, { a: string; b: string; weight: number }>();
+    if (docIds.length) {
+      const citeRows = db
+        .select()
+        .from(citations)
+        .where(sql`${citations.documentId} IN (${sql.join(docIds.map((id) => sql`${id}`), sql`, `)})`)
+        .all();
+      const byDoc = new Map<string, Set<string>>();
+      for (const c of citeRows) {
+        if (!refIds.has(c.referenceId)) continue;
+        let s = byDoc.get(c.documentId);
+        if (!s) {
+          s = new Set<string>();
+          byDoc.set(c.documentId, s);
+        }
+        s.add(c.referenceId);
+      }
+      for (const s of byDoc.values()) {
+        const arr = [...s];
+        for (let i = 0; i < arr.length; i++) {
+          for (let j = i + 1; j < arr.length; j++) {
+            const a = arr[i] < arr[j] ? arr[i] : arr[j];
+            const b = arr[i] < arr[j] ? arr[j] : arr[i];
+            const key = `${a}|${b}`;
+            const ex = coCite.get(key);
+            if (ex) ex.weight += 1;
+            else coCite.set(key, { a, b, weight: 1 });
+          }
+        }
+      }
+    }
+    const edges: { a: string; b: string; weight: number; type: 'co-cite' | 'dup' }[] = [...coCite.values()].map((e) => ({
+      ...e,
+      type: 'co-cite' as const,
+    }));
+
+    // 重复边
+    for (const r of refs) {
+      if (r.isDuplicateOf && refIds.has(r.isDuplicateOf)) {
+        edges.push({ a: r.id, b: r.isDuplicateOf, weight: 5, type: 'dup' as const });
+      }
+    }
+    return { nodes, edges };
+  }
+
+  // ---------- BibTeX / RIS 导出导入 ----------
+
+  /** 导出项目全部文献为 BibTeX 或 RIS 文本 */
+  exportRefs(projectId: string, format: string) {
+    const refs = this.list(projectId);
+    return (format || 'bibtex').toLowerCase() === 'ris' ? this.toRis(refs) : this.toBibtex(refs);
+  }
+
+  private toBibtex(refs: (typeof references.$inferSelect)[]): string {
+    return refs
+      .map((r, i) => {
+        const key = (r.fingerprint || '').slice(0, 8) || `ref${i + 1}`;
+        const authors = this.parseAuthors(r.authors).join(' and ');
+        const tags = this.parseTags(r.tags);
+        const fields: [string, string][] = [
+          ['title', r.title],
+          ...(authors ? [['author', authors] as [string, string]] : []),
+          ...(r.year ? [['year', String(r.year)] as [string, string]] : []),
+          ...(r.venue ? [['journal', r.venue] as [string, string]] : []),
+          ...(r.doi ? [['doi', r.doi] as [string, string]] : []),
+          ...(r.abstract ? [['abstract', r.abstract] as [string, string]] : []),
+          ...(tags.length ? [['keywords', tags.join(', ')] as [string, string]] : []),
+        ];
+        const body = fields.map(([k, v]) => `  ${k} = {${v}}`).join(',\n');
+        return `@article{${key},\n${body}\n}`;
+      })
+      .join('\n\n');
+  }
+
+  private toRis(refs: (typeof references.$inferSelect)[]): string {
+    return refs
+      .map((r) => {
+        const lines: string[] = ['TY  - JOUR', `TI  - ${r.title}`];
+        for (const a of this.parseAuthors(r.authors)) lines.push(`AU  - ${a}`);
+        if (r.year) lines.push(`PY  - ${r.year}`);
+        if (r.venue) lines.push(`JO  - ${r.venue}`);
+        if (r.doi) lines.push(`DO  - ${r.doi}`);
+        if (r.abstract) lines.push(`AB  - ${r.abstract}`);
+        for (const t of this.parseTags(r.tags)) lines.push(`KW  - ${t}`);
+        lines.push('ER  - ');
+        return lines.join('\n');
+      })
+      .join('\n\n');
+  }
+
+  /** 清洗 BibTeX 字段中的 LaTeX 转义与分组花括号：\{ \} \_ \& 等还原，{} 包裹去除 */
+  private cleanLatex(s: string): string {
+    return s
+      .replace(/\\([{}&_#$%])/g, '$1')
+      .replace(/[{}]/g, '')
+      .trim();
+  }
+
+  /** 正则/扫描式解析 BibTeX 文本（大括号匹配，支持嵌套），不引第三方依赖 */
+  private parseBibtex(text: string) {
+    const out: { title: string; authors: string[]; year: number | null; journal: string; doi: string; abstract: string }[] = [];
+    const s = text || '';
+    let i = 0;
+    while (true) {
+      const at = s.indexOf('@', i);
+      if (at < 0) break;
+      let j = at + 1;
+      while (j < s.length && s[j] !== '{' && s[j] !== '(') j++;
+      if (j >= s.length) break;
+      const open = s[j];
+      let depth = 0;
+      let k = j;
+      for (; k < s.length; k++) {
+        if (s[k] === '{' || s[k] === '(') depth++;
+        else if (s[k] === '}' || s[k] === ')') {
+          depth--;
+          if (depth === 0) {
+            k++;
+            break;
+          }
+        }
+      }
+      const entryBody = s.slice(j + 1, k - 1);
+      const commaIdx = entryBody.indexOf(',');
+      const body = commaIdx >= 0 ? entryBody.slice(commaIdx + 1) : entryBody;
+      // 字段扫描：name = {value} / "value" / bare
+      const fields: Record<string, string> = {};
+      let p = 0;
+      while (p < body.length) {
+        const eq = body.indexOf('=', p);
+        if (eq < 0) break;
+        // 前一个字段值结尾的 `},` 会留下前导逗号/空白，需一并剥离
+        const name = body.slice(p, eq).replace(/^[,\s]+/, '').trim().toLowerCase();
+        let q = eq + 1;
+        while (q < body.length && /\s/.test(body[q])) q++;
+        let val = '';
+        if (body[q] === '{' || body[q] === '"') {
+          const openC = body[q];
+          let d2 = 0;
+          let m = q;
+          for (; m < body.length; m++) {
+            if (openC === '{' && body[m] === '{') d2++;
+            else if (openC === '{' && body[m] === '}') {
+              d2--;
+              if (d2 === 0) {
+                m++;
+                break;
+              }
+            } else if (openC === '"' && body[m] === '"') {
+              m++;
+              break;
+            }
+          }
+          val = body.slice(q + 1, m - 1);
+          p = m;
+        } else {
+          const e2 = body.indexOf(',', q);
+          const end = e2 < 0 ? body.length : e2;
+          val = body.slice(q, end).trim();
+          p = end + 1;
+        }
+        fields[name] = this.cleanLatex(val);
+      }
+      out.push({
+        title: fields['title'] || '',
+        authors: (fields['author'] || '').split(/\s+and\s+/i).map((a) => a.trim()).filter(Boolean),
+        year: fields['year'] ? parseInt(fields['year'], 10) : null,
+        journal: fields['journal'] || fields['booktitle'] || '',
+        doi: fields['doi'] || '',
+        abstract: fields['abstract'] || '',
+      });
+      i = k;
+    }
+    return out;
+  }
+
+  /** 导入 BibTeX 文本：逐条复用创建逻辑，指纹命中已存在文献则跳过并计数 */
+  importBibtex(projectId: string, text: string) {
+    const entries = this.parseBibtex(text);
+    let imported = 0;
+    let skipped = 0;
+    for (const e of entries) {
+      if (!e.title) {
+        skipped++;
+        continue;
+      }
+      const fp = this.fingerprint(e.title);
+      if (fp) {
+        const dup = db
+          .select()
+          .from(references)
+          .where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp)))
+          .get();
+        if (dup) {
+          skipped++;
+          continue;
+        }
+      }
+      const created = this.create(projectId, {
+        title: e.title,
+        authors: e.authors,
+        year: e.year,
+        venue: e.journal,
+        doi: e.doi,
+        abstract: e.abstract,
+      });
+      if (created) imported++;
+      else skipped++;
+    }
+    return { imported, skipped, total: entries.length };
   }
 
   /** AI 文献综述（只基于文献库内真实文献，禁止编造） */

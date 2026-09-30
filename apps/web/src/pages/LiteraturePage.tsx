@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-import { BookOpenCheck, ClipboardList, Download, Filter, FlaskConical, GitCompareArrows, Lightbulb, ListChecks, Loader2, Plus, Search, Table2, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { BookOpenCheck, ClipboardList, Download, FileDown, Filter, FlaskConical, GitCompareArrows, Lightbulb, ListChecks, Loader2, Network, Plus, Search, Table2, Trash2, Upload, X } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { DeepDiveResult, EvidenceResult, ExtractedPaper, ExtractionField, ExtractionTableResult, GapResult, PaperComparisonResult, Project, Reference, ScreeningItem } from '../types';
-import { Badge, Button, Card, CollapsibleCard, Empty, ErrorBox, Input, Select, Spinner, Textarea, jsonText } from '../components/ui';
+import type { DeepDiveResult, EvidenceResult, ExtractedPaper, ExtractionField, ExtractionTableResult, GapResult, PaperComparisonResult, Project, Reference, ReferenceGraph, ScreeningItem } from '../types';
+import { Badge, Button, Card, CollapsibleCard, Empty, ErrorBox, Input, Select, Spinner, Textarea, downloadText, jsonText } from '../components/ui';
 import { ChartEmpty, Donut, HBar, SegBar } from '../components/charts';
 
-type Tool = 'summary' | 'extract' | 'evidence' | 'deepdive' | 'gap' | 'compare';
+type Tool = 'summary' | 'extract' | 'evidence' | 'deepdive' | 'gap' | 'compare' | 'graph';
 
 const TOOLS: { key: Tool; label: string; icon: typeof ListChecks; hint: string }[] = [
   { key: 'summary', label: '文献综述', icon: Download, hint: 'STORM 式结构化综述' },
@@ -16,7 +16,276 @@ const TOOLS: { key: Tool; label: string; icon: typeof ListChecks; hint: string }
   { key: 'deepdive', label: '单篇精读', icon: BookOpenCheck, hint: 'Lateral 式论文解剖' },
   { key: 'gap', label: '研究缺口', icon: Lightbulb, hint: '科研选题定位' },
   { key: 'compare', label: '文献对比', icon: Table2, hint: '多篇横向对比表' },
+  { key: 'graph', label: '引用网络', icon: Network, hint: '共引/去重关系图' },
 ];
+
+/* =====================================================================
+ * 引用网络图：自研 Fruchterman-Reingold 力导向布局（零依赖，纯 SVG）
+ * ---------------------------------------------------------------------
+ * - 节点圆内随机初始化，250 轮（大图 120 轮）：斥力 k²/d、引力 d²/k、温度衰减
+ * - 节点半径随被引数对数缩放；颜色按 venue 前 6 归类，其余灰
+ * - dup 边红色虚线、共引边品牌色细线（线宽随 weight）
+ * - 支持拖拽 / 点击选中 / 一跳邻居高亮 / 空白取消
+ * ===================================================================== */
+type Pt = { x: number; y: number };
+const VENUE_COLORS = ['#0d9488', '#0ea5e9', '#8b5cf6', '#f59e0b', '#ec4899', '#10b981'];
+
+function computeLayout(nodes: { id: string }[], edges: { a: string; b: string }[]): Map<string, Pt> {
+  const n = nodes.length;
+  const W = 900;
+  const H = 600;
+  const pos = new Map<string, Pt>();
+  nodes.forEach((nd, i) => {
+    const a = (i / Math.max(1, n)) * Math.PI * 2;
+    const r = 140 + (i % 6) * 26;
+    pos.set(nd.id, { x: W / 2 + Math.cos(a) * r, y: H / 2 + Math.sin(a) * r });
+  });
+  if (n < 2) return pos;
+  const k = Math.sqrt((W * H) / n);
+  const idx = new Map(nodes.map((nd, i) => [nd.id, i]));
+  const disp: Pt[] = nodes.map(() => ({ x: 0, y: 0 }));
+  let temp = W / 6;
+  const iters = n > 120 ? 120 : 250;
+  for (let it = 0; it < iters; it++) {
+    for (let i = 0; i < n; i++) {
+      disp[i].x = 0;
+      disp[i].y = 0;
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        const pi = pos.get(nodes[i].id)!;
+        const pj = pos.get(nodes[j].id)!;
+        let dx = pi.x - pj.x;
+        let dy = pi.y - pj.y;
+        let d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 1) {
+          dx = Math.random() - 0.5;
+          dy = Math.random() - 0.5;
+          d = 1;
+        }
+        const f = (k * k) / d;
+        disp[i].x += (dx / d) * f;
+        disp[i].y += (dy / d) * f;
+      }
+    }
+    for (const e of edges) {
+      const i = idx.get(e.a);
+      const j = idx.get(e.b);
+      if (i === undefined || j === undefined) continue;
+      const pi = pos.get(nodes[i].id)!;
+      const pj = pos.get(nodes[j].id)!;
+      const dx = pi.x - pj.x;
+      const dy = pi.y - pj.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const f = (d * d) / k;
+      disp[i].x -= (dx / d) * f;
+      disp[i].y -= (dy / d) * f;
+      disp[j].x += (dx / d) * f;
+      disp[j].y += (dy / d) * f;
+    }
+    for (let i = 0; i < n; i++) {
+      const pi = pos.get(nodes[i].id)!;
+      const m = Math.sqrt(disp[i].x * disp[i].x + disp[i].y * disp[i].y) || 0.01;
+      const lim = Math.min(m, temp);
+      pi.x += (disp[i].x / m) * lim;
+      pi.y += (disp[i].y / m) * lim;
+      // 轻微向心牵引，防止布局漂移出界
+      pi.x += (W / 2 - pi.x) * 0.015;
+      pi.y += (H / 2 - pi.y) * 0.015;
+    }
+    temp *= 0.93;
+  }
+  return pos;
+}
+
+function ReferenceNetwork({ graph, onViewRef }: { graph: ReferenceGraph; onViewRef?: (id: string) => void }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const layout = useMemo(() => computeLayout(graph.nodes, graph.edges), [graph]);
+  const [pos, setPos] = useState<Map<string, Pt>>(layout);
+  const [selected, setSelected] = useState<string | null>(null);
+  const dragRef = useRef<{ id: string; moved: boolean } | null>(null);
+
+  useEffect(() => {
+    setPos(layout);
+    setSelected(null);
+  }, [layout]);
+
+  // venue 前 6 类各一色
+  const venueColor = useMemo(() => {
+    const m = new Map<string, number>();
+    graph.nodes.forEach((nd) => {
+      const v = nd.venue || '未标注';
+      m.set(v, (m.get(v) || 0) + 1);
+    });
+    const top = [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map((e) => e[0]);
+    const map = new Map<string, string>();
+    top.forEach((v, i) => map.set(v, VENUE_COLORS[i % VENUE_COLORS.length]));
+    return map;
+  }, [graph]);
+
+  const neighbors = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    graph.edges.forEach((e) => {
+      if (!m.has(e.a)) m.set(e.a, new Set());
+      if (!m.has(e.b)) m.set(e.b, new Set());
+      m.get(e.a)!.add(e.b);
+      m.get(e.b)!.add(e.a);
+    });
+    return m;
+  }, [graph]);
+
+  // viewBox 按当前坐标包围盒 fit
+  const vb = useMemo(() => {
+    if (graph.nodes.length === 0) return '0 0 900 600';
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pos.forEach((p) => {
+      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+    });
+    const pad = 50;
+    return `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`;
+  }, [pos, graph]);
+
+  const toSvgPt = (clientX: number, clientY: number): Pt => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const pt = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+    return { x: pt.x, y: pt.y };
+  };
+
+  const selNode = selected ? graph.nodes.find((n) => n.id === selected) : null;
+  const neighborSet = selected ? neighbors.get(selected) : undefined;
+
+  return (
+    <div>
+      {graph.nodes.length > 200 && (
+        <div className="text-xs text-amber-600 dark:text-amber-400 mb-2">
+          节点较多（{graph.nodes.length}），为保证流畅已减少布局迭代；建议聚焦高被引节点。
+        </div>
+      )}
+      <svg
+        ref={svgRef}
+        viewBox={vb}
+        className="w-full h-[420px] rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/30 touch-none"
+        onClick={(e) => {
+          if (e.target === svgRef.current) setSelected(null);
+        }}
+        onPointerMove={(e) => {
+          const d = dragRef.current;
+          if (!d) return;
+          d.moved = true;
+          const p = toSvgPt(e.clientX, e.clientY);
+          setPos((prev) => {
+            const next = new Map(prev);
+            next.set(d.id, p);
+            return next;
+          });
+        }}
+        onPointerUp={() => {
+          dragRef.current = null;
+        }}
+      >
+        {graph.edges.map((e, i) => {
+          const pa = pos.get(e.a);
+          const pb = pos.get(e.b);
+          if (!pa || !pb) return null;
+          const isDup = e.type === 'dup';
+          const dim = !!selected && e.a !== selected && e.b !== selected && !neighborSet?.has(e.a) && !neighborSet?.has(e.b);
+          return (
+            <line
+              key={i}
+              x1={pa.x}
+              y1={pa.y}
+              x2={pb.x}
+              y2={pb.y}
+              stroke={isDup ? '#f43f5e' : 'var(--brand-500)'}
+              strokeWidth={isDup ? 1.6 : Math.min(3, 0.5 + e.weight * 0.5)}
+              strokeDasharray={isDup ? '5 4' : undefined}
+              opacity={dim ? 0.08 : isDup ? 0.85 : 0.3 + Math.min(0.4, e.weight * 0.1)}
+            >
+              <title>{isDup ? `重复关系` : `共引 ${e.weight} 篇文档`}</title>
+            </line>
+          );
+        })}
+        {graph.nodes.map((nd) => {
+          const p = pos.get(nd.id);
+          if (!p) return null;
+          const isSel = selected === nd.id;
+          const isNeighbor = !!neighborSet?.has(nd.id);
+          const dim = !!selected && !isSel && !isNeighbor;
+          const r = 4 + Math.min(11, Math.log10((nd.citationCount || 0) + 1) * 3.5);
+          const color = venueColor.get(nd.venue || '未标注') || '#94a3b8';
+          return (
+            <circle
+              key={nd.id}
+              cx={p.x}
+              cy={p.y}
+              r={r}
+              fill={color}
+              fillOpacity={dim ? 0.15 : isSel ? 1 : 0.85}
+              stroke={isSel ? '#0f172a' : '#fff'}
+              strokeWidth={isSel ? 2.5 : 1}
+              className="dark:stroke-slate-900 cursor-pointer"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                (e.target as Element).setPointerCapture?.(e.pointerId);
+                dragRef.current = { id: nd.id, moved: false };
+              }}
+              onPointerUp={(e) => {
+                e.stopPropagation();
+                const d = dragRef.current;
+                dragRef.current = null;
+                if (d && !d.moved) setSelected((cur) => (cur === nd.id ? null : nd.id));
+              }}
+            >
+              <title>{`${nd.title}（${nd.year || 'n.d.'}）被引 ${nd.citationCount}`}</title>
+            </circle>
+          );
+        })}
+      </svg>
+
+      {/* 图例 */}
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+        <span className="text-slate-400">颜色 = venue（前 6）</span>
+        {[...venueColor.entries()].slice(0, 6).map(([v, c]) => (
+          <span key={v} className="inline-flex items-center gap-1">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: c }} />
+            {v.slice(0, 12) || '未标注'}
+          </span>
+        ))}
+        <span className="inline-flex items-center gap-1">
+          <span className="w-6 border-t border-dashed border-rose-500" /> 重复文献
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="w-6 border-t border-[var(--brand-500)]" /> 共引关系
+        </span>
+      </div>
+
+      {/* 选中详情卡 */}
+      {selNode && (
+        <div className="mt-3 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/40 dark:bg-teal-900/10 p-3">
+          <div className="text-sm font-medium text-slate-800 dark:text-slate-100 leading-snug">{selNode.title}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            {selNode.year || 'n.d.'} · {selNode.venue || '未标注'} · 被引 {selNode.citationCount} · 阅读状态 {selNode.readingStatus || 'unread'}
+          </div>
+          {selNode.tags?.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {selNode.tags.map((t) => (
+                <Badge key={t} tone="teal">{t}</Badge>
+              ))}
+            </div>
+          )}
+          <div className="mt-2">
+            <Button variant="outline" className="text-xs" onClick={() => onViewRef?.(selNode.id)}>
+              去文献库查看
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type ScreenStatus = 'pending' | 'included' | 'excluded' | 'uncertain';
 const SCREEN_META: Record<ScreenStatus, { label: string; tone: 'slate' | 'green' | 'amber' | 'red' }> = {
@@ -71,6 +340,13 @@ export function LiteraturePage({ project }: { project: Project }) {
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldKind, setNewFieldKind] = useState<'text' | 'select'>('text');
   const [newFieldOptions, setNewFieldOptions] = useState('');
+  // —— 引用网络图 ——
+  const [graph, setGraph] = useState<ReferenceGraph | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  // —— BibTeX 导出/导入 ——
+  const [showImport, setShowImport] = useState(false);
+  const [bibText, setBibText] = useState('');
+  const [importing, setImporting] = useState(false);
   const toast = useContext(ToastContext);
 
   useEffect(() => {
@@ -81,6 +357,64 @@ export function LiteraturePage({ project }: { project: Project }) {
   useEffect(() => {
     api.references.screenList(project.id).then(setScreenItems).catch(() => setScreenItems([]));
   }, [project.id]);
+
+  // 引用网络：切到该 Tab 时懒加载一次（导入/删除文献后置空以触发下次刷新）
+  useEffect(() => {
+    if (tool === 'graph' && !graph) {
+      setGraphLoading(true);
+      api.references
+        .graph(project.id)
+        .then(setGraph)
+        .catch((e) => setError(e.message))
+        .finally(() => setGraphLoading(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, project.id]);
+
+  // BibTeX/RIS 导出
+  const doExport = async (format: 'bibtex' | 'ris') => {
+    try {
+      const text = await api.references.exportReferences(project.id, format);
+      downloadText(
+        `${project.name || 'references'}.${format === 'bibtex' ? 'bib' : 'ris'}`,
+        text,
+        format === 'bibtex' ? 'application/x-bibtex;charset=utf-8' : 'application/x-research-info-systems;charset=utf-8',
+      );
+      toast('success', format === 'bibtex' ? '已导出 BibTeX' : '已导出 RIS');
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  // BibTeX 导入（粘贴或选文件）
+  const onPickBibFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setBibText(String(reader.result || ''));
+    reader.readAsText(f);
+  };
+
+  const doImportBibtex = async () => {
+    if (!bibText.trim()) {
+      setError('请粘贴或选择 BibTeX 文件');
+      return;
+    }
+    setImporting(true);
+    setError('');
+    try {
+      const res = await api.references.importBibtex(project.id, bibText);
+      toast('success', `导入完成：新增 ${res.imported} 条，跳过重复 ${res.skipped} 条`);
+      setBibText('');
+      setShowImport(false);
+      setRefs(await api.references.list(project.id));
+      setGraph(null); // 下次进入网络 Tab 时重新聚合
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const search = async () => {
     if (!query.trim()) return;
@@ -412,7 +746,7 @@ export function LiteraturePage({ project }: { project: Project }) {
         <div className="flex gap-2 flex-wrap">
           <Input
             className="flex-1 min-w-52"
-            placeholder="在文献库中检索标题 / 作者 / 摘要，如：图神经网络"
+            placeholder="在我的文献库中检索标题 / 作者 / 摘要，如：图神经网络"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && search()}
@@ -424,7 +758,7 @@ export function LiteraturePage({ project }: { project: Project }) {
             <Plus size={15} /> 手动添加文献
           </Button>
         </div>
-        <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">本地文献库检索（已移除国外在线源，零外部网络依赖），或手动录入文献元数据</div>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">这里检索的是你已录入的本地文献库（离线可用，不联网）。还没有文献？试试：粘贴 DOI、导入 BibTeX、或手动录入</div>
 
         {/* 手动添加表单 */}
         {showAdd && (
@@ -499,7 +833,7 @@ export function LiteraturePage({ project }: { project: Project }) {
       <div className="grid lg:grid-cols-2 gap-4">
         {/* 文献库 */}
         <Card className="p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
               <FlaskConical size={14} /> 文献库（{refs.length} 条）
             </span>
@@ -507,8 +841,37 @@ export function LiteraturePage({ project }: { project: Project }) {
               <Badge tone="teal">已选 {selectedRefs.size} 篇（可用于对比）</Badge>
             )}
           </div>
+          {/* 文献交换工具区：导出 BibTeX/RIS、导入 BibTeX */}
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            <Button variant="outline" className="text-xs h-7 px-2" disabled={refs.length === 0} onClick={() => doExport('bibtex')}>
+              <FileDown size={12} /> 导出 BibTeX
+            </Button>
+            <Button variant="outline" className="text-xs h-7 px-2" disabled={refs.length === 0} onClick={() => doExport('ris')}>
+              <FileDown size={12} /> 导出 RIS
+            </Button>
+            <Button variant="outline" className="text-xs h-7 px-2" onClick={() => setShowImport((v) => !v)}>
+              <Upload size={12} /> 导入 BibTeX
+            </Button>
+          </div>
+          {showImport && (
+            <div className="mb-3 p-3 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/40 dark:bg-teal-900/10 space-y-2">
+              <Textarea
+                rows={5}
+                placeholder={'粘贴 BibTeX 内容，例如：\n@article{key,\n  title = {Attention Is All You Need},\n  author = {Vaswani, A.},\n  year = {2017}\n}'}
+                value={bibText}
+                onChange={(e) => setBibText(e.target.value)}
+              />
+              <input type="file" accept=".bib,.txt,text/plain" onChange={onPickBibFile} className="text-xs text-slate-500 dark:text-slate-400" />
+              <div className="flex gap-2">
+                <Button onClick={doImportBibtex} disabled={importing || !bibText.trim()}>
+                  {importing ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} 导入到文献库
+                </Button>
+                <Button variant="ghost" onClick={() => setShowImport(false)}>取消</Button>
+              </div>
+            </div>
+          )}
           {refs.length === 0 ? (
-            <Empty text="文献库为空：点击「手动添加文献」录入，或先上传资料到知识库" />
+            <Empty text="文献库为空。三步获得第一批文献：① 粘贴 DOI（自动识别去重）② 导入 BibTeX（文件/粘贴）③ 手动添加文献或上传全文到知识库" />
           ) : (
             <>
               {/* 文献库统计概览 */}
@@ -867,6 +1230,27 @@ export function LiteraturePage({ project }: { project: Project }) {
                 </div>
               ) : (
                 <Empty text="Consensus 式证据综合：判断每个论断的证据强度（支持/部分支持/矛盾/证据不足）并统计文献数" />
+              )}
+            </>
+          )}
+
+          {tool === 'graph' && (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Network size={14} /> 引用网络（共引 + 去重）
+                </span>
+                <span className="text-[11px] text-slate-400">拖拽节点 · 点击选中 · 点空白取消</span>
+              </div>
+              {graphLoading ? (
+                <Spinner label="聚合引用网络中…" />
+              ) : !graph || graph.nodes.length === 0 ? (
+                <Empty text="暂无文献，先去文献调研页录入 / 导入 BibTeX；网络将按文档共引与去重关系自动布局" />
+              ) : (
+                <ReferenceNetwork
+                  graph={graph}
+                  onViewRef={() => setTool('summary')}
+                />
               )}
             </>
           )}

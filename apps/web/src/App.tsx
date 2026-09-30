@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, useCallback, useContext, useEffect, useMemo, useState, createContext, type ReactNode } from 'react';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  BookOpen, Brain, FlaskConical, LayoutDashboard, Menu, MessageSquare, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
+  BookOpen, Brain, Beaker, FlaskConical, LayoutDashboard, Menu, MessageSquare, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { Project } from './types';
@@ -15,6 +15,7 @@ const QualityPage = lazy(() => import('./pages/QualityPage').then((m) => ({ defa
 const ChatPage = lazy(() => import('./pages/ChatPage').then((m) => ({ default: m.ChatPage })));
 const SubmissionPage = lazy(() => import('./pages/SubmissionPage').then((m) => ({ default: m.SubmissionPage })));
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage').then((m) => ({ default: m.KnowledgePage })));
+const ExperimentsPage = lazy(() => import('./pages/ExperimentsPage').then((m) => ({ default: m.ExperimentsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const MemoryPage = lazy(() => import('./pages/MemoryPage').then((m) => ({ default: m.MemoryPage })));
 const SuspensePage = ({ children }: { children: ReactNode }) => (
@@ -25,6 +26,7 @@ export type View =
   | 'dashboard'
   | 'writing'
   | 'literature'
+  | 'experiments'
   | 'pipeline'
   | 'quality'
   | 'chat'
@@ -41,6 +43,7 @@ const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: type
       { key: 'dashboard', label: '工作台', icon: LayoutDashboard },
       { key: 'writing', label: '论文写作', icon: BookOpen },
       { key: 'literature', label: '文献调研', icon: FlaskConical },
+      { key: 'experiments', label: '实验记录', icon: Beaker },
       { key: 'knowledge', label: '知识库', icon: BookMarked },
     ],
   },
@@ -65,6 +68,7 @@ const VIEW_LABELS: Record<View, string> = {
   dashboard: '工作台',
   writing: '论文写作',
   literature: '文献调研',
+  experiments: '实验记录',
   knowledge: '知识库',
   memory: '记忆中心',
   pipeline: '全自动流水线',
@@ -112,7 +116,7 @@ function AppInner() {
 
   // 路由化：pathname 决定当前视图（hash 路由，刷新/分享/深链不丢状态）；无效路径兜底工作台
   const rawView = (location.pathname.replace(/^\//, '') || 'dashboard') as View;
-  const view: View = (['dashboard', 'writing', 'literature', 'pipeline', 'quality', 'chat', 'submission', 'knowledge', 'memory', 'settings'] as View[]).includes(rawView) ? rawView : 'dashboard';
+  const view: View = (['dashboard', 'writing', 'literature', 'experiments', 'pipeline', 'quality', 'chat', 'submission', 'knowledge', 'memory', 'settings'] as View[]).includes(rawView) ? rawView : 'dashboard';
   const selectedDocId = searchParams.get('doc');
   const setView = useCallback(
     (v: View) => {
@@ -413,6 +417,7 @@ function AppInner() {
                 {view === 'dashboard' && currentProject && <SuspensePage><DashboardPage project={currentProject} onNavigate={setView} openDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage>}
                 {view === 'writing' && currentProject && <SuspensePage><WritingPage project={currentProject} initialDocId={selectedDocId} /></SuspensePage>}
                 {view === 'literature' && currentProject && <SuspensePage><LiteraturePage project={currentProject} /></SuspensePage>}
+                {view === 'experiments' && currentProject && <SuspensePage><ExperimentsPage project={currentProject} /></SuspensePage>}
                 {view === 'knowledge' && currentProject && <SuspensePage><KnowledgePage project={currentProject} /></SuspensePage>}
                 {view === 'memory' && currentProject && <SuspensePage><MemoryPage /></SuspensePage>}
                 {view === 'pipeline' && currentProject && <SuspensePage><PipelinePage project={currentProject} /></SuspensePage>}

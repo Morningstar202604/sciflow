@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BookOpen, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } from 'lucide-react';
+import { BookOpen, Beaker, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, Reference } from '../types';
 import { Button, Card, Empty, Spinner, Skeleton, Badge, jsonText, SectionTitle } from '../components/ui';
@@ -50,6 +50,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
   const entries = [
     { label: '论文写作', desc: '大纲 · 起草 · 润色 · 翻译', icon: BookOpen, view: 'writing' as View },
     { label: '文献调研', desc: '多源检索 · 综述 · 文献库', icon: FlaskConical, view: 'literature' as View },
+    { label: '实验记录', desc: '本机 Python 沙箱 · 出图留存', icon: Beaker, view: 'experiments' as View },
     { label: '全自动流水线', desc: '主题 → 初稿 → 评分 → 定稿', icon: Workflow, view: 'pipeline' as View },
     { label: '质量评分', desc: '7 维雷达评分与改进建议', icon: Gauge, view: 'quality' as View },
   ];

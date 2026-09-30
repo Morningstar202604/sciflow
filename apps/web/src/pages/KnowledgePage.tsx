@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookMarked, FileText, Loader2, MessageSquare, Trash2, Upload } from 'lucide-react';
+import { BookMarked, ChevronDown, ChevronUp, FileText, Link2, Loader2, MessageSquare, Trash2, Unlink, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { KnowledgeDoc, Project } from '../types';
-import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
+import type { KnowledgeDoc, KnowledgeQueryResult, Project, Reference } from '../types';
+import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Select, Textarea, Badge, Spinner } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
 
 function fileToBase64(file: File): Promise<string> {
@@ -23,13 +23,18 @@ function fileToBase64(file: File): Promise<string> {
 export function KnowledgePage({ project }: { project: Project }) {
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState<{ answer: string; sources: { docName: string; snippet: string; score: number }[] } | null>(null);
+  const [answer, setAnswer] = useState<KnowledgeQueryResult | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const toast = useContext(ToastContext);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [deleting, setDeleting] = useState<KnowledgeDoc | null>(null);
+  // 文献库↔知识库打通（#5）：项目内可选文献 + 正在展开绑定下拉的文档
+  const [refs, setRefs] = useState<Reference[]>([]);
+  const [bindingDocId, setBindingDocId] = useState<string | null>(null);
+  // RAG 引用可点（#17）：已展开原文的来源块（按 chunkId 记录）
+  const [openChunks, setOpenChunks] = useState<Record<string, boolean>>({});
 
   const load = async () => {
     try {
@@ -39,9 +44,33 @@ export function KnowledgePage({ project }: { project: Project }) {
     }
   };
 
+  const loadRefs = async () => {
+    try {
+      setRefs(await api.references.list(project.id));
+    } catch {
+      /* 文献库暂时不可用时不阻断知识库页 */
+    }
+  };
+
   useEffect(() => {
     load();
+    loadRefs();
   }, [project.id]);
+
+  /** 绑定/解除文献：referenceId 传 null 解除 */
+  const bindRef = async (doc: KnowledgeDoc, referenceId: string | null) => {
+    setError('');
+    try {
+      await api.knowledge.bind(doc.id, referenceId);
+      toast('success', referenceId ? `已绑定「${refs.find((r) => r.id === referenceId)?.title || '文献'}」` : `已解除「${doc.name}」的文献绑定`);
+      setBindingDocId(null);
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const toggleChunk = (key: string) => setOpenChunks((m) => ({ ...m, [key]: !m[key] }));
 
   // 文档类型分布 Donut（pdf/markdown/text）
   const typeDist = useMemo(() => {
@@ -202,8 +231,47 @@ export function KnowledgePage({ project }: { project: Project }) {
                       <Badge tone={d.type === 'pdf' ? 'red' : d.type === 'markdown' ? 'blue' : 'slate'}>{d.type}</Badge>
                       <span className="ml-2">{d.chunkCount} 个分块</span>
                     </div>
+                    {/* 文献库↔知识库打通（#5）：绑定状态 + 绑定/解除 */}
+                    {d.reference ? (
+                      <div className="text-[11px] text-teal-600 dark:text-teal-400 mt-1 flex items-center gap-1.5 flex-wrap">
+                        <Link2 size={11} className="shrink-0" />
+                        <span className="truncate">
+                          对应文献：{d.reference.title}
+                          {d.reference.year ? `（${d.reference.year}${d.reference.venue ? ` / ${d.reference.venue}` : ''}）` : d.reference.venue ? `（${d.reference.venue}）` : ''}
+                        </span>
+                        <button onClick={() => bindRef(d, null)} className="inline-flex items-center gap-0.5 text-slate-400 hover:text-rose-500 shrink-0" title="解除绑定">
+                          <Unlink size={11} /> 解除
+                        </button>
+                      </div>
+                    ) : bindingDocId === d.id ? (
+                      <div className="mt-1.5 flex items-center gap-2">
+                        {refs.length > 0 ? (
+                          <Select
+                            className="flex-1 max-w-sm"
+                            value=""
+                            onChange={(v) => v && bindRef(d, v)}
+                            options={[
+                              { value: '', label: '选择本项目文献…' },
+                              ...refs.map((r) => ({ value: r.id, label: `${r.title}${r.year ? ` (${r.year})` : ''}` })),
+                            ]}
+                          />
+                        ) : (
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500">本项目暂无文献，请到「文献库」录入后再绑定</span>
+                        )}
+                        <button onClick={() => setBindingDocId(null)} className="text-[11px] text-slate-400 hover:text-slate-600 shrink-0">
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setBindingDocId(d.id)}
+                        className="mt-1 inline-flex items-center gap-1 text-[11px] text-teal-500 hover:underline"
+                      >
+                        <Link2 size={11} /> 绑定文献
+                      </button>
+                    )}
                   </div>
-                  <button onClick={() => remove(d)} className="text-slate-400 dark:text-slate-500 hover:text-rose-500" title="删除">
+                  <button onClick={() => remove(d)} className="text-slate-400 dark:text-slate-500 hover:text-rose-500 shrink-0" title="删除">
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -248,12 +316,40 @@ export function KnowledgePage({ project }: { project: Project }) {
                     color: s.score >= 70 ? undefined : s.score >= 40 ? '#f59e0b' : '#f87171',
                   }))}
                 />
-                <div className="mt-2 space-y-1 border-t border-slate-100 dark:border-slate-800 pt-2">
-                  {answer.sources.map((s, i) => (
-                    <div key={i} className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                      <span className="text-slate-500 dark:text-slate-400 font-medium">「{s.docName}」</span> {s.snippet}
-                    </div>
-                  ))}
+                <div className="mt-2 space-y-2 border-t border-slate-100 dark:border-slate-800 pt-2">
+                  {answer.sources.map((s, i) => {
+                    const key = s.chunkId || `src-${i}`;
+                    const open = !!openChunks[key];
+                    const long = s.chunkText && s.chunkText.length > s.snippet.length;
+                    return (
+                      <div key={key} className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-slate-600 dark:text-slate-300 font-medium">「{s.docName}」</span>
+                          {long && (
+                            <button
+                              onClick={() => toggleChunk(key)}
+                              className="inline-flex items-center gap-0.5 text-teal-500 hover:underline"
+                            >
+                              {open ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                              {open ? '收起原文' : '展开原文'}
+                            </button>
+                          )}
+                        </div>
+                        {s.referenceTitle && (
+                          <div className="text-teal-600/90 dark:text-teal-400/90 mt-0.5">📄 对应文献：{s.referenceTitle}</div>
+                        )}
+                        <div>
+                          {s.snippet}
+                          {!open && long ? '…' : ''}
+                        </div>
+                        {open && s.chunkText && (
+                          <div className="mt-1 rounded bg-slate-100 dark:bg-slate-800/60 p-2 whitespace-pre-wrap max-h-64 overflow-y-auto">
+                            {s.chunkText}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

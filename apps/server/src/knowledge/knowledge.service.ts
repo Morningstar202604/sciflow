@@ -1,14 +1,23 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { db } from '../db/database';
-import { knowledgeDocs, knowledgeChunks } from '../db/schema';
-import { eq, inArray } from 'drizzle-orm';
+import { knowledgeDocs, knowledgeChunks, references } from '../db/schema';
+import { eq, inArray, and } from 'drizzle-orm';
 import { AiService } from '../ai/ai.service';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>;
 
 const CHUNK_SIZE = 800; // 每块约 800 字
+
+/** 文献库↔知识库打通（#5）：列表/检索中嵌入的 reference 摘要 */
+interface RefSummary {
+  id: string;
+  title: string;
+  year: number | null;
+  venue: string;
+  citationCount: number;
+}
 
 @Injectable()
 export class KnowledgeService {
@@ -32,6 +41,35 @@ export class KnowledgeService {
     return chunks;
   }
 
+  // ---------- 文献库↔知识库打通（#5） ----------
+  /** 标题归一化指纹：与 references.service 同一规则（lowercase + 去标点空白，取短 md5） */
+  private fingerprint(title: string): string {
+    const norm = (title || '').toLowerCase().replace(/[^a-z0-9一-鿿]/g, '');
+    if (!norm) return '';
+    return createHash('md5').update(norm).digest('hex').slice(0, 16);
+  }
+
+  /** 上传时按标题自动命中项目内已有文献：先指纹精确，再忽略大小写标题兜底；命中不中都可继续（不强绑） */
+  private matchReference(projectId: string, title: string): string | null {
+    const fp = this.fingerprint(title);
+    const all = db.select().from(references).where(eq(references.projectId, projectId)).all();
+    const hit = all.find(
+      (r) => (fp && r.fingerprint === fp) || (r.title || '').trim().toLowerCase() === (title || '').trim().toLowerCase(),
+    );
+    return hit ? hit.id : null;
+  }
+
+  /** 批量取 reference 摘要映射：docId -> RefSummary（列表/检索共用，避免 N+1） */
+  private referenceSummaryMap(rows: { referenceId: string | null }[]): Map<string, RefSummary> {
+    const refIds = [...new Set(rows.map((r) => r.referenceId).filter((x): x is string => !!x))];
+    const map = new Map<string, RefSummary>();
+    if (refIds.length === 0) return map;
+    for (const r of db.select().from(references).where(inArray(references.id, refIds)).all()) {
+      map.set(r.id, { id: r.id, title: r.title, year: r.year, venue: r.venue ?? '', citationCount: r.citationCount ?? 0 });
+    }
+    return map;
+  }
+
   /** 上传文档（type: text | pdf | markdown；content 为文本或 PDF 的 base64）
    *  RAG 升级：每块生成归一化 TF 向量（vector 列）+ 文档上下文前缀（context 列，Contextual Retrieval） */
   async upload(projectId: string, name: string, type: string, content: string) {
@@ -51,6 +89,8 @@ export class KnowledgeService {
     if (chunks.length === 0) throw new HttpException('文档内容为空或无法解析', HttpStatus.BAD_REQUEST);
 
     const docId = randomUUID();
+    // 文献库↔知识库打通：按文档标题自动命中项目内已有文献并回填 referenceId（不强绑，未命中则为 null）
+    const referenceId = this.matchReference(projectId, name);
     // Contextual Retrieval：文档级上下文描述（文档名 + 首段要点），检索时拼在块前，显著提升命中精度
     const head = text.replace(/\s+/g, ' ').trim().slice(0, 100);
     const context = `【${name}】${head}`;
@@ -60,6 +100,7 @@ export class KnowledgeService {
       name,
       type,
       chunkCount: chunks.length,
+      referenceId,
       createdAt: Date.now(),
     });
     await db.insert(knowledgeChunks).values(
@@ -72,11 +113,39 @@ export class KnowledgeService {
         vector: JSON.stringify(this.tfVector(c)),
       })),
     );
-    return { id: docId, name, chunkCount: chunks.length };
+    return { id: docId, name, chunkCount: chunks.length, referenceId: referenceId || null };
   }
 
-  list(projectId: string) {
-    return db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).orderBy(knowledgeDocs.createdAt);
+  /** 项目知识库列表：每条嵌入绑定文献的摘要（未绑定时 reference=null） */
+  async list(projectId: string) {
+    const docs = db
+      .select()
+      .from(knowledgeDocs)
+      .where(eq(knowledgeDocs.projectId, projectId))
+      .orderBy(knowledgeDocs.createdAt)
+      .all();
+    const refMap = this.referenceSummaryMap(docs);
+    return docs.map((d) => ({ ...d, reference: d.referenceId ? (refMap.get(d.referenceId) || null) : null }));
+  }
+
+  /** 手动绑定/解除文献：入参 referenceId 传 null 即解绑；绑定校验文献必须属于同一项目 */
+  async bind(id: string, referenceId: string | null) {
+    const doc = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.id, id)).get();
+    if (!doc) throw new HttpException('知识库文档不存在', HttpStatus.NOT_FOUND);
+    let resolved: string | null = null;
+    if (referenceId) {
+      const ref = db
+        .select()
+        .from(references)
+        .where(and(eq(references.id, referenceId), eq(references.projectId, doc.projectId)))
+        .get();
+      if (!ref) throw new HttpException('绑定失败：所选文献不在当前项目内', HttpStatus.BAD_REQUEST);
+      resolved = ref.id;
+    }
+    await db.update(knowledgeDocs).set({ referenceId: resolved }).where(eq(knowledgeDocs.id, id)).run();
+    const updated = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.id, id)).get()!;
+    const refMap = this.referenceSummaryMap([updated]);
+    return { ...updated, reference: updated.referenceId ? (refMap.get(updated.referenceId) || null) : null };
   }
 
   async remove(id: string) {
@@ -134,11 +203,14 @@ export class KnowledgeService {
   }
 
   async search(projectId: string, question: string, topK = 5) {
-    const docs = await db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId));
+    const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
     if (docs.length === 0) return [];
     const docIds = docs.map((d) => d.id);
-    const chunks = await db.select().from(knowledgeChunks).where(inArray(knowledgeChunks.docId, docIds));
+    const chunks = db.select().from(knowledgeChunks).where(inArray(knowledgeChunks.docId, docIds)).all();
     if (chunks.length === 0) return [];
+
+    // 文献库↔知识库打通：命中文档若绑定了文献，附带 referenceId/referenceTitle（前端显示"对应文献"）
+    const refMap = this.referenceSummaryMap(docs);
 
     // 文档频率（BM25 逆文档频率分母）
     const df = new Map<string, number>();
@@ -150,6 +222,7 @@ export class KnowledgeService {
     const scored = chunks
       .map((c) => {
         const doc = docs.find((d) => d.id === c.docId);
+        const ref = doc?.referenceId ? refMap.get(doc.referenceId) : undefined;
         let cVec: Record<string, number> = {};
         try {
           cVec = JSON.parse(c.vector || '{}');
@@ -160,7 +233,13 @@ export class KnowledgeService {
         const cos = this.cosine(qVec, cVec);
         // 混合评分：BM25 语义 + 余弦向量 互补（单边 0 分不归零，保留另一路信号）
         const score = bm * 1.0 + cos * 1.2;
-        return { ...c, docName: doc?.name || '未知', score };
+        return {
+          ...c,
+          docName: doc?.name || '未知',
+          score,
+          referenceId: doc?.referenceId || null,
+          referenceTitle: ref?.title || null,
+        };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
@@ -179,7 +258,17 @@ export class KnowledgeService {
     const answer = await this.ai.knowledgeQa(question, chunksText);
     return {
       answer,
-      sources: hits.map((h) => ({ docName: h.docName, snippet: h.content.slice(0, 120), score: Math.round(h.score * 100) })),
+      sources: hits.map((h) => ({
+        docName: h.docName,
+        snippet: h.content.slice(0, 120),
+        score: Math.round(h.score * 100),
+        // RAG 引用可点（#17）：chunkId + 完整块文本，前端"展开原文"查看（不跳 PDF）
+        chunkId: h.id,
+        chunkText: h.content,
+        // 文献库↔知识库打通（#5）：命中块若绑定文献，前端显示"对应文献"
+        referenceId: h.referenceId ?? null,
+        referenceTitle: h.referenceTitle ?? null,
+      })),
     };
   }
 }

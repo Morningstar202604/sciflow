@@ -311,6 +311,201 @@ if newJid:
 st, d2 = ai_call("期刊结构化匹配 journals-match", lambda: req("POST", "/api/submission/journals-match", {"title": "Graph neural networks for node classification", "abstract": "We survey GNNs and propose a new message passing architecture."}))
 info("期刊结构化匹配 journals-match", f"st={st} {str(d2)[:120]}")
 
+# ---------- 17. 轻量实验沙箱（本机 python3） ----------
+import shutil
+if not shutil.which("python3"):
+    print("  ⏭ 未检测到 python3，实验沙箱用例跳过（不失败）")
+else:
+    st, d = req("POST", "/api/experiments/run", {"projectId": pid, "goal": "验证沙箱执行", "code": "print('hello-sandbox'); print(2+3)"})
+    check("实验沙箱·正常执行 run", st in (200, 201) and d.get("status") == "ok" and "hello-sandbox" in (d.get("stdout") or "") and (d.get("stdout") or "").count("5") >= 1, f"st={st} {str(d)[:180]}")
+    eid = d.get("id") if st in (200, 201) else None
+    # 异常脚本 → status=error
+    st, d = req("POST", "/api/experiments/run", {"projectId": pid, "code": "raise RuntimeError('boom')"})
+    check("实验沙箱·异常脚本 status=error", st in (200, 201) and d.get("status") == "error" and "boom" in (d.get("stderr") or ""), f"st={st} {str(d)[:180]}")
+    # 超时脚本 → status=timeout（默认 10s 杀进程组）
+    st, d = req("POST", "/api/experiments/run", {"projectId": pid, "code": "while True:\n    pass"})
+    check("实验沙箱·超时 status=timeout", st in (200, 201) and d.get("status") == "timeout", f"st={st} {str(d)[:180]}")
+    # 输出截断（>64KB）
+    st, d = req("POST", "/api/experiments/run", {"projectId": pid, "code": "print('x' * 200000)"})
+    check("实验沙箱·stdout 截断标记", st in (200, 201) and d.get("stdoutTruncated") is True, f"st={st} trunc={d.get('stdoutTruncated') if isinstance(d, dict) else '?'}")
+    if eid:
+        st, d2 = req("GET", f"/api/experiments?projectId={pid}")
+        check("实验沙箱·列表（updatedAt 倒序）", st == 200 and isinstance(d2, list) and any(x.get("id") == eid for x in d2), f"st={st} n={len(d2) if isinstance(d2, list) else 0}")
+        st, d2 = req("GET", f"/api/experiments/{eid}")
+        check("实验沙箱·详情 GET :id", st == 200 and d2.get("id") == eid, f"st={st}")
+        st, d2 = req("PATCH", f"/api/experiments/{eid}", {"conclusion": "沙箱运行正常"})
+        check("实验沙箱·PATCH 结论", st == 200 and d2.get("conclusion") == "沙箱运行正常", f"st={st} {str(d2)[:140]}")
+        st, d2 = req("DELETE", f"/api/experiments/{eid}")
+        check("实验沙箱·删除", st == 200 and d2.get("ok"), f"st={st}")
+
+
+# ---------- 17. 投稿流程状态跟踪 ----------
+if pid:
+    # 登记一个带一审周期的期刊（4 周），用于验证 L3 超期推断
+    st, jd = req("POST", "/api/submission/journals-lib", {"name": "回归跟踪期刊", "firstDecisionWeeks": 4})
+    trackJid = jd.get("id") if st in (200, 201) else ""
+    # 投稿日期设为 6 周前 → 4 周一审周期下应 overdue
+    old_ts = int((time.time() - 6 * 7 * 24 * 3600) * 1000)
+    st, d = req("POST", "/api/submission/track", {
+        "projectId": pid, "journalId": trackJid, "journalName": "回归跟踪期刊",
+        "documentId": docid or "", "submittedAt": old_ts, "currentStatus": "submitted", "note": "回归测试登记",
+    })
+    check("投稿跟踪·登记（含 events 初始事件）", st in (200, 201) and d.get("id") and d.get("currentStatus") == "submitted"
+          and isinstance(d.get("events"), list) and len(d["events"]) == 1, f"st={st} {str(d)[:160]}")
+    tid = d.get("id") if st in (200, 201) else None
+    if tid:
+        # 追加状态事件
+        st, d2 = req("POST", f"/api/submission/track/{tid}/event", {"status": "external_review", "note": "已送外审"})
+        check("投稿跟踪·追加事件（currentStatus 同步）", st in (200, 201) and d2.get("currentStatus") == "external_review"
+              and len(d2.get("events", [])) == 2, f"st={st} {str(d2)[:160]}")
+        # 列表：最新状态 + 事件正序 + 超期推断字段（4 周周期，投稿 6 周前 → overdue）
+        st, d2 = req("GET", f"/api/submission/track?projectId={pid}")
+        mine = next((x for x in d2 if x.get("id") == tid), None) if st == 200 else None
+        check("投稿跟踪·列表（事件正序 + dueAt/overdue/estimatedStage 推断）",
+              st == 200 and mine and mine.get("currentStatus") == "external_review"
+              and mine.get("dueAt") and mine.get("overdue") is True and mine.get("overdueDays", 0) > 0
+              and mine.get("estimatedStage") and isinstance(mine.get("events"), list)
+              and [e["toStatus"] for e in mine["events"]] == ["submitted", "external_review"],
+              f"st={st} {str(mine)[:200]}")
+        # parse-email：AI 类，无 key/网关不可走既有 ai_call 跳过机制；成功时校验枚举输出
+        st, d2 = ai_call("投稿跟踪·AI 邮件解析 parse-email",
+                         lambda: req("POST", "/api/submission/track/parse-email",
+                                     {"emailText": "尊敬的作者：您的稿件经外审专家评议，需作小修后录用，修回截止 2026-10-31。", "currentStatus": "external_review"}))
+        info("投稿跟踪·parse-email", f"st={st} {str(d2)[:120]}")
+        if st == 200 and d2:
+            check("投稿跟踪·parse-email 返回建议状态在枚举内",
+                  d2.get("suggestedStatus") in ("submitted", "initial_review", "external_review", "review_returned",
+                                                 "minor_revision", "major_revision", "re_review", "final_review",
+                                                 "accepted", "in_production", "rejected", "withdrawn", "transferred"),
+                  f"st={st} {str(d2)[:120]}")
+        # PATCH：改 note + currentStatus（同步写事件）
+        st, d2 = req("PATCH", f"/api/submission/track/{tid}", {"notes": "回归改备注", "currentStatus": "minor_revision"})
+        check("投稿跟踪·PATCH（备注 + 状态推进）", st == 200 and d2.get("notes") == "回归改备注"
+              and d2.get("currentStatus") == "minor_revision" and len(d2.get("events", [])) >= 3, f"st={st} {str(d2)[:160]}")
+        # 非法状态码应被拒绝（400）
+        st, d2 = req("POST", f"/api/submission/track/{tid}/event", {"status": "not_a_real_status"})
+        check("投稿跟踪·非法状态码被拒绝", st == 400, f"st={st}")
+        # DELETE：级联清 events
+        st, d2 = req("DELETE", f"/api/submission/track/{tid}")
+        check("投稿跟踪·删除", st == 200 and d2.get("ok"), f"st={st}")
+        st, d2 = req("GET", f"/api/submission/track?projectId={pid}")
+        gone = not any(x.get("id") == tid for x in d2) if st == 200 else False
+        check("投稿跟踪·删除后列表不含记录（events 已级联）", gone, f"st={st}")
+    if trackJid:
+        req("DELETE", f"/api/submission/journals-lib/{trackJid}")
+
+# ---------- 18. 文献库↔知识库打通（#5）+ RAG 引用可点（#17） ----------
+if pid:
+    # 造一条文献，标题与知识库文档同名 → 上传时应自动按标题指纹/忽略大小写命中并回填 referenceId
+    st, ref = req("POST", "/api/references", {"projectId": pid, "hit": {
+        "title": "Knowledge RAG Binding Paper", "authors": ["Test Author"], "year": 2024,
+        "venue": "Sciflow Test Venue", "citationCount": 7}})
+    check("打通·造文献", st in (200, 201) and ref.get("id"), f"st={st} {str(ref)[:120]}")
+    bindRefId = ref.get("id") if st in (200, 201) else None
+
+    if bindRefId:
+        # 18.1 上传同名文档 → 自动绑定 referenceId
+        st, d = req("POST", "/api/knowledge/upload", {"projectId": pid, "name": "Knowledge RAG Binding Paper", "type": "text",
+            "content": "这是一篇关于知识库绑定测试的说明文档。图神经网络通过消息传递机制聚合邻居节点特征，在节点分类任务上表现优异。"})
+        check("打通·上传同名文档自动绑定 referenceId", st in (200, 201) and d.get("referenceId") == bindRefId, f"st={st} {str(d)[:160]}")
+        autoKid = d.get("id") if st in (200, 201) else None
+
+        # 18.2 上传不同名文档 → 不命中则不强绑（referenceId 为空）
+        st, d = req("POST", "/api/knowledge/upload", {"projectId": pid, "name": "Unbound Working Notes", "type": "text",
+            "content": "未绑定的工作笔记。这里记录一些关于图神经网络消息传递机制与节点分类的随记要点。"})
+        check("打通·未命中文献时不强绑（referenceId 为空）", st in (200, 201) and not d.get("referenceId"), f"st={st} {str(d)[:160]}")
+        unboundKid = d.get("id") if st in (200, 201) else None
+
+        # 18.3 列表嵌入 reference 摘要
+        st, lst = req("GET", f"/api/knowledge?projectId={pid}")
+        autoRow = next((x for x in lst if x.get("id") == autoKid), None) if st == 200 else None
+        check("打通·列表返回 reference 摘要", st == 200 and autoRow and autoRow.get("reference")
+              and autoRow["reference"].get("title") == "Knowledge RAG Binding Paper"
+              and autoRow["reference"].get("year") == 2024
+              and autoRow["reference"].get("venue") == "Sciflow Test Venue"
+              and autoRow["reference"].get("citationCount") == 7, f"st={st} {str(autoRow)[:220]}")
+
+        # 18.4 手动绑定 + 绑定不存在文献应被拒
+        if unboundKid:
+            st, d = req("PATCH", f"/api/knowledge/{unboundKid}/bind", {"referenceId": bindRefId})
+            check("打通·PATCH 手动绑定", st == 200 and d.get("referenceId") == bindRefId
+                  and d.get("reference", {}).get("title") == "Knowledge RAG Binding Paper", f"st={st} {str(d)[:180]}")
+            st, d = req("PATCH", f"/api/knowledge/{unboundKid}/bind", {"referenceId": "nonexistent-ref-id"})
+            check("打通·绑定不存在文献被拒绝(400)", st == 400, f"st={st} {str(d)[:120]}")
+
+        # 18.5 RAG 问答来源带 chunkText/chunkId + referenceTitle（AI 类，外部网关不可用时跳过）
+        st, d = ai_call("打通/RAG·query 来源带 chunkText+referenceTitle",
+                        lambda: req("POST", "/api/knowledge/query", {"projectId": pid, "question": "图神经网络的消息传递机制是什么？"}))
+        info("RAG query（打通后）", f"st={st} {str(d)[:160]}")
+        if st in (200, 201) and d.get("sources"):
+            src0 = d["sources"][0]
+            check("RAG 引用可点·sources 带 chunkId/chunkText", bool(src0.get("chunkId")) and bool(src0.get("chunkText")), f"keys={list(src0.keys())}")
+            bound_src = next((s for s in d["sources"] if s.get("referenceTitle")), None)
+            check("打通·命中来源带 referenceTitle", bound_src is not None
+                  and bound_src.get("referenceTitle") == "Knowledge RAG Binding Paper",
+                  str([s.get("referenceTitle") for s in d["sources"]]))
+
+        # 18.6 解除绑定 → reference 回到 null
+        if autoKid:
+            st, d = req("PATCH", f"/api/knowledge/{autoKid}/bind", {"referenceId": None})
+            check("打通·PATCH 解除绑定", st == 200 and not d.get("referenceId") and d.get("reference") is None, f"st={st} {str(d)[:160]}")
+
+        # 清理本次造的知识库文档
+        for kid in (autoKid, unboundKid):
+            if kid:
+                req("DELETE", f"/api/knowledge/{kid}")
+
+# ---------- 19. 引用网络 + BibTeX/RIS 导出导入 ----------
+# 造 2 篇文献 + 1 篇重复 + 1 个文档同时引用这 2 篇（产生共引边）
+st, d = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "Graph Regression Paper A", "authors": ["A Liu"], "year": 2022, "venue": "TKDE", "doi": "10.1/a"}})
+gA = d.get("id") if st in (200, 201) else None
+st, d = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "Graph Regression Paper B", "authors": ["B Chen"], "year": 2023, "venue": "NAACL"}})
+gB = d.get("id") if st in (200, 201) else None
+st, d = req("POST", "/api/references", {"projectId": pid, "hit": {"title": "graph regression paper a!!!", "authors": ["A Liu"], "year": 2022, "venue": "TKDE"}})
+gDup = d.get("id") if st in (200, 201) else None
+check("网络·重复文献 isDuplicateOf", bool(gA) and bool(gDup) and d.get("isDuplicateOf") == gA, f"st={st} dup={str(d)[:120]}")
+st, d = req("POST", "/api/documents", {"projectId": pid, "title": "network-smoke-doc"})
+gDoc = d.get("id") if st == 201 else None
+if gDoc and gA and gB:
+    req("POST", f"/api/documents/{gDoc}/citations", {"referenceId": gA})
+    req("POST", f"/api/documents/{gDoc}/citations", {"referenceId": gB})
+st, d = req("GET", f"/api/references/graph?projectId={pid}")
+check("网络·GET graph 返回 nodes/edges", st == 200 and isinstance(d.get("nodes"), list) and isinstance(d.get("edges"), list), f"st={st} nodes={len(d.get('nodes', []))} edges={len(d.get('edges', []))}")
+if st == 200:
+    edge_pairs = [(e.get("a"), e.get("b"), e.get("type")) for e in d.get("edges", [])]
+    has_cocite = any(t == "co-cite" and {a, b} == {gA, gB} for (a, b, t) in edge_pairs)
+    has_dup = any(t == "dup" and {a, b} == {gA, gDup} for (a, b, t) in edge_pairs)
+    check("网络·共引边（同文档引用 A/B）", has_cocite, str(edge_pairs))
+    check("网络·重复边 type=dup", has_dup, str(edge_pairs))
+
+def get_text(path):
+    try:
+        with urllib.request.urlopen(BASE + path, timeout=30) as r:
+            return r.status, r.read().decode()
+    except Exception as e:
+        return -1, str(e)
+
+st, txt = get_text(f"/api/references/export?projectId={pid}&format=bibtex")
+check("导出·BibTeX 含 @article 与字段", st == 200 and "@article{" in txt and "title =" in txt and "Graph Regression Paper A" in txt, f"st={st} head={txt[:120]!r}")
+st, txt = get_text(f"/api/references/export?projectId={pid}&format=ris")
+check("导出·RIS 含 TY/TI/ER", st == 200 and "TY  - JOUR" in txt and "TI  - " in txt and "ER  -" in txt, f"st={st} head={txt[:120]!r}")
+
+bib_sample = """@article{gr2099,
+  title = {Graph Regression Paper A},
+  author = {Liu, A.},
+  year = {2022}
+}
+
+@inproceedings{gr2099b,
+  title = {Brand New Paper C},
+  author = {Wang, Z. and Li, M.},
+  booktitle = {NeurIPS},
+  year = {2025}
+}
+"""
+st, d = req("POST", "/api/references/import-bibtex", {"projectId": pid, "text": bib_sample})
+check("导入·BibTeX imported/skipped 计数", st in (200, 201) and d.get("imported") == 1 and d.get("skipped") == 1, f"st={st} {d}")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL}")
 if FAILED:

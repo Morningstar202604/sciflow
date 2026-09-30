@@ -2,7 +2,8 @@ import type {
   Project, Doc, Reference, ReferenceInput, CitationRow, QualityReport, PipelineTask, PolishRecord, Outline,
   KnowledgeDoc, KnowledgeQueryResult, ExtractedPaper, EvidenceResult, DeepDiveResult, GapResult, AppSettings, SelfCheck,
   AgentRun, McpServerInfo, MemoryItem, ModelProvider, McpToolInfo, ResearchDesignResult, PaperComparisonResult, SimulatedReviewResult, IntentResult, CustomIntent, CustomPromptTool, PipelineStepConfig, QualityWeightItem,
-  ScreeningItem, ExtractionField, ExtractionTableResult, ReviewComment, Journal, JournalMatchResult,
+  ScreeningItem, ExtractionField, ExtractionTableResult, ReviewComment, Journal, JournalMatchResult, Experiment,
+  SubmissionTrack, SubmissionStatus, ParseEmailResult, ReferenceGraph, BibtexImportResult,
 } from '../types';
 
 /** 友好错误转译：后端中文业务错误原样保留；英文/状态码/网络错误转为清晰中文提示 */
@@ -183,6 +184,17 @@ export const api = {
     setExtractionValue: (fieldId: string, referenceId: string, value: string) =>
       request<{ ok: boolean }>('/api/references/extraction/values', { method: 'PUT', body: JSON.stringify({ fieldId, referenceId, value }) }),
     extractionTable: (projectId: string) => request<ExtractionTableResult>(`/api/references/extraction/table?projectId=${projectId}`),
+    /* —— 引用网络图（共引 + 去重边聚合） —— */
+    graph: (projectId: string) => request<ReferenceGraph>(`/api/references/graph?projectId=${projectId}`),
+    /* —— BibTeX/RIS 导出（纯文本，前端 Blob 下载） —— */
+    exportReferences: async (projectId: string, format: 'bibtex' | 'ris'): Promise<string> => {
+      const res = await fetch(`/api/references/export?projectId=${encodeURIComponent(projectId)}&format=${format}`);
+      if (!res.ok) throw new Error(friendlyError(undefined, res.status));
+      return res.text();
+    },
+    /* —— BibTeX 导入（指纹去重，返回 imported/skipped） —— */
+    importBibtex: (projectId: string, text: string) =>
+      request<BibtexImportResult>('/api/references/import-bibtex', { method: 'POST', body: JSON.stringify({ projectId, text }) }),
   },
 
   knowledge: {
@@ -191,6 +203,9 @@ export const api = {
       request<KnowledgeDoc>(`/api/knowledge/upload`, { method: 'POST', body: JSON.stringify({ projectId, name, type, content }) }),
     query: (projectId: string, question: string) =>
       request<KnowledgeQueryResult>(`/api/knowledge/query`, { method: 'POST', body: JSON.stringify({ projectId, question }) }),
+    /** 文献库↔知识库打通（#5）：绑定/解除文献，referenceId 传 null 解除 */
+    bind: (id: string, referenceId: string | null) =>
+      request<KnowledgeDoc>(`/api/knowledge/${id}/bind`, { method: 'PATCH', body: JSON.stringify({ referenceId }) }),
     remove: (id: string) => request<{ ok: boolean }>(`/api/knowledge/${id}`, { method: 'DELETE' }),
   },
 
@@ -271,6 +286,16 @@ export const api = {
       request<{ answer: string }>('/api/chat', { method: 'POST', body: JSON.stringify({ message, history, projectId }) }),
   },
 
+  experiments: {
+    run: (body: { projectId: string; goal?: string; code: string; documentId?: string | null }) =>
+      request<Experiment>('/api/experiments/run', { method: 'POST', body: JSON.stringify(body) }),
+    list: (projectId: string) => request<Experiment[]>(`/api/experiments?projectId=${projectId}`),
+    get: (id: string) => request<Experiment>(`/api/experiments/${id}`),
+    update: (id: string, patch: { goal?: string; conclusion?: string }) =>
+      request<Experiment>(`/api/experiments/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/api/experiments/${id}`, { method: 'DELETE' }),
+  },
+
   submission: {
     journals: (title: string, abstract: string, field: string) =>
       request<string>('/api/submission/journals', { method: 'POST', body: JSON.stringify({ title, abstract, field }) }),
@@ -284,6 +309,24 @@ export const api = {
     listJournals: () => request<Journal[]>('/api/submission/journals'),
     addJournal: (j: Partial<Journal>) => request<Journal>('/api/submission/journals-lib', { method: 'POST', body: JSON.stringify(j) }),
     removeJournal: (id: string) => request<{ ok: boolean }>(`/api/submission/journals-lib/${id}`, { method: 'DELETE' }),
+    /* —— 投稿流程状态跟踪 —— */
+    trackSubmit: (body: {
+      projectId: string;
+      journalId?: string;
+      journalName: string;
+      documentId?: string;
+      submittedAt?: number;
+      currentStatus?: string;
+      note?: string;
+    }) => request<SubmissionTrack>('/api/submission/track', { method: 'POST', body: JSON.stringify(body) }),
+    listTracks: (projectId: string) => request<SubmissionTrack[]>(`/api/submission/track?projectId=${encodeURIComponent(projectId)}`),
+    addTrackEvent: (id: string, body: { status: string; date?: number; note?: string }) =>
+      request<SubmissionTrack>(`/api/submission/track/${id}/event`, { method: 'POST', body: JSON.stringify(body) }),
+    parseEmail: (emailText: string, currentStatus: string) =>
+      request<ParseEmailResult>('/api/submission/track/parse-email', { method: 'POST', body: JSON.stringify({ emailText, currentStatus }) }),
+    updateTrack: (id: string, patch: Partial<{ notes: string; currentStatus: SubmissionStatus }>) =>
+      request<SubmissionTrack>(`/api/submission/track/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    removeTrack: (id: string) => request<{ ok: boolean }>(`/api/submission/track/${id}`, { method: 'DELETE' }),
   },
 };
 

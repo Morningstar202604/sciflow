@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS knowledge_doc (
   name TEXT NOT NULL,
   type TEXT DEFAULT 'text',
   chunk_count INTEGER DEFAULT 0,
+  reference_id TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -288,6 +289,61 @@ CREATE TABLE IF NOT EXISTS journal (
   oa TEXT DEFAULT '',
   created_at INTEGER NOT NULL
 );
+
+-- 轻量实验沙箱：本机 python3 执行记录
+CREATE TABLE IF NOT EXISTS experiment (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  document_id TEXT,
+  goal TEXT DEFAULT '',
+  code TEXT NOT NULL,
+  stdout TEXT DEFAULT '',
+  stderr TEXT DEFAULT '',
+  stdout_truncated INTEGER DEFAULT 0,
+  stderr_truncated INTEGER DEFAULT 0,
+  figures TEXT DEFAULT '[]',
+  conclusion TEXT DEFAULT '',
+  runtime_ms INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'ok',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_experiment_project ON experiment(project_id);
+
+-- 投稿流程状态跟踪：投稿记录 + 状态历史流水
+CREATE TABLE IF NOT EXISTS submission (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  document_id TEXT DEFAULT '',
+  journal_id TEXT DEFAULT '',
+  journal_name TEXT NOT NULL,
+  manuscript_no TEXT DEFAULT '',
+  title TEXT DEFAULT '',
+  submitted_at INTEGER,
+  current_status TEXT DEFAULT 'submitted',
+  status_updated_at INTEGER,
+  revision_deadline INTEGER,
+  previous_submission_id TEXT DEFAULT '',
+  source TEXT DEFAULT 'manual',
+  notes TEXT DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_submission_project ON submission(project_id);
+
+CREATE TABLE IF NOT EXISTS submission_status_event (
+  id TEXT PRIMARY KEY,
+  submission_id TEXT NOT NULL,
+  from_status TEXT DEFAULT '',
+  to_status TEXT NOT NULL,
+  event_at INTEGER NOT NULL,
+  source TEXT DEFAULT 'manual',
+  raw_email_text TEXT DEFAULT '',
+  confidence REAL DEFAULT 1,
+  note TEXT DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_submission_event_submission ON submission_status_event(submission_id);
 `);
 
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */
@@ -302,6 +358,8 @@ ensureColumn('pipeline_task', 'trace', "TEXT DEFAULT '[]'");
 // 知识库 Contextual Retrieval 升级：旧库补齐 context/vector 列（RAG 混合检索依赖）
 ensureColumn('knowledge_chunk', 'context', "TEXT DEFAULT ''");
 ensureColumn('knowledge_chunk', 'vector', "TEXT DEFAULT '[]'");
+// 文献库↔知识库打通（#5）：旧库补齐 reference_id 可空外键列
+ensureColumn('knowledge_doc', 'reference_id', "TEXT");
 // 科研高级功能：reference 阅读状态 / 去重指纹 / 重复指向
 ensureColumn('reference', 'reading_status', "TEXT DEFAULT 'unread'");
 ensureColumn('reference', 'fingerprint', "TEXT DEFAULT ''");

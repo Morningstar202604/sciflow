@@ -101,6 +101,8 @@ export const knowledgeDocs = sqliteTable('knowledge_doc', {
   name: text('name').notNull(),
   type: text('type').default('text'), // text | pdf | markdown
   chunkCount: integer('chunk_count').default(0),
+  // 文献库↔知识库打通（#5）：可空外键，指向同项目 reference.id；不强绑，可手动绑定/解除
+  referenceId: text('reference_id'),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -303,3 +305,79 @@ export type ExtractionField = typeof extractionFields.$inferSelect;
 export type ExtractionValue = typeof extractionValues.$inferSelect;
 export type ReviewCommentRow = typeof reviewComments.$inferSelect;
 export type Journal = typeof journals.$inferSelect;
+
+/** 投稿流程状态机：13 个统一状态码（见投稿跟踪调研 §2.2） */
+export const SUBMISSION_STATUSES = [
+  'submitted',       // 收稿/已投稿
+  'initial_review',  // 初审中
+  'external_review', // 外审中
+  'review_returned', // 外审意见已回
+  'minor_revision',  // 小修
+  'major_revision',  // 大修
+  're_review',       // 复审中
+  'final_review',    // 终审中
+  'accepted',        // 已录用
+  'in_production',   // 编辑加工/待见刊
+  'rejected',        // 退稿（终态）
+  'withdrawn',       // 主动撤稿（终态）
+  'transferred',     // 转投他刊
+] as const;
+export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
+
+/** 投稿记录（一条 = 一次投向某刊） */
+export const submissions = sqliteTable('submission', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  documentId: text('document_id').default(''), // 可选：关联 sciflow 里的论文文档
+  journalId: text('journal_id').default(''), // 可选：关联 journal 表（拿 firstDecisionWeeks）
+  journalName: text('journal_name').notNull(), // 冗余存名，未入期刊库也能记
+  manuscriptNo: text('manuscript_no').default(''), // 稿号（编辑部给的编号）
+  title: text('title').default(''), // 稿件标题（冗余，便于列表显示）
+  submittedAt: integer('submitted_at'), // 投稿日期（核心，驱动超期推断）
+  currentStatus: text('current_status').default('submitted'), // 当前状态码
+  statusUpdatedAt: integer('status_updated_at'), // 当前状态最近变更时间
+  revisionDeadline: integer('revision_deadline'), // 修回/缴费截止（来自邮件）
+  previousSubmissionId: text('previous_submission_id').default(''), // 转投他刊时指回旧记录
+  source: text('source').default('manual'), // manual | email_ai
+  notes: text('notes').default(''),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** 投稿状态历史流水（append-only；submissions.currentStatus 为最新 event 的冗余缓存） */
+export const submissionStatusEvents = sqliteTable('submission_status_event', {
+  id: text('id').primaryKey(),
+  submissionId: text('submission_id').notNull(),
+  fromStatus: text('from_status').default(''), // 变更前状态
+  toStatus: text('to_status').notNull(), // 变更后状态
+  eventAt: integer('event_at').notNull(), // 该状态实际发生日期（可早于录入时间）
+  source: text('source').default('manual'), // manual | email_ai | system
+  rawEmailText: text('raw_email_text').default(''), // 若来自邮件，存原文片段（可追溯/可重解析）
+  confidence: real('confidence').default(1), // 邮件解析置信度；手动=1
+  note: text('note').default(''),
+  createdAt: integer('created_at').notNull(), // 录入时间
+});
+
+export type SubmissionRow = typeof submissions.$inferSelect;
+export type SubmissionStatusEventRow = typeof submissionStatusEvents.$inferSelect;
+
+/** 轻量实验沙箱：本机 python3 执行记录（单用户本地威胁模型，临时目录+超时+进程组强杀） */
+export const experiments = sqliteTable('experiment', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  documentId: text('document_id'), // 可空：关联到具体论文草稿
+  goal: text('goal').default(''), // 实验目的/假设
+  code: text('code').notNull(), // 用户提交的 python 源码
+  stdout: text('stdout').default(''), // 截断后标准输出（≤64KB）
+  stderr: text('stderr').default(''), // 截断后标准错误（≤64KB）
+  stdoutTruncated: integer('stdout_truncated').default(0),
+  stderrTruncated: integer('stderr_truncated').default(0),
+  figures: text('figures').default('[]'), // JSON: string[] matplotlib 产出的 png（base64 data URL）
+  conclusion: text('conclusion').default(''), // 实验结论（人工回填）
+  runtimeMs: integer('runtime_ms').default(0),
+  status: text('status').default('ok'), // ok | error | timeout
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type Experiment = typeof experiments.$inferSelect;

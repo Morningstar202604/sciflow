@@ -1,11 +1,40 @@
-import { useEffect, useState } from 'react';
-import { FilePen, Globe2, Library, Loader2, MessageSquareReply, Plus, Send, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  CalendarClock, Check, FilePen, Globe2, Library, Loader2, Mail, MessageSquareReply, Plus, Send, Trash2,
+} from 'lucide-react';
 import { api } from '../api/client';
-import type { Doc, Journal, JournalMatchResult, Project } from '../types';
+import type { Doc, Journal, JournalMatchResult, ParseEmailResult, Project, ReviewComment, SubmissionStatus, SubmissionTrack } from '../types';
 import { Badge, Button, Card, ErrorBox, Input, Select, Spinner, Textarea } from '../components/ui';
 import { HBar } from '../components/charts';
 
-type Tab = 'journals' | 'cover' | 'reply';
+type Tab = 'journals' | 'cover' | 'reply' | 'track';
+
+/* —— 状态 → 中文标签 / Badge 颜色 / 阶段分组（页面顶部常量） —— */
+const STATUS_META: Record<SubmissionStatus, { label: string; tone: 'slate' | 'green' | 'amber' | 'red' | 'teal' | 'blue'; group: string }> = {
+  submitted: { label: '收稿', tone: 'blue', group: '投稿中' },
+  initial_review: { label: '初审', tone: 'teal', group: '外审中' },
+  external_review: { label: '外审', tone: 'amber', group: '外审中' },
+  review_returned: { label: '意见已回', tone: 'amber', group: '外审中' },
+  minor_revision: { label: '小修', tone: 'amber', group: '返修' },
+  major_revision: { label: '大修', tone: 'red', group: '返修' },
+  re_review: { label: '复审', tone: 'amber', group: '返修' },
+  final_review: { label: '终审', tone: 'blue', group: '终审' },
+  accepted: { label: '录用', tone: 'green', group: '完结' },
+  in_production: { label: '编辑加工', tone: 'green', group: '完结' },
+  rejected: { label: '拒稿', tone: 'red', group: '终止' },
+  withdrawn: { label: '撤稿', tone: 'slate', group: '终止' },
+  transferred: { label: '转投他刊', tone: 'slate', group: '终止' },
+};
+const STATUS_OPTIONS = (Object.keys(STATUS_META) as SubmissionStatus[]).map((s) => ({
+  value: s,
+  label: `${STATUS_META[s].label}（${s}）`,
+}));
+/** 活跃链路 Stepper 节点（终态不展示步进条） */
+const STEPPER_CHAIN: SubmissionStatus[] = ['submitted', 'initial_review', 'external_review', 'review_returned', 'minor_revision', 're_review', 'final_review', 'accepted', 'in_production'];
+const TERMINAL = new Set<SubmissionStatus>(['rejected', 'withdrawn', 'transferred']);
+
+const fmtDate = (ts?: number | null) => (ts ? new Date(ts).toLocaleDateString('zh-CN') : '—');
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export function SubmissionPage({ project }: { project: Project }) {
   const [tab, setTab] = useState<Tab>('journals');
@@ -25,11 +54,28 @@ export function SubmissionPage({ project }: { project: Project }) {
   const [libForm, setLibForm] = useState({ name: '', issn: '', publisher: '', quartile: '', if2024: '' });
   // Cover Letter
   const [journal, setJournal] = useState('');
-  // 审稿回复
+  // 审稿回复（兜底粘贴）
   const [reviewComments, setReviewComments] = useState('');
   const [responseHint, setResponseHint] = useState('');
+  // 审稿意见闭环：当前文档的 review_comment 列表
+  const [comments, setComments] = useState<ReviewComment[]>([]);
+  const [draftReplies, setDraftReplies] = useState<Record<string, string>>({});
+  const [writingBack, setWritingBack] = useState<string | null>(null);
 
-  // 修复：拉取项目内文档，否则「选择项目内论文」下拉恒空
+  // 投稿跟踪
+  const [tracks, setTracks] = useState<SubmissionTrack[]>([]);
+  const [regForm, setRegForm] = useState({ docId: '', journalId: '', journalName: '', date: todayISO(), status: 'submitted' as SubmissionStatus, note: '' });
+  const [openTrackId, setOpenTrackId] = useState<string | null>(null);
+  const [eventFor, setEventFor] = useState<string | null>(null);
+  const [evStatus, setEvStatus] = useState<SubmissionStatus>('minor_revision');
+  const [evNote, setEvNote] = useState('');
+  const [emailFor, setEmailFor] = useState<string | null>(null);
+  const [emailText, setEmailText] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [parseResult, setParseResult] = useState<ParseEmailResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  // 拉取项目内文档，否则「选择项目内论文」下拉恒空
   useEffect(() => {
     api.documents.list(project.id).then(setDocs).catch(() => setDocs([]));
   }, [project.id]);
@@ -46,6 +92,28 @@ export function SubmissionPage({ project }: { project: Project }) {
       /* 忽略 */
     }
   };
+
+  // 审稿意见闭环：切换文档时拉取该文档的 review_comment
+  useEffect(() => {
+    if (!selDoc) {
+      setComments([]);
+      return;
+    }
+    api.research.reviewComments(selDoc).then(setComments).catch(() => setComments([]));
+  }, [selDoc]);
+
+  // 投稿跟踪列表加载
+  const loadTracks = useCallback(async () => {
+    try {
+      setTracks(await api.submission.listTracks(project.id));
+    } catch (e: any) {
+      setError(e?.message || '投稿列表加载失败');
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    if (tab === 'track') loadTracks();
+  }, [tab, loadTracks]);
 
   const run = async (fn: () => Promise<string>) => {
     setBusy(true);
@@ -104,10 +172,117 @@ export function SubmissionPage({ project }: { project: Project }) {
     }
   };
 
+  /* —— 审稿意见闭环：为单条意见生成回复 —— */
+  const genReplyForComment = async (c: ReviewComment) => {
+    setWritingBack(c.id);
+    setError('');
+    try {
+      const text = await api.submission.replyReview(c.commentText, c.responseText || '');
+      setDraftReplies((m) => ({ ...m, [c.id]: text }));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setWritingBack(null);
+    }
+  };
+
+  const writeBackReply = async (c: ReviewComment) => {
+    const text = draftReplies[c.id];
+    if (!text) return;
+    setWritingBack(c.id);
+    try {
+      await api.research.updateReviewComment(c.id, { responseText: text, status: 'resolved' });
+      const updated = await api.research.reviewComments(selDoc);
+      setComments(updated);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setWritingBack(null);
+    }
+  };
+
+  /* —— 投稿跟踪动作 —— */
+  const submitTrack = async () => {
+    if (!regForm.journalName.trim()) {
+      setError('请选择或输入期刊名');
+      return;
+    }
+    try {
+      await api.submission.trackSubmit({
+        projectId: project.id,
+        journalId: regForm.journalId,
+        journalName: regForm.journalName.trim(),
+        documentId: regForm.docId,
+        submittedAt: regForm.date ? new Date(regForm.date + 'T00:00:00').getTime() : Date.now(),
+        currentStatus: regForm.status,
+        note: regForm.note,
+      });
+      setRegForm({ docId: '', journalId: '', journalName: '', date: todayISO(), status: 'submitted', note: '' });
+      await loadTracks();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const confirmEvent = async (id: string) => {
+    try {
+      await api.submission.addTrackEvent(id, { status: evStatus, note: evNote });
+      setEventFor(null);
+      setEvNote('');
+      await loadTracks();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const doParseEmail = async (t: SubmissionTrack) => {
+    if (!emailText.trim()) return;
+    setParsing(true);
+    setError('');
+    setParseResult(null);
+    try {
+      setParseResult(await api.submission.parseEmail(emailText, t.currentStatus));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const confirmParse = async (t: SubmissionTrack) => {
+    if (!parseResult) return;
+    setConfirming(true);
+    try {
+      await api.submission.addTrackEvent(t.id, {
+        status: parseResult.suggestedStatus,
+        date: parseResult.date ? new Date(parseResult.date + 'T00:00:00').getTime() : undefined,
+        note: `AI 解析：${parseResult.reason || ''}`,
+      });
+      setEmailFor(null);
+      setEmailText('');
+      setParseResult(null);
+      await loadTracks();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const removeTrack = async (id: string) => {
+    try {
+      await api.submission.removeTrack(id);
+      await loadTracks();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
   const TABS: { key: Tab; label: string; icon: typeof Globe2 }[] = [
     { key: 'journals', label: '期刊推荐', icon: Globe2 },
     { key: 'cover', label: 'Cover Letter', icon: FilePen },
     { key: 'reply', label: '审稿回复', icon: MessageSquareReply },
+    { key: 'track', label: '投稿跟踪', icon: CalendarClock },
   ];
 
   return (
@@ -164,10 +339,85 @@ export function SubmissionPage({ project }: { project: Project }) {
 
         {tab === 'reply' && (
           <div className="space-y-3">
+            <div>
+              <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">关联项目内文档（自动带出已记录的审稿意见）</div>
+              <Select
+                className="w-full"
+                options={[{ value: '', label: '不关联文档，手动粘贴审稿意见…' }, ...docs.map((d) => ({ value: d.id, label: d.title }))]}
+                value={selDoc}
+                onChange={pickDoc}
+              />
+            </div>
+
+            {/* 审稿意见闭环：逐条展示 review_comment，逐条生成并回写回复 */}
+            {comments.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs text-slate-400 dark:text-slate-500">本文档已记录 {comments.length} 条审稿意见，逐条生成回复后可回写到意见条目</div>
+                {comments.map((c) => (
+                  <div key={c.id} className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-medium text-slate-700 dark:text-slate-200">{c.reviewer}</span>
+                      {c.category && <Badge tone="slate">{c.category}</Badge>}
+                      <Badge tone={c.status === 'resolved' ? 'green' : c.status === 'deferred' ? 'slate' : 'amber'}>
+                        {c.status === 'resolved' ? '已回复' : c.status === 'deferred' ? '暂缓' : '待回复'}
+                      </Badge>
+                    </div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap">{c.commentText}</div>
+                    {c.responseText && <div className="text-[12px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 rounded p-2 whitespace-pre-wrap">已回写回复：{c.responseText}</div>}
+                    {draftReplies[c.id] && (
+                      <Textarea rows={4} value={draftReplies[c.id]} onChange={(e) => setDraftReplies((m) => ({ ...m, [c.id]: e.target.value }))} />
+                    )}
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="text-xs" disabled={writingBack === c.id} onClick={() => genReplyForComment(c)}>
+                        {writingBack === c.id ? <Loader2 size={13} className="animate-spin" /> : <MessageSquareReply size={13} />}
+                        {draftReplies[c.id] ? '重新生成' : '生成回复'}
+                      </Button>
+                      {draftReplies[c.id] && (
+                        <Button variant="outline" className="text-xs" disabled={writingBack === c.id} onClick={() => writeBackReply(c)}>
+                          <Check size={13} /> 回写到意见条目
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="text-xs text-slate-400 dark:text-slate-500 border-t border-dashed border-slate-200 dark:border-slate-700 pt-2">
+              兜底：未关联文档或想手动处理时，直接粘贴审稿意见原文
+            </div>
             <Textarea rows={6} placeholder="粘贴审稿意见原文（可包含多条）" value={reviewComments} onChange={(e) => setReviewComments(e.target.value)} />
             <Textarea rows={3} placeholder="你的初步回应想法（可选）" value={responseHint} onChange={(e) => setResponseHint(e.target.value)} />
             <Button onClick={() => run(() => api.submission.replyReview(reviewComments, responseHint))} disabled={busy}>
               {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} 生成回复信
+            </Button>
+          </div>
+        )}
+
+        {tab === 'track' && (
+          <div className="space-y-3">
+            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">登记新投稿</div>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <Select
+                options={[{ value: '', label: '不关联文档' }, ...docs.map((d) => ({ value: d.id, label: d.title }))]}
+                value={regForm.docId}
+                onChange={(v) => setRegForm((f) => ({ ...f, docId: v }))}
+              />
+              <Select
+                options={[{ value: '', label: '期刊库选择（可选）…' }, ...lib.map((j) => ({ value: j.id, label: j.name }))]}
+                value={regForm.journalId}
+                onChange={(v) => {
+                  const hit = lib.find((j) => j.id === v);
+                  setRegForm((f) => ({ ...f, journalId: v, journalName: hit ? hit.name : f.journalName }));
+                }}
+              />
+              <Input placeholder="期刊名（库内没有可自由输入）" value={regForm.journalName} onChange={(e) => setRegForm((f) => ({ ...f, journalName: e.target.value }))} />
+              <Input type="date" value={regForm.date} onChange={(e) => setRegForm((f) => ({ ...f, date: e.target.value }))} />
+              <Select options={STATUS_OPTIONS} value={regForm.status} onChange={(v) => setRegForm((f) => ({ ...f, status: v as SubmissionStatus }))} />
+              <Input placeholder="备注（可选）" value={regForm.note} onChange={(e) => setRegForm((f) => ({ ...f, note: e.target.value }))} />
+            </div>
+            <Button onClick={submitTrack}>
+              <Plus size={15} /> 登记投稿
             </Button>
           </div>
         )}
@@ -280,19 +530,141 @@ export function SubmissionPage({ project }: { project: Project }) {
         </>
       )}
 
-      {tab !== 'journals' && (
-      busy ? (
-        <Card className="p-4">
-          <Spinner label="AI 生成中…" />
-        </Card>
-      ) : output ? (
-        <Card className="p-4">
-          <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">生成结果</div>
-          <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 max-h-[480px] overflow-y-auto">{output}</div>
-        </Card>
-      ) : (
-        <Card className="p-4 text-center text-slate-400 dark:text-slate-500 text-sm">填写信息后生成结果会显示在这里</Card>
-      )
+      {/* —— 投稿跟踪卡片流 —— */}
+      {tab === 'track' && (
+        <div className="space-y-3">
+          {tracks.length === 0 && <Card className="p-6 text-center text-sm text-slate-400 dark:text-slate-500">还没有投稿记录，在上方登记第一条吧</Card>}
+          {tracks.map((t) => {
+            const meta = STATUS_META[t.currentStatus] || STATUS_META.submitted;
+            const docTitle = t.documentId ? docs.find((d) => d.id === t.documentId)?.title : '';
+            const stepIdx = STEPPER_CHAIN.indexOf(t.currentStatus);
+            return (
+              <Card key={t.id} className="p-4 mb-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{t.journalName}</span>
+                  <Badge tone={meta.tone}>{meta.label}</Badge>
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500">{meta.group}</span>
+                  <div className="ml-auto flex gap-1.5">
+                    <button className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline" onClick={() => setEventFor(eventFor === t.id ? null : t.id)}>更新状态</button>
+                    <button className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline" onClick={() => { setEmailFor(emailFor === t.id ? null : t.id); setParseResult(null); }}>
+                      <Mail size={11} className="inline mr-0.5" />解析邮件
+                    </button>
+                    <button className="text-slate-300 hover:text-rose-500" title="删除" onClick={() => removeTrack(t.id)}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+                  {docTitle || t.title || '（未命名稿件）'} · 投稿于 {fmtDate(t.submittedAt)}
+                </div>
+
+                {/* L3 周期推断提示 */}
+                {t.dueAt && !TERMINAL.has(t.currentStatus) && (
+                  <div className="mt-1.5 text-[11px]">
+                    {t.overdue ? (
+                      <Badge tone="red">已超一审周期 {t.overdueDays} 天 · 建议询问编辑部</Badge>
+                    ) : (
+                      <Badge tone="amber">预计{t.estimatedStage ? STATUS_META[t.estimatedStage].label : ''}阶段 · 一审节点 {fmtDate(t.dueAt)}</Badge>
+                    )}
+                  </div>
+                )}
+
+                {/* 横向 Stepper：当前状态在链路中的位置 */}
+                {stepIdx >= 0 && (
+                  <div className="mt-3 flex items-center">
+                    {STEPPER_CHAIN.map((s, i) => (
+                      <div key={s} className="flex items-center flex-1 last:flex-none">
+                        <div className="flex flex-col items-center">
+                          <div
+                            className={`w-2.5 h-2.5 rounded-full ${
+                              i <= stepIdx ? (i === stepIdx ? 'bg-teal-600 ring-4 ring-teal-100 dark:ring-teal-900/40' : 'bg-teal-400') : 'bg-slate-200 dark:bg-slate-700'
+                            }`}
+                          />
+                          <span className={`text-[9px] mt-0.5 ${i === stepIdx ? 'text-teal-700 font-medium' : 'text-slate-400'}`}>{STATUS_META[s].label}</span>
+                        </div>
+                        {i < STEPPER_CHAIN.length - 1 && <div className={`h-px flex-1 mx-0.5 mb-3 ${i < stepIdx ? 'bg-teal-400' : 'bg-slate-200 dark:bg-slate-700'}`} />}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 追加状态事件 */}
+                {eventFor === t.id && (
+                  <div className="mt-3 rounded-lg border border-slate-100 dark:border-slate-800 p-3 space-y-2">
+                    <Select options={STATUS_OPTIONS} value={evStatus} onChange={(v) => setEvStatus(v as SubmissionStatus)} />
+                    <Input placeholder="备注（可选）" value={evNote} onChange={(e) => setEvNote(e.target.value)} />
+                    <Button className="text-xs px-2 py-1" onClick={() => confirmEvent(t.id)}>确认追加状态</Button>
+                  </div>
+                )}
+
+                {/* 粘贴邮件解析 */}
+                {emailFor === t.id && (
+                  <div className="mt-3 rounded-lg border border-slate-100 dark:border-slate-800 p-3 space-y-2">
+                    <Textarea rows={5} placeholder="粘贴编辑部邮件正文（退修/录用/退稿/缴费通知等），AI 给出建议状态，确认后入库" value={emailText} onChange={(e) => setEmailText(e.target.value)} />
+                    <Button variant="outline" className="text-xs" disabled={parsing || !emailText.trim()} onClick={() => doParseEmail(t)}>
+                      {parsing ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />} AI 解析
+                    </Button>
+                    {parseResult && (
+                      <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3 space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-slate-500 dark:text-slate-400">建议状态：</span>
+                          <Badge tone={(STATUS_META[parseResult.suggestedStatus] || STATUS_META.submitted).tone}>
+                            {(STATUS_META[parseResult.suggestedStatus] || STATUS_META.submitted).label}
+                          </Badge>
+                          <span className="text-[11px] text-slate-400">置信度 {Math.round(parseResult.confidence * 100)}%</span>
+                          {parseResult.date && <span className="text-[11px] text-slate-400">{parseResult.date}</span>}
+                        </div>
+                        {parseResult.reason && <div className="text-[11px] text-slate-500 dark:text-slate-400">依据：{parseResult.reason}</div>}
+                        <div className="flex gap-2 pt-1">
+                          <Button className="text-xs px-2 py-1" disabled={confirming} onClick={() => confirmParse(t)}>
+                            {confirming ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} 确认更新
+                          </Button>
+                          <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setParseResult(null)}>忽略建议</Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 状态事件时间线 */}
+                <button className="mt-2 text-[11px] text-slate-400 hover:text-slate-600" onClick={() => setOpenTrackId(openTrackId === t.id ? null : t.id)}>
+                  {openTrackId === t.id ? '收起历史' : `展开历史（${t.events.length} 条）`}
+                </button>
+                {openTrackId === t.id && (
+                  <div className="mt-2 ml-1 border-l-2 border-slate-100 dark:border-slate-800 pl-3 space-y-2">
+                    {t.events.map((ev) => (
+                      <div key={ev.id} className="text-[12px]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-400 dark:text-slate-500">{fmtDate(ev.eventAt)}</span>
+                          <Badge tone={(STATUS_META[ev.toStatus as SubmissionStatus] || STATUS_META.submitted).tone}>
+                            {(STATUS_META[ev.toStatus as SubmissionStatus] || STATUS_META.submitted).label}
+                          </Badge>
+                          {ev.source === 'email_ai' && <span className="text-[10px] text-slate-400">AI 邮件解析</span>}
+                        </div>
+                        {ev.note && <div className="text-slate-500 dark:text-slate-400 mt-0.5">{ev.note}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {(tab === 'cover' || (tab === 'reply' && output)) && (
+        busy ? (
+          <Card className="p-4">
+            <Spinner label="AI 生成中…" />
+          </Card>
+        ) : output ? (
+          <Card className="p-4">
+            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">生成结果</div>
+            <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 max-h-[480px] overflow-y-auto">{output}</div>
+          </Card>
+        ) : (
+          <Card className="p-4 text-center text-slate-400 dark:text-slate-500 text-sm">填写信息后生成结果会显示在这里</Card>
+        )
       )}
     </div>
   );

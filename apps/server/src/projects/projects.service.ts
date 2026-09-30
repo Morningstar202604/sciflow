@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments } from '../db/schema';
+import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments, experiments, submissions, submissionStatusEvents } from '../db/schema';
 
 @Injectable()
 export class ProjectsService {
@@ -58,9 +58,16 @@ export class ProjectsService {
       db.delete(extractionValues).where(eq(extractionValues.fieldId, fieldId)).run();
     }
     db.delete(extractionFields).where(eq(extractionFields.projectId, id)).run();
+    // 投稿跟踪级联清理：状态流水先于投稿记录删除
+    const subIds = db.select().from(submissions).where(eq(submissions.projectId, id)).all().map((s) => s.id);
+    for (const sid of subIds) {
+      db.delete(submissionStatusEvents).where(eq(submissionStatusEvents.submissionId, sid)).run();
+    }
+    db.delete(submissions).where(eq(submissions.projectId, id)).run();
     db.delete(documents).where(eq(documents.projectId, id)).run();
     db.delete(references).where(eq(references.projectId, id)).run();
     db.delete(pipelineTasks).where(eq(pipelineTasks.projectId, id)).run();
+    db.delete(experiments).where(eq(experiments.projectId, id)).run();
     db.delete(projects).where(eq(projects.id, id)).run();
     return { ok: true };
   }

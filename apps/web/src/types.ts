@@ -156,12 +156,25 @@ export interface PolishRecord {
   createdAt: number;
 }
 
+/** 知识库文档绑定的文献摘要（文献库↔知识库打通 #5，list/bind 响应内嵌） */
+export interface KnowledgeRefSummary {
+  id: string;
+  title: string;
+  year: number | null;
+  venue: string;
+  citationCount: number;
+}
+
 export interface KnowledgeDoc {
   id: string;
   projectId: string;
   name: string;
   type: string;
   chunkCount: number;
+  /** 可空外键：绑定的文献 id（#5） */
+  referenceId: string | null;
+  /** 绑定文献的摘要，未绑定时为 null */
+  reference: KnowledgeRefSummary | null;
   createdAt: number;
 }
 
@@ -169,6 +182,12 @@ export interface KnowledgeSource {
   docName: string;
   snippet: string;
   score: number;
+  /** RAG 引用可点（#17）：块 id + 完整块文本，前端"展开原文" */
+  chunkId: string;
+  chunkText: string;
+  /** 命中块绑定的文献（#5） */
+  referenceId: string | null;
+  referenceTitle: string | null;
 }
 
 export interface KnowledgeQueryResult {
@@ -390,4 +409,128 @@ export interface JournalMatchItem {
 
 export interface JournalMatchResult {
   journals: JournalMatchItem[];
+}
+
+/** 轻量实验沙箱：本机 python3 执行记录 */
+export interface Experiment {
+  id: string;
+  projectId: string;
+  documentId: string | null;
+  goal: string;
+  code: string;
+  stdout: string;
+  stderr: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  /** matplotlib 产出的 png（base64 data URL） */
+  figures: string[];
+  conclusion: string;
+  runtimeMs: number;
+  status: 'ok' | 'error' | 'timeout';
+  createdAt: number;
+  updatedAt: number;
+}
+
+/* =====================================================================
+ * 投稿流程状态跟踪（13 状态码 + 事件流 + 周期推断）
+ * ===================================================================== */
+
+/** 13 个统一状态码（后端 SUBMISSION_STATUSES） */
+export type SubmissionStatus =
+  | 'submitted'
+  | 'initial_review'
+  | 'external_review'
+  | 'review_returned'
+  | 'minor_revision'
+  | 'major_revision'
+  | 're_review'
+  | 'final_review'
+  | 'accepted'
+  | 'in_production'
+  | 'rejected'
+  | 'withdrawn'
+  | 'transferred';
+
+/** 投稿状态历史事件（append-only 流水） */
+export interface SubmissionStatusEvent {
+  id: string;
+  submissionId: string;
+  fromStatus: string;
+  toStatus: string;
+  eventAt: number;
+  source: string; // manual | email_ai | system
+  rawEmailText: string;
+  confidence: number;
+  note: string;
+  createdAt: number;
+}
+
+/** 一条投稿记录（含全部事件 + L3 推断字段） */
+export interface SubmissionTrack {
+  id: string;
+  projectId: string;
+  documentId: string;
+  journalId: string;
+  journalName: string;
+  manuscriptNo: string;
+  title: string;
+  submittedAt: number | null;
+  currentStatus: SubmissionStatus;
+  statusUpdatedAt: number | null;
+  revisionDeadline: number | null;
+  previousSubmissionId: string;
+  source: string;
+  notes: string;
+  createdAt: number;
+  updatedAt: number;
+  events: SubmissionStatusEvent[];
+  /** L3 周期推断（journal.firstDecisionWeeks 存在时才有值） */
+  dueAt: number | null;
+  overdue: boolean;
+  overdueDays: number;
+  estimatedStage: SubmissionStatus | null;
+}
+
+/** AI 解析编辑部邮件的建议（不改库，用户确认后走 event 端点） */
+export interface ParseEmailResult {
+  suggestedStatus: SubmissionStatus;
+  confidence: number;
+  reason: string;
+  date?: string;
+}
+
+/* =====================================================================
+ * 引用网络图 + BibTeX/RIS 导入导出
+ * ===================================================================== */
+
+/** 引用网络节点（后端聚合，供前端力导向布局） */
+export interface GraphNode {
+  id: string;
+  title: string;
+  year: number | null;
+  venue: string;
+  citationCount: number;
+  tags: string[];
+  readingStatus?: string;
+  isDuplicateOf?: string;
+}
+
+/** 引用网络边：a/b 为节点 id，weight=共引文档数（dup 边固定高亮） */
+export interface GraphEdge {
+  a: string;
+  b: string;
+  weight: number;
+  type?: 'co-cite' | 'dup';
+}
+
+export interface ReferenceGraph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+/** BibTeX 导入结果 */
+export interface BibtexImportResult {
+  imported: number;
+  skipped: number;
+  total: number;
 }

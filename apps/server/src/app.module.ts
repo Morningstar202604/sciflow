@@ -12,6 +12,7 @@ import { MemoryModule } from './memory/memory.module';
 import { ResearchModule } from './research/research.module';
 import { JudgmentModule } from './judgment/judgment.module';
 import { CustomizationModule } from './settings/customization.module';
+import { ExperimentsModule } from './experiments/experiments.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -29,6 +30,7 @@ import { HealthController } from './health.controller';
     ResearchModule,
     JudgmentModule,
     CustomizationModule,
+    ExperimentsModule,
   ],
   controllers: [HealthController],
 })
