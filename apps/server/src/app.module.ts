@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { AiModule } from './ai/ai.module';
 import { ProjectsModule } from './projects/projects.module';
 import { DocumentsModule } from './documents/documents.module';
@@ -15,6 +16,7 @@ import { CustomizationModule } from './settings/customization.module';
 import { ExperimentsModule } from './experiments/experiments.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthController } from './health.controller';
+import { HttpExceptionFilter } from './common/http-exception.filter';
 
 @Module({
   imports: [
@@ -35,5 +37,6 @@ import { HealthController } from './health.controller';
     DashboardModule,
   ],
   controllers: [HealthController],
+  providers: [{ provide: APP_FILTER, useClass: HttpExceptionFilter }],
 })
 export class AppModule {}

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Bot, Brain, Check, ChevronRight, CircleDashed, Eye, Loader2, Plus, RotateCcw, Workflow, Zap } from 'lucide-react';
+import { Activity, Bot, Brain, Check, CircleDashed, Eye, Loader2, Plus, RotateCcw, Trash2, Workflow, Zap } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { AgentRun, Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
-import { Badge, Button, Card, Empty, ErrorBox, Input, Modal, Spinner, Textarea, jsonText } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Spinner, jsonText } from '../components/ui';
 import { HBar, ProgressRing, Sparkline } from '../components/charts';
 
 const STEP_LABELS: Record<string, string> = {
@@ -34,7 +34,8 @@ const AGENT_MAP: Record<string, { role: string; tone: 'blue' | 'green' | 'teal' 
  * 大纲模板（差距 #17）：前端常量，零 AI 依赖
  * 流水线后端 create 只收 topic 文本，故选中模板后把章节结构
  * 以纯文本形式追加到 topic 末尾，Planner/写作 Agent 自然遵循。
- * P2 扩展：自定义模板按项目隔离（localStorage sciflow:templates:<projectId>），
+ * P2 扩展：自定义模板按项目隔离（后端项目 templates 字段，PATCH /api/projects/:id 持久化；
+ *  首次进入时若后端为空且 localStorage 有旧值，一次性迁移写回后端并清本地）。
  * 内置预设只读；自定义模板可增/删/改，并可「一键套用」创建带章节骨架的草稿文档。
  */
 interface OutlineTemplate {
@@ -82,7 +83,7 @@ const OUTLINE_TEMPLATES: Record<string, OutlineTemplate> = {
   },
 };
 
-/* ---------------- 模板管理：内置预设（只读）+ 自定义（按项目 localStorage） ---------------- */
+/* ---------------- 模板管理：内置预设（只读）+ 自定义（按项目后端 templates 字段） ---------------- */
 interface ManagedTemplate {
   id: string;
   label: string;
@@ -99,38 +100,37 @@ const PRESET_TEMPLATES: ManagedTemplate[] = Object.entries(OUTLINE_TEMPLATES).ma
   sections: t.sections,
 }));
 const tplStorageKey = (pid: string) => `sciflow:templates:${pid}`;
+
+/** 容错解析模板数组（localStorage 旧值 / 后端 templates JSON 字符串共用） */
+function parseTemplateArr(arr: unknown): ManagedTemplate[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((t: any) => t && typeof t === 'object')
+    .map((t: any, i: number) => ({
+      id: typeof t.id === 'string' && t.id ? t.id : `c_${Date.now()}_${i}`,
+      label: String(t.label || '未命名模板'),
+      desc: String(t.desc || ''),
+      builtin: false,
+      sections: Array.isArray(t.sections)
+        ? t.sections
+            .filter((s: any) => s && s.title)
+            .map((s: any) => ({ title: String(s.title), hint: String(s.hint || '') }))
+        : [],
+    }));
+}
+/** 读取 localStorage 旧值（仅用于首次向后端一次性迁移；此后不再作为读源） */
 function loadCustomTemplates(pid: string): ManagedTemplate[] {
   try {
     const raw = localStorage.getItem(tplStorageKey(pid));
     if (!raw) return [];
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .filter((t: any) => t && typeof t === 'object')
-      .map((t: any, i: number) => ({
-        id: typeof t.id === 'string' && t.id ? t.id : `c_${Date.now()}_${i}`,
-        label: String(t.label || '未命名模板'),
-        desc: String(t.desc || ''),
-        builtin: false,
-        sections: Array.isArray(t.sections)
-          ? t.sections
-              .filter((s: any) => s && s.title)
-              .map((s: any) => ({ title: String(s.title), hint: String(s.hint || '') }))
-          : [],
-      }));
+    return parseTemplateArr(JSON.parse(raw));
   } catch {
     return [];
   }
 }
-function persistCustomTemplates(pid: string, list: ManagedTemplate[]) {
-  try {
-    localStorage.setItem(
-      tplStorageKey(pid),
-      JSON.stringify(list.map(({ id, label, desc, sections }) => ({ id, label, desc, sections }))),
-    );
-  } catch {
-    /* 存储满/隐私模式静默失败 */
-  }
+/** 序列化为后端 templates 字段存储形态（丢弃 builtin 标记，仅存自定义模板） */
+function stripTemplates(list: ManagedTemplate[]) {
+  return list.map(({ id, label, desc, sections }) => ({ id, label, desc, sections }));
 }
 
 export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenDoc?: (docId: string) => void }) {
@@ -138,7 +138,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
   const [activeId, setActiveId] = useState<string | null>(null);
   const [topic, setTopic] = useState('');
   const [templateId, setTemplateId] = useState<string>('');
-  /* —— 模板管理：自定义模板（按项目 localStorage 持久化）—— */
+  /* —— 模板管理：自定义模板（按项目后端 templates 字段持久化）—— */
   const [customs, setCustoms] = useState<ManagedTemplate[]>([]);
   const [manageOpen, setManageOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -159,13 +159,53 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
   const toast = useContext(ToastContext);
   const [agents, setAgents] = useState<AgentRun[]>([]);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 差距#9a：待删除的任务记录（二次确认后调用 DELETE /api/pipeline/:id；失败/中断任务同样可删）
+  const [deletingTask, setDeletingTask] = useState<PipelineTask | null>(null);
 
   const active = tasks.find((t) => t.id === activeId) ?? null;
 
-  /** 自定义模板按项目隔离加载（切换项目时读取该项目专属模板） */
+  /** 自定义模板按项目隔离加载：后端 templates 字段优先；后端为空且 localStorage 有旧值时一次性迁移写回后端 */
   useEffect(() => {
-    setCustoms(loadCustomTemplates(project.id));
+    let cancelled = false;
+    (async () => {
+      let fromBackend: ManagedTemplate[] = [];
+      try {
+        if (project.templates) fromBackend = parseTemplateArr(JSON.parse(project.templates));
+      } catch {
+        fromBackend = [];
+      }
+      if (!cancelled) setCustoms(fromBackend);
+      // 一次性迁移：后端为空但 localStorage 有旧自定义模板 → 写回后端并清本地
+      if (fromBackend.length === 0) {
+        const old = loadCustomTemplates(project.id);
+        if (old.length > 0) {
+          if (!cancelled) setCustoms(old);
+          try {
+            await api.projects.update(project.id, { templates: JSON.stringify(stripTemplates(old)) });
+            try {
+              localStorage.removeItem(tplStorageKey(project.id));
+            } catch {
+              /* 隐私模式清不掉也无妨 */
+            }
+          } catch {
+            /* 迁移失败：保留本地 customs，下次进入再试 */
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [project.id]);
+
+  /** 自定义模板持久化：写后端项目 templates 字段（PATCH /api/projects/:id），失败 toast 提示 */
+  const persistCustomTemplates = async (list: ManagedTemplate[]) => {
+    try {
+      await api.projects.update(project.id, { templates: JSON.stringify(stripTemplates(list)) });
+    } catch (e: any) {
+      toast('error', '模板保存失败：' + (e?.message || '网络错误'));
+    }
+  };
 
   /** 全部模板 = 内置预设 + 当前项目自定义 */
   const templates: ManagedTemplate[] = [...PRESET_TEMPLATES, ...customs];
@@ -292,7 +332,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
       next = [...customs, { id: `c_${Date.now()}`, builtin: false, ...record }];
     }
     setCustoms(next);
-    persistCustomTemplates(project.id, next);
+    persistCustomTemplates(next);
     setEditorOpen(false);
     toast('success', editingId ? '模板已更新' : `已新增自定义模板「${label}」`);
   };
@@ -302,7 +342,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
     if (!t) return;
     const next = customs.filter((x) => x.id !== id);
     setCustoms(next);
-    persistCustomTemplates(project.id, next);
+    persistCustomTemplates(next);
     if (templateId === id) setTemplateId('');
     toast('info', `已删除模板「${t.label}」`);
   };
@@ -347,6 +387,24 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
       setError(e.message);
     } finally {
       setConfirming(false);
+    }
+  };
+
+  /** 差距#9a：删除任务记录（DELETE /api/pipeline/:id）；删除后从列表移除并切换选中项 */
+  const confirmDeleteTask = async () => {
+    if (!deletingTask) return;
+    try {
+      await api.pipeline.remove(deletingTask.id);
+      setTasks((s) => {
+        const next = s.filter((t) => t.id !== deletingTask.id);
+        if (activeId === deletingTask.id) setActiveId(next[0]?.id ?? null);
+        return next;
+      });
+      toast('success', `已删除任务「${deletingTask.topic}」`);
+    } catch (e: any) {
+      toast('error', '删除失败：' + (e?.message || '未知错误'));
+    } finally {
+      setDeletingTask(null);
     }
   };
 
@@ -488,7 +546,16 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                       创建于 {new Date(active.createdAt).toLocaleString()} · 回炉 {active.retryCount} 次
                     </div>
                   </div>
-                  <Badge tone={statusText[active.status]?.tone || 'blue'}>{statusText[active.status]?.text || active.status}</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={statusText[active.status]?.tone || 'blue'}>{statusText[active.status]?.text || active.status}</Badge>
+                    <button
+                      onClick={() => setDeletingTask(active)}
+                      title="删除此任务记录（失败/中断任务同样可删）"
+                      className="text-slate-300 hover:text-rose-500 transition-colors"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* 进度环：8 步中已完成占比，label=当前步骤 */}
@@ -880,6 +947,17 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
           <Button onClick={saveEditor}>保存模板</Button>
         </div>
       </Modal>
+
+      {/* 差距#9a：删除流水线任务记录二次确认 */}
+      <ConfirmDialog
+        open={!!deletingTask}
+        title="删除流水线任务"
+        description={deletingTask ? `确定要删除任务「${deletingTask.topic}」吗？其步骤/轨迹/Agent 执行记录将一并删除，且无法恢复。` : undefined}
+        confirmText="删除"
+        danger
+        onConfirm={confirmDeleteTask}
+        onClose={() => setDeletingTask(null)}
+      />
     </div>
   );
 }

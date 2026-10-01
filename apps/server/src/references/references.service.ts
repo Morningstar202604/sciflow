@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { db } from '../db/database';
 import { references, screeningQueue, extractionFields, extractionValues, documents, citations } from '../db/schema';
 import { AiService } from '../ai/ai.service';
+import { parseAuthors } from '../common/authors';
 
 /** 文献命中条目（本地文献库检索/入库共用） */
 export interface PaperHit {
@@ -53,14 +54,9 @@ export class ReferencesService {
     }));
   }
 
+  /** 解析 authors JSON 为字符串数组（三形态归一化：字符串/对象{name|family+given}/坏 JSON→[]，与前端同口径） */
   private parseAuthors(json: string | null): string[] {
-    if (!json) return [];
-    try {
-      const arr = JSON.parse(json);
-      return Array.isArray(arr) ? arr.map(String) : [];
-    } catch {
-      return json ? [json] : [];
-    }
+    return parseAuthors(json);
   }
 
   list(projectId: string) {

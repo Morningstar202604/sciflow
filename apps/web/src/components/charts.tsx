@@ -15,7 +15,6 @@ import type { ReactNode } from 'react';
  * ===================================================================== */
 
 const BRAND = 'var(--brand-500)';
-const BRAND_LIGHT = 'var(--brand-400)';
 
 /** 默认分类色板：品牌三色 + 语义色，暗色下由 token 自动提亮 */
 const PALETTE = ['var(--brand-500)', 'var(--brand-400)', '#0ea5e9', '#f59e0b', '#64748b', '#94a3b8', '#8b5cf6', '#f87171'];
@@ -67,12 +66,12 @@ export function HBar({
   items,
   max,
   showValue = true,
-  barHeight = 8,
   className = '',
 }: {
   items: { label: string; value: number; max?: number; color?: string; sub?: string; hint?: string; formatValue?: (v: number) => string }[];
   max?: number;
   showValue?: boolean;
+  /** 兼容旧调用方传参（已不影响渲染，保留入参类型避免调用方报错） */
   barHeight?: number;
   className?: string;
 }) {

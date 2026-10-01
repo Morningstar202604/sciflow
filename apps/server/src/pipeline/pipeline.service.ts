@@ -2,10 +2,9 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { pipelineTasks, documents, references, polishRecords, qualityReports, reflexionLogs, memoryLogs , pipelineConfigs, citations } from '../db/schema';
+import { pipelineTasks, documents, references, polishRecords, reflexionLogs, memoryLogs , pipelineConfigs, citations } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
-import { QualityService } from '../research/quality.service';
 import { AgentOrchestratorService, ResearchPlan } from '../orchestrator/orchestrator.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 
@@ -51,7 +50,6 @@ export class PipelineService {
   constructor(
     private readonly ai: AiService,
     private readonly references: ReferencesService,
-    private readonly quality: QualityService,
     private readonly orchestrator: AgentOrchestratorService,
     private readonly knowledge: KnowledgeService,
   ) {}

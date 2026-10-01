@@ -3,7 +3,7 @@ import { AlertTriangle, Beaker, Check, Copy, Loader2, Play, RotateCcw, Save, Tra
 import { api } from '../api/client';
 import { ToastContext } from '../App';
 import type { Doc, Experiment, Project } from '../types';
-import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Select, Spinner, Textarea } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Select, Textarea } from '../components/ui';
 
 const DEFAULT_CODE = `# 在本机沙箱中运行 Python（超时 10s，临时目录隔离）
 import math

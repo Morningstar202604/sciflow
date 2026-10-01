@@ -7,6 +7,8 @@ export interface Project {
   updatedAt: number;
   /** 项目级系统提示（差距#22：写作偏好，每轮注入；仅字符串） */
   preface?: string;
+  /** 差距#1：自定义大纲模板持久化（JSON 字符串，PATCH /api/projects/:id 写入；GET/list 返回） */
+  templates?: string;
 }
 
 export interface Doc {
@@ -189,6 +191,8 @@ export interface KnowledgeRefSummary {
   year: number | null;
   venue: string;
   citationCount: number;
+  /** 差距#2：绑定文献作者串（后端未返回时前端容错为空不显示） */
+  authors?: string;
 }
 
 export interface KnowledgeDoc {
@@ -216,6 +220,9 @@ export interface KnowledgeSource {
   /** 命中块绑定的文献（#5） */
   referenceId: string | null;
   referenceTitle: string | null;
+  /** 差距#2：绑定文献作者/年份（SSE/检索未下发时前端容错为空不显示） */
+  referenceAuthors?: string | null;
+  referenceYear?: number | null;
 }
 
 export interface KnowledgeQueryResult {
@@ -234,6 +241,9 @@ export interface ChatSource {
   chunkSeq: number;
   referenceId: string | null;
   referenceTitle: string | null;
+  /** 差距#2：绑定文献作者/年份（SSE 未下发时前端容错为空不显示） */
+  referenceAuthors?: string | null;
+  referenceYear?: number | null;
 }
 
 /** 学习复盘取数（GET /api/knowledge/:id）：单文档全部分块正文（按 seq 升序） */

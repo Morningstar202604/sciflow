@@ -6,6 +6,7 @@ import { config as loadEnv } from 'dotenv';
 loadEnv({ path: join(__dirname, '..', '.env') });
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { InputValidationPipe } from './common/input-validation.pipe';
 
 async function bootstrap() {
   // ---------- 全局兜底：异步任务（流水线 fire-and-forget）漏网异常不再崩进程 ----------
@@ -40,9 +41,14 @@ async function bootstrap() {
     credentials: true,
   });
   app.setGlobalPrefix('api');
+  // 全局输入校验（轻量兜底，零新增依赖）：仅约束 @Body() 为 JSON 对象，不剥字段、不误伤现有端点
+  app.useGlobalPipes(new InputValidationPipe());
   const port = Number(process.env.PORT || 3000);
-  await app.listen(port, '0.0.0.0');
-  console.log(`[SciFlow] API 已启动: http://localhost:${port}/api/health`);
+  // 安全基线：单用户本地定位服务，只回环监听 127.0.0.1，不再对局域网暴露零鉴权 API。
+  // 确需对外暴露时显式设置 HOST=0.0.0.0（默认安全，opt-in 暴露）。
+  const host = process.env.HOST || '127.0.0.1';
+  await app.listen(port, host);
+  console.log(`[SciFlow] API 已启动: http://localhost:${port}/api/health （仅监听 ${host}）`);
 
   // ---------- Checkpoint 断点续跑：重启后恢复中断的流水线任务（对标 LangGraph checkpointer） ----------
   try {

@@ -29,18 +29,87 @@ function escTex(t: string): string {
     .replace(/\^/g, '\\textasciicircum{}');
 }
 
-/** 行内格式：**粗** / `代码` / *斜体*（先转义再套命令） */
+/* ------------------------------------------------------------------ */
+/* 数学公式保护/还原（与编辑器 KaTeX 语义对齐）                         */
+/* ------------------------------------------------------------------ */
+// 编辑器用 remark-math + rehype-katex 支持 $..$ / $$..$$。导出时若走通用 LaTeX
+// 转义会把 $ 转成 \$ 导致公式丢失。故先把公式抽成占位符，正文照常转义，最后按
+// 目标格式还原：.tex 侧 $..$→\(..\)、$$..$$→\[..\]（内容原样，不转义）；
+// HTML 侧自包含离线无法引 KaTeX CDN，降级为等宽/斜体近似渲染（见 .math 样式）。
+interface MathSpan {
+  raw: string;
+  display: boolean;
+  /** 字面量 \$（用户显式写的美元符号）：原样还原，不包 \(..\) */
+  literal?: boolean;
+}
+function protectMath(md: string): { text: string; spans: MathSpan[] } {
+  const spans: MathSpan[] = [];
+  let text = md || '';
+  // 0. 先保护已转义的字面量 \$（用户显式写的美元符号），避免被下面公式定界符误吞
+  text = text.replace(/\\\$/g, () => {
+    spans.push({ raw: '\\$', display: false, literal: true });
+    return `@@M${spans.length - 1}@@`;
+  });
+  // 1. 块级 $$..$$ 优先（可跨行）
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_m, g: string) => {
+    spans.push({ raw: g.trim(), display: true });
+    return `@@M${spans.length - 1}@@`;
+  });
+  // 2. 行内 $..$（不跨行；孤立 $ 无闭合则不匹配，保留为字面量由 escTex 转义）
+  text = text.replace(/\$([^\$\n]+?)\$/g, (_m, g: string) => {
+    spans.push({ raw: g.trim(), display: false });
+    return `@@M${spans.length - 1}@@`;
+  });
+  return { text, spans };
+}
+function restoreMathTex(text: string, spans: MathSpan[]): string {
+  return text.replace(/@@M(\d+)@@/g, (_m, i: string) => {
+    const sp = spans[Number(i)];
+    if (!sp) return '';
+    if (sp.literal) return sp.raw; // 字面 \$ 原样（LaTeX 中即转义美元）
+    return sp.display ? `\\[${sp.raw}\\]` : `\\(${sp.raw}\\)`;
+  });
+}
+function restoreMathHtml(text: string, spans: MathSpan[]): string {
+  let out = text.replace(/@@M(\d+)@@/g, (_m, i: string) => {
+    const sp = spans[Number(i)];
+    if (!sp) return '';
+    if (sp.literal) return '\\$';
+    const inner = escHtml(sp.raw);
+    return sp.display ? `<div class="math">${inner}</div>` : `<span class="math">${inner}</span>`;
+  });
+  // 块级公式不该被套在 <p> 里：去掉包裹 <p> 让 <div class="math"> 独立成块
+  out = out.replace(/<p>\s*(<div class="math">[\s\S]*?<\/div>)\s*<\/p>/g, '$1');
+  return out;
+}
+
+/** 行内格式：链接 [text](url) + 粗体/代码/斜体（先转义再套命令） */
 function inlineTex(t: string): string {
-  let s = escTex(t);
+  // 先把链接抽出（在转义前捕获原始 url，避免转义污染 \href 的目标地址）
+  const links: { url: string; text: string }[] = [];
+  let s = (t ?? '').replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text: string, url: string) => {
+    links.push({ url, text });
+    return `@@L${links.length - 1}@@`;
+  });
+  s = escTex(s);
   s = s.replace(/\*\*([^*]+)\*\*/g, '\\textbf{$1}');
   s = s.replace(/`([^`]+)`/g, '\\texttt{$1}');
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1\\emph{$2}');
+  s = s.replace(/@@L(\d+)@@/g, (_m, i: string) => {
+    const l = links[Number(i)];
+    if (!l) return '';
+    // hyperref：url 仅最小转义 % # &（其余字符原样，保证链接地址可用）
+    const url = l.url.replace(/([%#&])/g, '\\$1');
+    return `\\href{${url}}{${inlineTex(l.text)}}`;
+  });
   return s;
 }
 
 /** markdown 正文 → LaTeX 块结构（#/##/### → section/subsection/subsubsection，列表/段落分组） */
 function mdToLatex(md: string): string {
-  const lines = (md || '').split('\n');
+  // 先抽离数学公式占位（避免 escTex 把 $ 转义成 \$ 导致公式丢失）
+  const { text, spans } = protectMath(md);
+  const lines = text.split('\n');
   const out: string[] = [];
   let list: { type: 'itemize' | 'enumerate'; items: string[] } | null = null;
   const closeList = () => {
@@ -77,7 +146,7 @@ function mdToLatex(md: string): string {
     out.push(inlineTex(line), '');
   }
   closeList();
-  return out.join('\n').trim();
+  return restoreMathTex(out.join('\n').trim(), spans);
 }
 
 /**
@@ -145,9 +214,11 @@ function toBibtex(i: number, ref: Reference): string {
   if (ref.venue) fields.push([venueField, ref.venue]);
   if (ref.doi) fields.push(['doi', ref.doi]);
   if (ref.url) fields.push(['url', ref.url]);
+  // BibTeX 字段转义：title/venue/doi/url 等文本字段轻量转义 & % _ # { }（author 已是规范作者串，不转义）
+  const escBib = (v: string) => v.replace(/([%_#{}&])/g, '\\$1');
   const body = fields
     .filter(([, v]) => v && v.trim())
-    .map(([k, v]) => `  ${k} = {${v.replace(/([{}])/g, '\\$1')}}`)
+    .map(([k, v]) => `  ${k} = {${k === 'author' ? v : escBib(v)}}`)
     .join(',\n');
   return `@${type}{${key},\n${body}\n}`;
 }
@@ -155,7 +226,9 @@ function toBibtex(i: number, ref: Reference): string {
 /** 构建自包含 .tex 全文（导出供离线单测） */
 export function buildTex(doc: Doc, content: string, citations: CitationRow[], project: Project): string {
   const title = doc?.title || 'Untitled';
-  const author = 'Your Name'; // 占位：请在导出后替换为实际作者
+  // 占位作者：Doc / 项目契约暂无 author 字段（项目 preface 为写作偏好提示，非作者）。
+  // 导出后请把下一行 \\author{} 内的「作者姓名」替换为真实姓名即可（如需单位/邮箱可自行加 \\thanks）。
+  const author = '作者姓名';
   const date = new Date().toLocaleDateString('zh-CN');
   const body = mdToLatex(content || '');
   const bibItems = citations.length
@@ -179,6 +252,8 @@ export function buildTex(doc: Doc, content: string, citations: CitationRow[], pr
 % \\usepackage{ctex}
 %   · 参考文献已内嵌为 thebibliography，开箱即可编译；
 %     文末另附 BibTeX 源条目（refs*.bib），可改用 \\bibliography{refs} 工作流。
+%   · 行内/块级数学公式由 $..$ / $$..$$ 转写为 \\(..\\) / \\[..\\]（与编辑器 KaTeX 一致）；
+%     正文中的 [text](url) 链接转写为 \\href{url}{text}（见 hyperref 宏包）。
 % 项目来源：${escTex(project?.name || 'SciFlow Project')}
 % ============================================================================
 \\documentclass[11pt]{article}
@@ -187,6 +262,7 @@ export function buildTex(doc: Doc, content: string, citations: CitationRow[], pr
 \\usepackage{amsmath,amssymb}
 \\usepackage{graphicx}
 \\usepackage[margin=2.5cm]{geometry}
+\\usepackage{hyperref}   % [text](url) 链接 → \\href；已自动加载
 % \\usepackage{ctex}   % 含中文时取消本行注释，并以 XeLaTeX 编译
 
 \\title{${inlineTex(title)}}
@@ -223,16 +299,28 @@ function escHtml(t: string): string {
 }
 
 function inlineHtml(t: string): string {
-  let s = escHtml(t);
+  // 先抽离链接（在转义前捕获原始 url；href 经 escHtml 转义引号/&，符合 HTML 属性规范）
+  const links: { url: string; text: string }[] = [];
+  let s = (t ?? '').replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text: string, url: string) => {
+    links.push({ url, text });
+    return `@@L${links.length - 1}@@`;
+  });
+  s = escHtml(s);
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  s = s.replace(/@@L(\d+)@@/g, (_m, i: string) => {
+    const l = links[Number(i)];
+    return l ? `<a href="${escHtml(l.url)}">${inlineHtml(l.text)}</a>` : '';
+  });
   return s;
 }
 
-/** 手写轻量 markdown → HTML（标题/段落/粗斜体/行内代码/列表/代码块/引用块） */
+/** 手写轻量 markdown → HTML（标题/段落/粗斜体/行内代码/列表/代码块/引用块/链接/近似数学） */
 function mdToHtml(md: string): string {
-  const lines = (md || '').split('\n');
+  // 抽离数学公式占位（离线自包含无法引 KaTeX CDN，导出后降级为 .math 近似渲染）
+  const { text, spans } = protectMath(md);
+  const lines = text.split('\n');
   const out: string[] = [];
   let list: { type: 'ul' | 'ol'; items: string[] } | null = null;
   let inCode = false;
@@ -288,7 +376,7 @@ function mdToHtml(md: string): string {
   }
   closeList();
   if (inCode) out.push('<pre><code>' + escHtml(codeBuf.join('\n')) + '</code></pre>');
-  return out.join('\n');
+  return restoreMathHtml(out.join('\n'), spans);
 }
 
 /** 构建自包含单文件 HTML 快照（导出供离线单测） */
@@ -317,6 +405,7 @@ ${citations
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escHtml(title)}</title>
+<!-- 数学公式为近似渲染（等宽/斜体占位），离线自包含未引入 KaTeX；如需正确排版请导出 .tex -->
 <style>
   :root { color-scheme: light dark; }
   body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -335,11 +424,18 @@ ${citations
   ol.refs li { margin: .5em 0; font-size: .92rem; }
   .ref-authors { color: #0d9488; }
   a { color: #0d9488; }
+  /* 数学公式近似渲染（离线无 KaTeX CDN）：等宽斜体 + 左边框提示；正确排版请用 .tex 导出 */
+  .math { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-style: italic;
+          background: #f3f4f6; border-left: 3px solid #0d9488; padding: .35em .7em; margin: .7em 0;
+          overflow-x: auto; border-radius: 4px; }
+  span.math { background: #eef2f2; padding: .05em .35em; border-radius: 4px; border-left: none; }
   footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: .78rem; color: #9ca3af; }
   @media (prefers-color-scheme: dark) {
     body { background: #111827; color: #e5e7eb; }
     blockquote { background: #1f2937; color: #9ca3af; }
     code { background: #1f2937; }
+    .math { background: #1f2937; }
+    span.math { background: #1f2937; }
   }
 </style>
 </head>

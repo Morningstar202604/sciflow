@@ -1,10 +1,10 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import {
-  Brain, Check, Copy, Download, FileText, Loader2, MessageSquare, Navigation, Pencil, PlayCircle, Quote, RotateCcw, Send, Sparkles, Square, X,
+  Brain, Check, ChevronDown, ChevronUp, Copy, Download, FileText, Loader2, MessageSquare, Navigation, Pencil, PlayCircle, Quote, RotateCcw, Send, Sparkles, Square,
 } from 'lucide-react';
 import { api, streamChat } from '../api/client';
 import { ToastContext } from '../App';
-import type { Doc, IntentResult, KnowledgeDoc, Project } from '../types';
+import type { ChatSource, IntentResult, KnowledgeDoc, Project } from '../types';
 import { Card, ErrorBox, Modal } from '../components/ui';
 
 /** 消息结构（含主流智能体范式的附加字段：思考流/来源/用量/follow-up/状态） */
@@ -14,7 +14,7 @@ interface Msg {
   streaming?: boolean;
   stopped?: boolean;
   reasoning?: string;
-  sources?: { docName: string; score: number }[];
+  sources?: ChatSource[];
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
   followUps?: string[];
   error?: string;
@@ -78,9 +78,11 @@ export function ChatPage({ project }: { project: Project }) {
   // RAG 一键引用：知识库文档名→referenceId 映射（SSE 来源只带 docName/score，按名反查绑定文献）
   const [kbByName, setKbByName] = useState<Map<string, KnowledgeDoc>>(new Map());
   // 引用目标选择弹层 + 已引用标记
-  const [citeSource, setCiteSource] = useState<{ docName: string; score: number } | null>(null);
+  const [citeSource, setCiteSource] = useState<ChatSource | null>(null);
   const [citing, setCiting] = useState(false);
   const [citedKeys, setCitedKeys] = useState<Record<string, boolean>>({});
+  // 来源卡「展开原文」：按 `消息序号:来源序号` 记录展开态（纯前端，零新请求）
+  const [openSrc, setOpenSrc] = useState<Record<string, boolean>>({});
 
   const hasConversation = messages.some((m) => m.role === 'user');
 
@@ -233,12 +235,12 @@ export function ChatPage({ project }: { project: Project }) {
   };
 
   /** RAG 一键引用：打开目标文档选择弹层（docName 已在 kbByName 中查到 referenceId） */
-  const openCite = (s: { docName: string; score: number }) => {
+  const openCite = (s: ChatSource) => {
     if (!kbByName.get(s.docName)?.referenceId) return; // 未绑定文献：按钮已禁用
     setCiteSource(s);
   };
 
-  /** 选定目标文档 → 幂等写入引用（location 标记为 RAG 来源） */
+  /** 选定目标文档 → 幂等写入引用（location 标记为 RAG 来源，context 带命中文块前 200 字） */
   const doCite = async (docId: string) => {
     if (!citeSource) return;
     const refId = kbByName.get(citeSource.docName)?.referenceId;
@@ -249,7 +251,7 @@ export function ChatPage({ project }: { project: Project }) {
         documentId: docId,
         referenceId: refId,
         location: 'rag:' + citeSource.docName,
-        context: '',
+        context: (citeSource.chunkText || '').slice(0, 200),
       });
       setCitedKeys((m) => ({ ...m, [citeSource.docName]: true }));
       toast('success', `已引用「${citeSource.docName}」到论文`);
@@ -434,32 +436,68 @@ export function ChatPage({ project }: { project: Project }) {
                     {m.content}
                     {m.streaming && <span className="inline-block w-1.5 h-4 bg-current opacity-60 ml-0.5 align-middle pulse-dot" />}
                   </div>
-                  {/* 来源引用 chips（知识库 RAG 命中）：每张可一键引用到论文 */}
+                  {/* 来源引用 chips（知识库 RAG 命中）：可展开原文 + 一键引用到论文 */}
                   {m.sources && m.sources.length > 0 && (
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <div className="mt-1.5 space-y-1.5">
                       {m.sources.map((s, si) => {
                         const refId = kbByName.get(s.docName)?.referenceId;
                         const cited = !!citedKeys[s.docName];
                         const pct = Math.round(s.score > 1 ? s.score : s.score * 100);
+                        const key = `${i}:${si}`;
+                        const open = !!openSrc[key];
+                        const hasChunk = !!(s.chunkText && s.chunkText.trim());
+                        const chunkNo = typeof s.chunkSeq === 'number' ? s.chunkSeq + 1 : null;
                         return (
-                          <span
-                            key={si}
-                            className="inline-flex items-center gap-1 text-[11px] bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-full px-2 py-0.5 border border-teal-200 dark:border-teal-800"
-                          >
-                            <FileText size={10} /> {s.docName} · {pct}%
-                            {cited ? (
-                              <span className="inline-flex items-center gap-0.5 text-teal-700 dark:text-teal-300"><Check size={10} />已引用</span>
-                            ) : (
-                              <button
-                                onClick={() => openCite(s)}
-                                disabled={!refId}
-                                title={refId ? '把该来源引用进论文草稿' : '先在知识库把这份资料绑定到文献，再引用'}
-                                className="ml-0.5 inline-flex items-center gap-0.5 underline underline-offset-2 disabled:text-slate-400 disabled:no-underline disabled:cursor-not-allowed"
-                              >
-                                <Quote size={10} />引用
-                              </button>
+                          <div key={si} className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="inline-flex items-center gap-1 text-[11px] bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300 rounded-full px-2 py-0.5 border border-teal-200 dark:border-teal-800">
+                                <FileText size={10} /> {s.docName} · {pct}%
+                                {chunkNo !== null && <span className="text-[10px] opacity-70">分块 {chunkNo}</span>}
+                              </span>
+                              {hasChunk && (
+                                <button
+                                  onClick={() => setOpenSrc((mm) => ({ ...mm, [key]: !mm[key] }))}
+                                  className="inline-flex items-center gap-0.5 text-teal-500 hover:underline"
+                                >
+                                  {open ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                                  {open ? '收起原文' : '展开原文'}
+                                </button>
+                              )}
+                              {cited ? (
+                                <span className="inline-flex items-center gap-0.5 text-teal-700 dark:text-teal-300"><Check size={10} />已引用</span>
+                              ) : (
+                                <button
+                                  onClick={() => openCite(s)}
+                                  disabled={!refId}
+                                  title={refId ? '把该来源引用进论文草稿' : '先在知识库把这份资料绑定到文献，再引用'}
+                                  className="inline-flex items-center gap-0.5 underline underline-offset-2 disabled:text-slate-400 disabled:no-underline disabled:cursor-not-allowed"
+                                >
+                                  <Quote size={10} />引用
+                                </button>
+                              )}
+                            </div>
+                            {open && hasChunk && (
+                              <div className="mt-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden">
+                                <div className="flex items-center gap-2 border-l-[3px] border-l-teal-500 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1.5">
+                                  <FileText size={12} className="text-teal-500 shrink-0" />
+                                  <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300 truncate">
+                                    来源：{s.docName}{chunkNo !== null ? ` · 分块 ${chunkNo}` : ''}
+                                  </span>
+                                </div>
+                                {(s.referenceTitle || s.referenceAuthors) && (
+                                  <div className="px-2.5 pt-1.5 text-[11px] text-teal-600/90 dark:text-teal-400/90">
+                                    📄 对应文献：
+                                    {s.referenceAuthors ? <span className="text-slate-500 dark:text-slate-400">{s.referenceAuthors}</span> : null}
+                                    {s.referenceTitle || '—'}
+                                    {s.referenceYear ? ` (${s.referenceYear})` : ''}
+                                  </div>
+                                )}
+                                <div className="px-2.5 py-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                                  {s.chunkText}
+                                </div>
+                              </div>
                             )}
-                          </span>
+                          </div>
                         );
                       })}
                     </div>

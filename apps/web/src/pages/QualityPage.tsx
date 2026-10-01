@@ -2,7 +2,7 @@ import { useEffect, useState, useContext } from 'react';
 import { Gauge, Loader2, Sparkles, ListChecks } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, QualityReport } from '../types';
-import { Badge, Button, Card, Empty, ErrorBox, Select, Spinner, jsonText } from '../components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, Select, jsonText } from '../components/ui';
 import { ToastContext } from '../App';
 import { HBar, LineChart, ProgressRing } from '../components/charts';
 

@@ -10,6 +10,8 @@ export const projects = sqliteTable('project', {
   updatedAt: integer('updated_at').notNull(),
   /** 项目级系统提示（projectPreface）：写作/规划时注入 system prompt 开头（差距 #22） */
   preface: text('preface').default(''),
+  /** 差距#1：自定义大纲模板（JSON 字符串：[{name,description,sections:[{title,points}]}]） */
+  templates: text('templates').default('[]'),
 });
 
 /** 文档（论文草稿，多版本历史以 JSON 保存在 versions） */

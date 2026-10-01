@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { Doc, KnowledgeDoc, KnowledgeDocDetail, KnowledgeQueryResult, KnowledgeSource, Project, Reference } from '../types';
-import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, SectionTitle, Textarea, Badge, Spinner } from '../components/ui';
+import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, SectionTitle, Badge, Spinner } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
 
 function fileToBase64(file: File): Promise<string> {
@@ -152,7 +152,6 @@ function buildLeaves(docName: string, detail: KnowledgeDocDetail | null): string
 }
 
 function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
-  const [open, setOpen] = useState(false);
   const [docId, setDocId] = useState('');
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
   const [detail, setDetail] = useState<KnowledgeDocDetail | null>(null);
@@ -521,7 +520,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                       <div className="text-[11px] text-teal-600 dark:text-teal-400 mt-1 flex items-center gap-1.5 flex-wrap">
                         <Link2 size={11} className="shrink-0" />
                         <span className="truncate">
-                          对应文献：{d.reference.title}
+                          对应文献：{d.reference.authors ? <span className="text-slate-500 dark:text-slate-400">{d.reference.authors} </span> : null}{d.reference.title}
                           {d.reference.year ? `（${d.reference.year}${d.reference.venue ? ` / ${d.reference.venue}` : ''}）` : d.reference.venue ? `（${d.reference.venue}）` : ''}
                         </span>
                         <button onClick={() => bindRef(d, null)} className="inline-flex items-center gap-0.5 text-slate-400 hover:text-rose-500 shrink-0" title="解除绑定">
@@ -676,7 +675,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                               </span>
                             </div>
                             {s.referenceTitle && (
-                              <div className="px-2.5 pt-1.5 text-[11px] text-teal-600/90 dark:text-teal-400/90">📄 对应文献：{s.referenceTitle}</div>
+                              <div className="px-2.5 pt-1.5 text-[11px] text-teal-600/90 dark:text-teal-400/90">📄 对应文献：{s.referenceAuthors ? <span className="text-slate-500 dark:text-slate-400">{s.referenceAuthors} </span> : null}{s.referenceTitle}{s.referenceYear ? ` (${s.referenceYear})` : ''}</div>
                             )}
                             <div className="px-2.5 py-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
                               {s.chunkText}

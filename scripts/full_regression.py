@@ -941,6 +941,51 @@ if MOCK:
                 check("25.2 产物文档正文含零命中结构化引导段",
                       "研究阶段未在本地文献库" in c0, f"len={len(c0)} tail={c0[-160:]!r}")
 
+# ---------- 26. 技术债收口后端：自定义模板透传(templates) + 知识库来源补作者/年份(referenceAuthors/referenceYear) ----------
+# 纯后端可测，不依赖 AI：projects PATCH/GET 回读 templates JSON 字符串；
+# 种子一条「对象数组形态 authors」的文献 + 同名知识库文档（标题指纹自动绑定），search 命中块断言归一化作者串与年份。
+st, p26 = req("POST", "/api/projects", {"name": "技术债收口项目", "description": "tech-debt segment 26"})
+p26id = p26.get("id") if st == 201 else None
+check("26.0 建项目供模板/作者断言", st == 201 and bool(p26id), f"st={st} {str(p26)[:80]}")
+
+if p26id:
+    # 26.1 自定义模板（差距#1）：PATCH templates(JSON 数组字符串) → GET 回读逐字节一致
+    st, patched = req("PATCH", f"/api/projects/{p26id}", {"templates": '[{"name":"T1","description":"模板一","sections":[{"title":"引言","points":["背景"]}]}]'})
+    check("26.1 PATCH templates 200 且回包带 templates", st == 200 and isinstance(patched, dict) and patched.get("templates") == '[{"name":"T1","description":"模板一","sections":[{"title":"引言","points":["背景"]}]}]',
+          f"st={st} templates={str(patched.get('templates'))[:120]}")
+    st, got = req("GET", f"/api/projects/{p26id}")
+    check("26.1 GET /:id 回读 templates 与写入一致", st == 200 and got.get("templates") == '[{"name":"T1","description":"模板一","sections":[{"title":"引言","points":["背景"]}]}]',
+          f"st={st} templates={str(got.get('templates'))[:120]}")
+    st, pl = req("GET", "/api/projects")
+    _p26 = next((x for x in (pl or []) if x.get("id") == p26id), None)
+    check("26.1 GET /list 项目条目含 templates 字段", st == 200 and isinstance(_p26, dict) and "templates" in _p26, f"st={st} keys={list(_p26.keys()) if _p26 else _p26}")
+    # 26.1b 非法 templates（非 JSON 数组）应 400，不脏库
+    st, bad = req("PATCH", f"/api/projects/{p26id}", {"templates": "this-is-not-json"})
+    check("26.1b 非法 templates 拒绝(400)且不破坏原值", st == 400 and got.get("templates") == '[{"name":"T1","description":"模板一","sections":[{"title":"引言","points":["背景"]}]}]',
+          f"st={st} {str(bad)[:80]}")
+
+    # 26.2 知识库来源补作者/年份（差距#2）：对象数组 authors 归一化；标题同名上传知识库文档自动绑定文献
+    st, ref = req("POST", "/api/references", {"projectId": p26id, "hit": {
+        "title": "TechDebt Binding Seed Study",
+        "authors": [{"name": "Alice Smith"}, {"family": "Wang", "given": "Wei"}],
+        "year": 2021, "venue": "Seed Venue"}})
+    check("26.2 种子对象数组作者文献创建成功", st in (200, 201) and isinstance(ref, dict) and ref.get("id"), f"st={st} {str(ref)[:120]}")
+    st, up = req("POST", "/api/knowledge/upload", {"projectId": p26id, "name": "TechDebt Binding Seed Study", "type": "text",
+        "content": "图神经网络的消息传递机制通过邻居聚合更新节点表示，我们在节点分类任务上与主流基线做了对比实验。"})
+    check("26.2 同名知识库文档上传成功并绑定文献", st in (200, 201) and up.get("referenceId"), f"st={st} refId={up.get('referenceId')}")
+    # 26.2b GET /knowledge list 内嵌 reference.authors（归一化作者串）
+    st, kl = req("GET", f"/api/knowledge?projectId={p26id}")
+    _kd = next((x for x in (kl or []) if x.get("referenceId")), None)
+    check("26.2b GET /knowledge 内嵌 reference.authors 归一化(Alice Smith, Wei Wang)",
+          st == 200 and _kd and _kd.get("reference") and _kd["reference"].get("authors") == "Alice Smith, Wei Wang" and _kd["reference"].get("year") == 2021,
+          f"st={st} ref={str((_kd or {}).get('reference'))[:160]}")
+    # 26.2c POST /knowledge/search 命中块带 referenceAuthors/referenceYear（无 AI 纯 BM25）
+    st, khits = req("POST", "/api/knowledge/search", {"projectId": p26id, "query": "消息传递 邻居聚合 节点分类"})
+    _h0 = khits[0] if st in (200, 201) and isinstance(khits, list) and khits else None
+    check("26.2c search 命中块含 referenceAuthors/referenceYear 且对象作者已归一化",
+          _h0 is not None and _h0.get("referenceAuthors") == "Alice Smith, Wei Wang" and _h0.get("referenceYear") == 2021 and _h0.get("referenceTitle") == "TechDebt Binding Seed Study",
+          f"st={st} keys={list(_h0.keys()) if _h0 else khits} authors={_h0.get('referenceAuthors') if _h0 else None} year={_h0.get('referenceYear') if _h0 else None}")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL}")
 if FAILED:

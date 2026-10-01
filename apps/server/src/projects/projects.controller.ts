@@ -21,7 +21,7 @@ export class ProjectsController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: { name?: string; description?: string; preface?: string }) {
+  update(@Param('id') id: string, @Body() body: { name?: string; description?: string; preface?: string; templates?: string }) {
     return this.projects.update(id, body);
   }
 

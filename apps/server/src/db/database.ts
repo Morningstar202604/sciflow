@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { isTable, getTableName } from 'drizzle-orm';
 import * as schema from './schema';
 
 const DATA_DIR = path.resolve(__dirname, '..', '..', 'data');
@@ -25,7 +26,8 @@ CREATE TABLE IF NOT EXISTS project (
   status TEXT DEFAULT 'active',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  preface TEXT DEFAULT ''
+  preface TEXT DEFAULT '',
+  templates TEXT DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS document (
@@ -375,6 +377,8 @@ ensureColumn('reference', 'is_duplicate_of', "TEXT DEFAULT ''");
 ensureColumn('reference', 'notes', "TEXT DEFAULT ''");
 // 路线图差距 #22：项目级系统提示 projectPreface
 ensureColumn('project', 'preface', "TEXT DEFAULT ''");
+// 差距 #1：自定义大纲模板（JSON 字符串数组）；旧库补齐默认 '[]'
+ensureColumn('project', 'templates', "TEXT DEFAULT '[]'");
 
 /** 期刊库种子：内置国内主流期刊（仅写领域定位等事实描述；ISSN/IF/分区等不确定指标一律 NULL，禁止编造） */
 const seedJournals = [
@@ -396,6 +400,102 @@ if (journalCount === 0) {
   }
   console.log(`[DB] 期刊库种子：已写入 ${seedJournals.length} 个国内期刊`);
 }
+
+/**
+ * schema 双写一致性自检（技术债收口）：
+ * 过去 schema.ts（drizzle 定义）与下方手写 DDL + ensureColumn 需三处手工同步。
+ * 这里在启动时以 schema.ts 为唯一事实来源，运行时反射遍历其表/列，与 SQLite 实际建出的库对比：
+ *  - 缺表：按 drizzle 列元数据自动 CREATE TABLE；
+ *  - 缺列：自动 ALTER TABLE ADD COLUMN（带默认值）；
+ *  - 多列/类型漂移：不删不改（非破坏性），仅日志。
+ * 全程 try/catch 包裹，任何失败只告警、不中断启动。全新空库与旧库均幂等。
+ */
+interface DrizzleColLike {
+  name: string;
+  dataType: string;
+  notNull: boolean;
+  hasDefault: boolean;
+  primary: boolean;
+  default: unknown;
+  defaultFn?: (() => unknown) | undefined;
+  getSQLType(): string;
+}
+function isDrizzleCol(v: unknown): v is DrizzleColLike {
+  return (
+    !!v &&
+    typeof v === 'object' &&
+    typeof (v as DrizzleColLike).name === 'string' &&
+    typeof (v as DrizzleColLike).dataType === 'string' &&
+    typeof (v as DrizzleColLike).getSQLType === 'function'
+  );
+}
+
+/** 把 drizzle 默认值渲染成 DDL 字面量；无法静态表达（SQL 对象/运行时函数）返回 null */
+function defaultLiteral(d: unknown): string | null {
+  if (d === undefined || d === null) return null;
+  if (typeof d === 'number') return String(d);
+  if (typeof d === 'boolean') return d ? '1' : '0';
+  if (typeof d === 'string') return `'${d.replace(/'/g, "''")}'`;
+  return null;
+}
+
+/** CREATE TABLE 用的列定义 */
+function columnDef(c: DrizzleColLike): string {
+  let s = `  ${c.name} ${c.getSQLType()}`;
+  if (c.primary) s += ' PRIMARY KEY';
+  if (c.notNull) s += ' NOT NULL';
+  const lit = defaultLiteral(c.default);
+  if (c.hasDefault && lit !== null) s += ` DEFAULT ${lit}`;
+  return s;
+}
+
+/** ALTER TABLE ADD COLUMN 用的列定义（SQLite 不允许给无默认值的列加 NOT NULL，故缺列一律不加 NOT NULL） */
+function alterColumnDef(c: DrizzleColLike): string {
+  let s = `${c.name} ${c.getSQLType()}`;
+  const lit = defaultLiteral(c.default);
+  if (c.hasDefault && lit !== null) s += ` DEFAULT ${lit}`;
+  return s;
+}
+
+function reconcileSchema() {
+  let createdTables = 0;
+  let addedCols = 0;
+  let checkedTables = 0;
+  const tableExists = (name: string) =>
+    sqlite.prepare("SELECT 1 AS x FROM sqlite_master WHERE type='table' AND name=?").get(name) !== undefined;
+
+  for (const exported of Object.values(schema)) {
+    if (!isTable(exported)) continue;
+    const tname = getTableName(exported as Parameters<typeof getTableName>[0]);
+    const cols = (Object.values(exported as unknown as Record<string, unknown>) as unknown[]).filter(isDrizzleCol);
+    try {
+      checkedTables += 1;
+      if (!tableExists(tname)) {
+        sqlite.exec(`CREATE TABLE IF NOT EXISTS ${tname} (\n${cols.map(columnDef).join(',\n')}\n)`);
+        createdTables += 1;
+        console.log(`[DB] 自检：自动建表 ${tname}（${cols.length} 列）`);
+        continue;
+      }
+      const existing = (sqlite.prepare(`PRAGMA table_info(${tname})`).all() as { name: string }[]).map((c) => c.name);
+      for (const c of cols) {
+        if (existing.includes(c.name)) continue;
+        if (c.primary) {
+          // 主键列缺失属于异常旧表结构，不自动改动（避免破坏既有数据），仅记日志
+          console.warn(`[DB] 自检：${tname}.${c.name} 为主键列且缺失，跳过自动修复`);
+          continue;
+        }
+        sqlite.exec(`ALTER TABLE ${tname} ADD COLUMN ${alterColumnDef(c)}`);
+        addedCols += 1;
+        console.log(`[DB] 自检：${tname} 自动补列 ${c.name}`);
+      }
+    } catch (e: any) {
+      console.warn(`[DB] 自检：表 ${tname} 一致性修复失败（不阻断启动）: ${e?.message || e}`);
+    }
+  }
+  console.log(`[DB] schema 自检完成：核对 ${checkedTables} 表 / 新建 ${createdTables} 表 / 补全 ${addedCols} 列`);
+}
+
+reconcileSchema();
 
 export const db: BetterSQLite3Database<typeof schema> = drizzle(sqlite, { schema });
 export { sqlite, DB_PATH };

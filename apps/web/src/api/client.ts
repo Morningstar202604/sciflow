@@ -310,6 +310,8 @@ export const api = {
     confirmOutline: (id: string, outline?: Outline) =>
       request<PipelineTask>(`/api/pipeline/${id}/confirm-outline`, { method: 'POST', body: JSON.stringify({ outline }) }),
     agents: (id: string) => request<AgentRun[]>(`/api/pipeline/${id}/agents`),
+    /** 差距#9a：删除任务记录（DELETE /api/pipeline/:id，后端已就绪；失败/interrupted 任务同样可删） */
+    remove: (id: string) => request<{ ok: boolean }>(`/api/pipeline/${id}`, { method: 'DELETE' }),
   },
 
   chat: {

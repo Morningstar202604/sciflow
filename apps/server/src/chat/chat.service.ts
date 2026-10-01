@@ -20,6 +20,10 @@ export interface ChatSource {
   referenceId: string | null;
   /** 绑定文献标题（未绑定为 null） */
   referenceTitle: string | null;
+  /** 差距#2：绑定文献作者串（逗号分隔；未绑定为 null） */
+  referenceAuthors: string | null;
+  /** 差距#2：绑定文献年份（未绑定为 null） */
+  referenceYear: number | null;
 }
 
 /** sources.chunkText 上限：超过则截断并在末尾加明确标记；前端可凭 chunkSeq 经 GET /api/knowledge/:id 取全文 */
@@ -93,6 +97,8 @@ export class ChatService {
               chunkSeq: h.seq ?? 0,
               referenceId: h.referenceId ?? null,
               referenceTitle: h.referenceTitle ?? null,
+              referenceAuthors: h.referenceAuthors ?? null,
+              referenceYear: h.referenceYear ?? null,
             });
           }
         }

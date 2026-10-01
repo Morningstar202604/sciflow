@@ -4,6 +4,7 @@ import { db } from '../db/database';
 import { knowledgeDocs, knowledgeChunks, references } from '../db/schema';
 import { eq, inArray, and, asc } from 'drizzle-orm';
 import { AiService } from '../ai/ai.service';
+import { authorsToString } from '../common/authors';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>;
@@ -17,6 +18,8 @@ interface RefSummary {
   year: number | null;
   venue: string;
   citationCount: number;
+  /** 差距#2：归一化后的作者串（逗号分隔；无作者为空串） */
+  authors: string;
 }
 
 @Injectable()
@@ -105,7 +108,14 @@ export class KnowledgeService {
     const map = new Map<string, RefSummary>();
     if (refIds.length === 0) return map;
     for (const r of db.select().from(references).where(inArray(references.id, refIds)).all()) {
-      map.set(r.id, { id: r.id, title: r.title, year: r.year, venue: r.venue ?? '', citationCount: r.citationCount ?? 0 });
+      map.set(r.id, {
+        id: r.id,
+        title: r.title,
+        year: r.year,
+        venue: r.venue ?? '',
+        citationCount: r.citationCount ?? 0,
+        authors: authorsToString(r.authors),
+      });
     }
     return map;
   }
@@ -316,6 +326,9 @@ export class KnowledgeService {
           score,
           referenceId: doc?.referenceId || null,
           referenceTitle: ref?.title || null,
+          // 差距#2：命中块透传绑定文献的作者串/年份（无绑定文献时为 null）
+          referenceAuthors: ref?.authors ?? null,
+          referenceYear: ref?.year ?? null,
         };
       })
       .sort((a, b) => b.score - a.score)
@@ -347,6 +360,9 @@ export class KnowledgeService {
         // 文献库↔知识库打通（#5）：命中块若绑定文献，前端显示"对应文献"
         referenceId: h.referenceId ?? null,
         referenceTitle: h.referenceTitle ?? null,
+        // 差距#2：绑定文献作者串/年份（无绑定为 null）
+        referenceAuthors: h.referenceAuthors ?? null,
+        referenceYear: h.referenceYear ?? null,
       })),
     };
   }

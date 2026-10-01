@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState } from 'react';
 import { ToastContext } from '../App';
-import { CheckCircle2, ChevronDown, ChevronUp, Coins, Database, FlaskConical, Gauge, Loader2, Plug, Plus, Power, RefreshCw, Server, Trash2, Wand2, Workflow, Wrench, XCircle } from 'lucide-react';
+import { CheckCircle2, Coins, Database, FlaskConical, Gauge, Loader2, Plug, Plus, Power, RefreshCw, Server, Trash2, Wand2, Workflow, Wrench, XCircle } from 'lucide-react';
 import { api } from '../api/client';
 import type { AppSettings, CustomIntent, CustomPromptTool, McpServerInfo, McpToolInfo, ModelProvider, PipelineStepConfig, QualityWeightItem, SelfCheck } from '../types';
 import { Badge, Button, Card, CollapsibleCard, ErrorBox, Input, Modal, SectionTitle, Select, Spinner, Textarea, errMsg } from '../components/ui';
@@ -51,13 +51,11 @@ export function SettingsPage() {
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [intents, setIntents] = useState<CustomIntent[]>([]);
   const [intentForm, setIntentForm] = useState({ key: '', label: '', route: '/literature', keywords: '' });
-  const [intentEditing, setIntentEditing] = useState<string | null>(null);
   const [promptTools, setPromptTools] = useState<CustomPromptTool[]>([]);
   const [editingPrompt, setEditingPrompt] = useState<CustomPromptTool | null>(null);
   const [promptText, setPromptText] = useState('');
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ intent: false, prompt: false });
   const [judgmentMode, setJudgmentMode] = useState('auto');
-  const [modeLoaded, setModeLoaded] = useState(false);
   const [pipelineSteps, setPipelineSteps] = useState<PipelineStepConfig[]>([]);
   const [qualityWeights, setQualityWeights] = useState<QualityWeightItem[]>([]);
   const [weightInputs, setWeightInputs] = useState<Record<string, string>>({});
@@ -76,7 +74,6 @@ export function SettingsPage() {
       setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
-      setModeLoaded(true);
       setMcpServers(await api.settings.listMcpServers());
       api.usage.summary().then(setUsage).catch(() => undefined);
     } catch (e: any) {
@@ -319,7 +316,6 @@ export function SettingsPage() {
       setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
-      setModeLoaded(true);
                   setSettings(await api.settings.get());
                 } catch (e: any) {
                   setError(errMsg(e));
@@ -382,7 +378,6 @@ export function SettingsPage() {
       setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
-      setModeLoaded(true);
                         setSettings(await api.settings.get());
                       } catch (e: any) {
                         setError(e.message);
@@ -406,7 +401,6 @@ export function SettingsPage() {
       setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
-      setModeLoaded(true);
                   }}
                 >
                   删除
@@ -810,7 +804,6 @@ export function SettingsPage() {
       setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
-      setModeLoaded(true);
                         toast('success', `${t.toolLabel} 已恢复系统默认`);
                       }}
                     >
@@ -985,7 +978,6 @@ export function SettingsPage() {
       setWeightInputs(Object.fromEntries(w.map((x) => [x.key, String(x.weight)])));
       const mode = await api.customization.getJudgmentMode();
       setJudgmentMode(mode.mode);
-      setModeLoaded(true);
                   setEditingPrompt(null);
                   toast('success', `${editingPrompt.toolLabel} 提示词已保存`);
                 } catch (e: any) {

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BookOpen, Beaker, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
 import type { DashboardOverview, Doc, Project, Reference } from '../types';
-import { Button, Card, Empty, Spinner, Skeleton, Badge, jsonText, SectionTitle, Textarea } from '../components/ui';
+import { Button, Card, Empty, Skeleton, Badge, jsonText, SectionTitle, Textarea } from '../components/ui';
 import { Donut, HBar, MetricCard } from '../components/charts';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
