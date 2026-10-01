@@ -1,4 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+/**
+ * Markdown 预览栈（ReactMarkdown + remark-math + rehype-katex + katex.css）保持静态引入，不做 lazy：
+ * 结论——保持现状（P2 评审 2026-10）。依据：
+ *  1) 体积：WritingPage 主 chunk 约 448.56KB gz 内，距 449.48KB 红线尚有裕量，无拆包压力；
+ *  2) 路径：桌面默认即「分栏 split」模式，预览与编辑同屏首屏渲染，是写作页最高频切换路径；
+ *  3) 代价：lazy 后首次切到预览/分栏会出现 Suspense 占位闪烁 + KaTeX 异步加载延迟，
+ *     对一个默认即渲染的核心路径是净负体验；DocExporter/VersionDiffModal 等低频弹窗才走 lazy。
+ * 若未来 chunk 逼近红线，再评估拆分（注意需给 split 首屏加载留骨架屏，避免白屏闪烁）。
+ */
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';

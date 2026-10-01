@@ -165,7 +165,8 @@ export interface PipelineTask {
   documentId: string | null;
   topic: string;
   currentStep: string;
-  status: 'running' | 'awaiting_confirmation' | 'completed' | 'failed';
+  // interrupted：后端 checkpoint 在服务重启时对前半段中断任务的标记（无产物文档，不自动续跑）
+  status: 'running' | 'awaiting_confirmation' | 'completed' | 'failed' | 'interrupted';
   steps: PipelineStep[];
   retryCount: number;
   trace: string; // JSON: ReactTraceStep[]

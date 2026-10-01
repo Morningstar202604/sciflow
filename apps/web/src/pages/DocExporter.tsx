@@ -10,6 +10,20 @@
  * 导出物：
  *  1) 自包含 .tex：元数据头 / 章节结构 / 正文 LaTeX 转义 / 引用 → thebibliography + BibTeX 源条目 / ctex 中文编译注释
  *  2) 自包含单文件 .html：内联 CSS + 手写轻量 markdown 渲染 + 引用列表 + 元数据头，浏览器直接打开可读
+ *
+ * 已确认的 markdown 边界（与编辑器渲染保持一致，不额外补实现）：
+ *  ① 表格 | a | b |：编辑器未挂 remark-gfm，预览不渲染表格，导出同样不转表格（裸文本按段落输出，不错乱）；
+ *  ② 删除线 ~~x~~：已支持 → .tex \sout（ulem, normalem）/ HTML <del>；
+ *  ③ 脚注 [^1]：编辑器不支持，导出按字面文本保留；
+ *  ④ 多级列表 / 嵌套引用块 >>：手写块解析按一级扁平输出（缩进层级丢失，内容不丢）；
+ *  ⑤ 行内代码含 _：正确转义为 \texttt{a\_b} / <code>a_b</code>；
+ *     行内代码内含成对 $...$：本导出先做数学保护，可能把代码内 $ 误判为公式（编辑器 remark-math 跳过代码，
+ *     属已知低暴露差异，不在本轮重构保护链，避免回归风险）；
+ *  ⑥ 裸链接 http://…（无 [text]()）：不自动转 <a>，按文本输出（与预览一致）；
+ *  ⑦ 中英文混排空格：markdown 段内空白按规则输出，无特殊处理。
+ * 引用样式边界（8 样式 + 后端 renderCitations 同构）：
+ *  作者空 → Anonymous（GB/T 为「佚名」）；年份缺 → n.d.；DOI 原样拼接（href 经 escHtml，.tex 经 inlineTex 转义）；
+ *  同一文献多次引用 → citations 表按 referenceId 去重，正文复用同一 [n]。
  */
 import { useContext } from 'react';
 import { Button } from '../components/ui';
@@ -83,7 +97,7 @@ function restoreMathHtml(text: string, spans: MathSpan[]): string {
   return out;
 }
 
-/** 行内格式：链接 [text](url) + 粗体/代码/斜体（先转义再套命令） */
+/** 行内格式：链接 [text](url) + 删除线 ~~x~~ + 粗体/代码/斜体（先转义再套命令） */
 function inlineTex(t: string): string {
   // 先把链接抽出（在转义前捕获原始 url，避免转义污染 \href 的目标地址）
   const links: { url: string; text: string }[] = [];
@@ -91,10 +105,17 @@ function inlineTex(t: string): string {
     links.push({ url, text });
     return `@@L${links.length - 1}@@`;
   });
+  // 删除线 ~~x~~：在 escTex 前提取壳，避免 ~ 被转义成 \textasciitilde{} 产生一串波浪号
+  const dels: string[] = [];
+  s = s.replace(/~~([^~]+)~~/g, (_m, inner: string) => {
+    dels.push(inner);
+    return `@@D${dels.length - 1}@@`;
+  });
   s = escTex(s);
   s = s.replace(/\*\*([^*]+)\*\*/g, '\\textbf{$1}');
   s = s.replace(/`([^`]+)`/g, '\\texttt{$1}');
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1\\emph{$2}');
+  s = s.replace(/@@D(\d+)@@/g, (_m, i: string) => `\\sout{${inlineTex(dels[Number(i)] ?? '')}}`);
   s = s.replace(/@@L(\d+)@@/g, (_m, i: string) => {
     const l = links[Number(i)];
     if (!l) return '';
@@ -261,6 +282,7 @@ export function buildTex(doc: Doc, content: string, citations: CitationRow[], pr
 \\usepackage[T1]{fontenc}
 \\usepackage{amsmath,amssymb}
 \\usepackage{graphicx}
+\\usepackage[normalem]{ulem}   % ~~删除线~~ → \\sout；normalem 保持 \\emph 斜体语义
 \\usepackage[margin=2.5cm]{geometry}
 \\usepackage{hyperref}   % [text](url) 链接 → \\href；已自动加载
 % \\usepackage{ctex}   % 含中文时取消本行注释，并以 XeLaTeX 编译
@@ -305,10 +327,17 @@ function inlineHtml(t: string): string {
     links.push({ url, text });
     return `@@L${links.length - 1}@@`;
   });
+  // 删除线 ~~x~~ → <del>（在 escHtml 前提取壳）
+  const dels: string[] = [];
+  s = s.replace(/~~([^~]+)~~/g, (_m, inner: string) => {
+    dels.push(inner);
+    return `@@D${dels.length - 1}@@`;
+  });
   s = escHtml(s);
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  s = s.replace(/@@D(\d+)@@/g, (_m, i: string) => `<del>${inlineHtml(dels[Number(i)] ?? '')}</del>`);
   s = s.replace(/@@L(\d+)@@/g, (_m, i: string) => {
     const l = links[Number(i)];
     return l ? `<a href="${escHtml(l.url)}">${inlineHtml(l.text)}</a>` : '';

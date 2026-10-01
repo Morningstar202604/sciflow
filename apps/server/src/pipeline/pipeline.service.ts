@@ -145,7 +145,7 @@ export class PipelineService {
         void this.runAfterConfirmation(t.id, t.documentId);
       } else {
         this.logger.warn(`[checkpoint] 任务 ${t.id} 中断于前半段（无产物文档），标记 interrupted`);
-        this.setStatus(t.id, 'interrupted', '', '服务重启中断，可点击重新运行');
+        this.setStatus(t.id, 'interrupted', '', '服务重启中断，前半段任务请删除后重新启动');
       }
     }
     return rows.length;

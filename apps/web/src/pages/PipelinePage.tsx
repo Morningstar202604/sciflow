@@ -503,7 +503,10 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
       </Card>
 
       {tasks.length === 0 ? (
-        <Empty text="暂无流水线任务。输入主题，一条链路自动产出论文初稿" />
+        <Empty
+          text="暂无流水线任务"
+          hint="在上方输入研究主题启动自动流水线；或先选中大纲模板，点「一键套用为草稿」直接进入写作页。"
+        />
       ) : (
         <div className="grid lg:grid-cols-3 gap-4">
           {/* 任务列表 */}
@@ -575,7 +578,26 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                   );
                 })()}
 
-                {active.lastError && <div className="text-xs text-rose-600 bg-rose-50 rounded p-2 mb-3">{active.lastError}</div>}
+                {active.lastError && <div className="text-xs text-rose-600 dark:text-rose-300 bg-rose-50 dark:bg-rose-900/20 rounded p-2 mb-3">{active.lastError}</div>}
+
+                {/* 失败/中断引导（零后端端点：无 per-task resume）：说明 checkpoint 续跑边界与下一步动作 */}
+                {(active.status === 'failed' || active.status === 'interrupted') && (
+                  <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 rounded p-2 mb-3 leading-relaxed">
+                    {active.status === 'interrupted' ? (
+                      <>
+                        <span className="font-medium text-amber-600 dark:text-amber-400">中断说明：</span>
+                        服务重启时，已进入写作阶段（有产物文档）的任务会按断点自动续跑；中断于前半段（尚无产物文档）的任务不提供单任务重跑——
+                        可删除本任务后在上方重新启动一条新流水线。
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-medium text-rose-600 dark:text-rose-400">失败说明：</span>
+                        质量门自动回炉仍失败时不提供单任务重跑；请查看上方错误信息，调整主题或文献后删除本任务并重新启动。
+                        若刚重启服务，稍后刷新本页——进行中的任务会自动恢复。
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {/* 研究计划（Phase 1a：Planner）+ ReAct 轨迹（Phase 1b） */}
                 {activePlan && (

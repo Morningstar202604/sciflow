@@ -7,10 +7,22 @@ dist/
 build/
 *.tsbuildinfo
 
-# env
+# env（全部忽略，但保留各 .env.example 模板可被跟踪）
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+
+# secrets / keys（绝不提交私钥证书）
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+secrets/
+
+# test coverage
+coverage/
 
 # database (local dev)
 *.db

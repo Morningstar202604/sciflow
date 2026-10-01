@@ -1,4 +1,6 @@
-# SciFlow · 全自动 AI 科研助手
+# SciFlow —— 科研全流程 AI 助手
+
+> **Local-First AI Research Workbench · 单用户本地科研智能体工作台**
 
 > **🌐 语言 / Language：[中文](README.md) · [English](README.en.md)**
 
@@ -6,11 +8,14 @@
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
 > 四仓由 CI 级验证保障：typecheck ×2 · vitest · build ×2 · 密钥校验，全部公开可克隆。
 
-> 对标 2026 主流 Agent 方案（Claude Agent SDK / AutoGen / Deep Research）的科研工作台：输入一个研究主题，由 **Supervisor 编排器** 调度 5 类专业子 Agent（Planner / 并行 Research×3 / Writer / Reviewer / Polisher），完成 **研究规划 → 并行文献调研（ReAct）→ 大纲生成 → 分章起草（Agentic RAG 边写边查）→ 质量门评分（不达标 Reflexion 自动回炉）→ 润色定稿 → 引用格式化** 的全流程，并自动沉淀情景/程序记忆。
+SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一个研究主题，由 Supervisor 编排器调度多类专业子智能体（Planner / 并行 Research / Writer / Reviewer / Polisher），完成 **文献调研 → 研究规划 → 大纲 → 分章起草（边写边查的 Agentic RAG）→ 质量门评分（不达标自动 Reflexion 回炉）→ 润色 → 引用格式化 → 投稿辅助** 的科研全生命周期，并以 NotebookLM 式 RAG 知识库 + 可视化工作台沉淀过程资产。
+
+- **零外部 AI 依赖、零重型图表库**：前端图表全部为手写 SVG（`apps/web/src/components/charts.tsx`）；AI 只通过 **OpenAI 兼容协议**对接你自己的模型 Key。
+- **本地优先**：SQLite 单文件开箱即跑，你的文献、笔记、记忆、Key 全部落本地，不建多租户、不上传第三方云。
 
 ## 📸 界面预览
 
-| 工作台 · 项目总览 | 全自动流水线 · 多 Agent 编排 |
+| 工作台 · 项目总览 | 全自动流水线 · 多智能体编排 |
 | --- | --- |
 | ![工作台](docs/screenshots/dash.png) | ![流水线](docs/screenshots/pipeline.png) |
 
@@ -20,230 +25,182 @@
 
 > 截图来自真实运行界面（本地部署 · 内置 AI 网关实测）。
 
-## ✨ 功能
+## ✨ 特性
 
-| 模块 | 能力 |
-| --- | --- |
-| **论文写作** | 大纲生成（outline-first）、章节起草、三段式学术润色（原文+润色文+理由）、中英互译、降重改写、自动保存与多版本历史 |
-| **文献调研** | 本地文献库管理（手动添加 / 项目导入 / 库内检索）、AI 结构化综述（每处观点绑定真实文献，防幻觉） |
-| **全自动流水线** | Supervisor 多 Agent 编排：**Planner** 研究计划（目标/子问题/检索策略/章节/风险）→ **Research×3 并行 ReAct**（think→act→observe 自主补检）→ 大纲生成（**人工确认点**）→ **Writer 分章起草**（Agentic RAG 每章补检）→ **Reviewer 7 维质量门（<80 触发 Reflexion 反思并回炉重写）** → **Polisher 润色** → 引用格式化 → 完成（自动沉淀情景记忆） |
-| **Agent 编排视图** | 流水线页可视化每个子 Agent 的执行状态/耗时/摘要（`/api/pipeline/:id/agents`） |
-| **MCP 工具台** | 13 个 AI 能力协议化为 11 个标准 MCP 工具（2026-07 规范），设置页可逐个可视化调用 |
-| **模型路由** | fast / strong 双档：问答润色走快模型，规划/长文/评审自动切强模型 |
-| **记忆中心** | 情景记忆（项目自动沉淀）+ 程序记忆（写作风格指令，起草自动注入） |
-| **质量评分** | 7 维评分（文献/逻辑/引用/语言/创新/图表/格式，0-100）+ ECharts 雷达图 + 历史评分对比 |
-| **科研问答** | SSE 流式多轮对话 |
-| **投稿辅助** | 期刊推荐、Cover Letter、审稿意见回复 |
+### 写作与定稿
+- **大纲先行（outline-first）**：AI 生成研究计划与章节大纲，写作页编辑 / 预览 / 分栏三态切换。
+- **分章起草 + Agentic RAG**：每章边写边查本地知识库，文内 `[n]` 锚点与文末列表一一对应。
+- **学术润色**：三段式润色（原文 + 润色文 + 理由）、中英互译、降重改写；自动保护图表与「参考文献」尾部不被洗掉。
+- **多版本历史 + 版本 diff**：每次定稿留存快照，逐版本 LCS 文本比对（`VersionDiffModal`）。
+- **一键导出**：Markdown / HTML / LaTeX(.tex) / Word(.docx)，投稿交稿即用。
+
+### 引用与文献
+- **8 种引用样式**：APA / IEEE / Vancouver / **GB/T 7714** / Nature / Chicago / Springer / ACS。
+- **文内锚点重排**：顺序编码制正文 `[n]` 保持插入序；著者-年制按正文首现自动加 a/b 后缀重排（`CiteReorderButton`）。
+- **BibTeX / RIS 导入导出**：文献库元数据去重指纹、`reading_status` 状态机（unread / reading / read / cited）。
+- **PRISMA 筛选 + 编码矩阵**：文献调研页按纳入/排除标准筛选、编码归纳。
+- **力导向引用网络**：手写 SVG 可交互图谱，直观呈现文献间引用关系。
+
+### 知识库 RAG（NotebookLM 式）
+- 本地 **BM25 + TF 向量余弦混合检索**，零依赖中文 Bigram 分词；知识库资料与文献双向绑定，命中块带来源作者/年份卡片。
+
+### 全自动流水线（多智能体）
+- Supervisor 编排：**Planner**（目标/子问题/检索策略/风险）→ **Research 并行 ReAct**（think→act→observe 自主补检）→ 大纲人工确认点 → **Writer** 分章起草 → **Reviewer 7 维质量门**（<80 触发 Reflexion 反思并回炉重写，最多 3 轮，自动取最高分轮次定稿）→ **Polisher** 润色 → 引用格式化。
+- **执行轨迹可视化**：流水线页展示每个子智能体的状态 / 耗时 / 摘要（`/api/pipeline/:id/agents`）。
+- **Checkpoint 断点续跑**：服务重启后自动恢复中断任务，从草稿阶段幂等续跑。
+- **模型路由**：fast / strong 双档，问答润色走快模型，规划/长文/评审自动切强模型。
+
+### 质量与评审
+- **7 维质量评分**：文献 / 逻辑 / 引用 / 语言 / 创新 / 图表 / 格式（0–100），手写 SVG 雷达图 + 历史评分对比。
+- **审稿闭环**：审稿意见结构化解析、逐条回复模板、修回截止日倒计时。
+
+### 投稿辅助
+- 选刊匹配（按主题/范围推荐）、Cover Letter 生成、投稿状态跟踪（投稿→under review→修回→录用/拒稿→转投串联）。
+
+### 实验与记忆
+- **实验沙箱**：隔离 `spawn` 执行 Python 脚本（`SANDBOX_PYTHON` / `SANDBOX_TIMEOUT_MS` 可配），资源上限防护，降级时给出引导。
+- **记忆中心**：情景记忆（项目自动沉淀）+ 程序记忆（写作风格指令，起草自动注入）。
+- **学习复盘卡 / 思维导图**：流水线复盘要点结构化沉淀。
+
+### 体验细节
+- **⌘K 命令面板**：全局导航 / 新建项目 / 暗色切换；`#/` hash 路由深层链接直达。
+- **MCP 工具台**：AI 能力协议化为标准 MCP 工具，设置页逐个可视化调用，参数 JSON Schema 动态校验（Guardrail 拒参即报错）。
+- 全站错误文案中文化、移动端窄屏适配、品牌渐变视觉系统。
 
 ## 🏗 技术栈
 
+| 端 | 技术 |
+| --- | --- |
+| 后端 `apps/server` | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· zod · 原生 fetch（OpenAI 兼容协议）· 内置零依赖 mock AI 网关（仅 `node:http`） |
+| 前端 `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · react-markdown + KaTeX · lucide-react · **手写 SVG 图表（无 ECharts 等重型图库）** |
+| 工程 | pnpm workspace · vitest 5 · GitHub Actions（Node 22）· Python 3 回归脚本 |
+
+**架构概览**
+
 ```
-apps/
-├── server/  NestJS 11 · TypeScript · Drizzle ORM · SQLite（better-sqlite3）
-│            · 原生 fetch 对接国内 OpenAI 兼容协议（豆包火山方舟/DeepSeek/通义/智谱/Kimi）
-│            · 18 表：Project / Document / Reference / Citation / QualityReport / PipelineTask / PolishRecord
-│                     / KnowledgeDoc / KnowledgeChunk / ReflexionLog / MemoryLog / AgentRun / ModelProvider
-│                     / McpServer / CustomIntent / PipelineConfig / AppSetting / CustomPrompt / LlmCallLog
-│            · orchestrator/  Supervisor 编排器（五类子 Agent + 并行调度 + 轨迹记录）
-│            · mcp/           MCP 工具协议化（11 个工具，list/call/info 端点）
-│            · 全局令牌桶限流（AI_RPM_CAP 可配，稳定适配免费版 429）
-└── web/     React 19 · Vite · TypeScript · Tailwind CSS v4 · ECharts · lucide-react
+apps/server/src/   后端模块（NestJS）
+├── ai/            统一 LLM 服务 + Prompt 模板 + mock 网关 + 全局令牌桶限流
+├── projects/      项目管理        ├── documents/   文档/润色/翻译/引用/版本/导出
+├── references/    文献库 + 综述     ├── knowledge/   RAG 知识库（BM25+向量）
+├── pipeline/      流水线状态机     ├── orchestrator/ Supervisor 多智能体编排
+├── research/      文献调研 + 质量评分 + 投稿辅助（controller 集中于此）
+├── judgment/      评审闭环         ├── experiments/  实验沙箱
+├── chat/          SSE 流式问答     ├── memory/       情景/程序记忆
+├── mcp/           MCP 工具协议化    ├── settings/     设置/模型连通自检
+├── dashboard/     工作台聚合       ├── db/          Drizzle schema + SQLite
+└── common/        输入校验等公共件
+
+apps/web/src/pages/  前端页面
+Dashboard(工作台) · Writing(论文写作) · Literature(文献调研) · Knowledge(知识库)
+Pipeline(全自动流水线) · Quality(质量评分) · Experiments(实验记录) · Memory(记忆中心)
+Chat(科研问答) · Submission(投稿辅助) · Settings(设置)
 ```
 
-数据链条：`Project → Document（多版本）→ Citation → Reference（真实可追溯）`；`PipelineTask` 记录步骤状态/回炉次数/ReAct 轨迹，`AgentRun` 记录每个子 Agent 的执行单元，`ReflexionLog` 保存质量回炉的反思指令，`MemoryLog` 沉淀情景/程序记忆。
+数据链条：`Project → Document（多版本）→ Citation → Reference（真实可追溯）`；`PipelineTask` / `AgentRun` / `ReflexionLog` / `MemoryLog` / `LlmCallLog` 分别记录流水线状态、子智能体执行单元、回炉反思、记忆沉淀与 token 成本。
 
 ## 🚀 快速开始
 
-要求：Node ≥ 20、pnpm ≥ 9
+要求：Node ≥ 20（CI 锁定 Node 22）、pnpm ≥ 9（本仓库锁定 `pnpm@11.7.0`）
 
 ```bash
-# 1. 安装依赖
+# 1. 克隆并安装依赖
+git clone <你的仓库镜像地址> sciflow && cd sciflow
 pnpm install
 
-# 2. 配置 AI（复制 .env.example 为 .env 并填写你的 API Key）
+# 2. 配置 AI（复制模板并填写你自己的 Key；模板已含全部变量说明）
 cp apps/server/.env.example apps/server/.env
-#    默认豆包（火山方舟），也可用 DeepSeek / 通义千问 / 智谱 / Kimi 等国内 OpenAI 兼容接口
+#    编辑 apps/server/.env：至少填 AI_BASE_URL / AI_API_KEY / AI_MODEL
 
-# 3. 编译并启动（后端 :3000 + 前端 :5173）
-pnpm build
-pnpm dev
+# 3. 编译后端
+pnpm --filter @sciflow/server build
 
-# 4. 浏览器打开
+# 4. 启动（两个终端）
+#    后端 :3000
+node apps/server/dist/main.js
+#    前端 :5173
+pnpm --filter @sciflow/web dev
+
+# 5. 浏览器打开
 #    http://localhost:5173
 ```
 
-> 数据库使用 SQLite，首次启动自动建表（`apps/server/data/sciflow.db`），零配置开箱即跑。
-> 生产环境切换 PostgreSQL：Drizzle ORM 已抽象，替换连接驱动并执行 `pnpm db:push` 即可。
+> SQLite 首次启动自动建表（默认 `apps/server/data/sciflow.db`），零配置开箱即跑。
+> 后端默认仅监听 `127.0.0.1`；确需局域网暴露时显式设置 `HOST=0.0.0.0`。
 
 ## 🔑 AI 配置说明
 
-| 变量 | 说明 | 示例 |
+SciFlow 支持**任意 OpenAI 兼容端点**，只需要填 `base_url` + `model` + `key`：
+
+| 变量 | 说明 | 示例值（占位，非真实 Key） |
 | --- | --- | --- |
-| `AI_BASE_URL` | OpenAI 兼容接口地址（默认豆包·火山方舟） | `https://ark.cn-beijing.volces.com/api/v3` / `https://api.deepseek.com/v1` |
-| `AI_API_KEY` | API 密钥 | `sk-...` |
-| `AI_MODEL` | 模型名 | `agnes-3.0-flash` / `deepseek-chat` |
-| `AI_MODEL_FAST` | fast 档模型（问答/润色/翻译） | `agnes-3.0-flash` |
-| `AI_MODEL_STRONG` | strong 档模型（规划/长文/评审） | 未配置则回落 fast |
-| `AI_RPM_CAP` | 每分钟最大 AI 调用数（令牌桶防 429） | `8` |
-| `AI_MOCK` | 设为 `1` 启用本机 mock AI 网关（无 Key / 无外网跑通全链路测试用，见下文） | `1` |
-| `AI_MOCK_PORT` | mock 网关监听端口（默认 5099） | `5099` |
+| `AI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.deepseek.com/v1` |
+| `AI_API_KEY` | 你的 API 密钥 | `sk-your-api-key-here` |
+| `AI_MODEL` | 默认模型 | `deepseek-chat` |
+| `AI_MODEL_FAST` | fast 档（问答/润色/翻译/评审 JSON） | 留空则回落 `AI_MODEL` |
+| `AI_MODEL_STRONG` | strong 档（规划/长文起草） | 留空则回落 `AI_MODEL` |
+| `AI_RPM_CAP` | 每分钟 AI 调用上限（令牌桶防 429） | `8`（长流水线建议 100+） |
+| `AI_MOCK` | 设为 `1` 启用本机 mock 网关（无 Key / 无外网跑全链路） | `1` |
+| `AI_MOCK_PORT` | mock 网关端口（默认 5099，仅回环） | `5099` |
+| `CORS_ORIGIN` | 允许的前端来源（逗号分隔） | `http://localhost:5173` |
 
-未配置 Key 时应用可正常使用（项目管理/文献检索），AI 功能会给出明确配置提示，不会返回假数据。
+兼容端点示例（任选其一，格式均为 `base_url` + 模型名）：火山方舟 `https://ark.cn-beijing.volces.com/api/v3`、DeepSeek `https://api.deepseek.com/v1`、豆包、智谱 `https://open.bigmodel.cn/api/paas/v4`、Kimi `https://api.moonshot.cn/v1`、Ollama 本地 `http://localhost:11434/v1`、云知声 u2-flash 网关等。
 
-### 真实网关适配结论（以云知声 u2-flash / DeepSeek-R1 兼容 OpenAI 网关实测）
+> 未配置 Key 时项目管理 / 文献库 / RAG 等本地功能照常可用；AI 功能会给出明确配置提示，**不返回假数据**。
 
-以下结论在真实 Key 下端到端实测得出（密钥只放在本地 `apps/server/.env`，不入库、不写入仓库）：
-
-- **推理字段形态**：u2-flash 这类推理型网关在**非流式**响应里把正文放在 `message.content`、把思考过程放在同帧的 `message.reasoning_content`；**流式**则先吐 `delta.reasoning_content`、再吐 `delta.content`（两者可能落在同一 chunk）。本项目 `ai.service` 非流式只取 `message.content`，因此思考过程**不会**混进评审/结构化任务的 JSON，7 维评分、期刊匹配、邮件解析、证据综合等 JSON 输出均能稳定解析，无需额外去 reasoning 前缀。
-- **思考过程自适应透传**：`chat/stream` 已透传 `delta.reasoning_content / delta.thinking`，前端「深度思考」开关打开时折叠思维链 UI 实时收到推理流；关闭时后端不再把推理增量下发（对无视 `thinking` 参数、每帧都带推理的网关，开关才真正有意义）。正文与 `usage` 收尾块不受开关影响。
-- **深度思考用法**：ChatPage 顶栏「🧠 深度思考」按钮即对应请求体 `enableThinking:true`；开启后上游附带 `thinking:{type:"enabled"}`（不支持的网关静默忽略），关闭时仅影响推理流是否上屏。
-- **连通自检**：`settings/check` 对推理型网关已加大 `max_tokens` 预算并在正文为空时回退 `reasoning_content` 佐证连通，避免「推理吃光 token → 误报空回复」。
-- **已知厂商差异与建议**：① 推理型模型会消耗一部分 token 在思考上，长文/多章节流水线请把 `AI_RPM_CAP` 调到 100+ 避免排队；② 评审类 JSON 仍优先走 fast 档（`reviewPaper` 已固定 fast），稳健性更好；③ 若换用不返回 `reasoning_content` 的普通对话模型，开关关闭/打开行为一致（本就没有推理流），无副作用。
-- **mock / 真实网关切换**：`AI_MOCK=1` 时进程内 mock 网关接管（`ai.configured=true`、模型名 `mock-model`、确定性响应、零外网）；不设 `AI_MOCK` 时严格走 `AI_BASE_URL` 真实网关，两种模式互不串状态（独立进程/独立环境变量）。
-
-## 🧪 测试
+## 🧪 测试与回归
 
 ```bash
-# 单元测试（引用格式化等核心纯逻辑）
-pnpm --filter server test
+# 类型检查（双端，CI 强制）
+pnpm --filter @sciflow/server typecheck
+pnpm --filter @sciflow/web typecheck
+
+# 单元测试（vitest 5，引用格式化等核心纯逻辑）
+pnpm --filter @sciflow/server test
+
+# 构建（双端）
+pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
 ```
 
-### 本地 mock AI 网关（测试 / 演示用，与任何国外平台无关）
+### 内置 mock AI 网关（无 Key / 无外网跑全链路）
 
-无 `AI_API_KEY`、无外网的本机环境下，可用内置的零依赖 mock 网关跑通「Planner→Research→Writer→Reviewer→Polisher→renderCitations」整条流水线并跑全量回归：
+`AI_MOCK=1` 时进程内起一个仅监听回环、零依赖（`node:http`）的 mock OpenAI 兼容网关，按 prompt 关键词返回**确定性**响应（研究计划/大纲 JSON、带 `[Ref:N]` 的中文章节、≈87 分 7 维评分不回炉、三段式润色、RAG 答案、期刊匹配等），并支持 SSE 分块。
 
 ```bash
-# 起后端（mock 模式）
-AI_MOCK=1 AI_RPM_CAP=100 DATABASE_PATH=/tmp/sciflow_mock.db PORT=3000 \
+# 起后端（mock 模式，放宽限流）
+AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_regression.db PORT=3000 \
   node apps/server/dist/main.js
 
-# 另一个终端：全量回归（FAIL 0）
+# 另一终端：全量回归（覆盖全部路由 + 一条流水线端到端产物断言）
 SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
-  SCIFLOW_DB_PATH=/tmp/sciflow_mock.db python3 scripts/full_regression.py
+  python3 scripts/full_regression.py
 ```
 
-- `AI_MOCK=1` 时 `ai.configured=true`，`settings/check` 返回连通；`AI_MOCK_PORT` 覆盖端口（默认 `127.0.0.1:5099`）。
-- mock 网关（`apps/server/src/ai/mock-gateway.ts`，仅 `node:http`、零新增依赖、只监听回环）按 prompt 关键词返回**确定性**响应：研究计划/大纲 JSON、带 `[Ref:N]` 的中文章节、7 维评分（≈87 分不回炉）、润色三段式、RAG 答案、期刊匹配/邮件解析 JSON 等，并支持 `stream:true` 的 SSE 分块。
-- **仅本机测试/演示用**：不访问任何外部网络、不代表真实模型能力；不要在生产或演示给真实作者时依赖它。未设 `AI_MOCK` 时，AI 调用行为与真实网关逐字节一致。
+回归基线（本机实测）：**mock 网关 PASS 162 / FAIL 0**；真实网关路径（未配 Key）PASS 143，其中 2 项为预期的「AI 未配置」语义（`settings/check`→503、创建流水线→400），不代表缺陷。mock 网关仅用于测试/演示，不代表真实模型能力。
 
-## 🧭 2026 前沿升级（查漏补缺批次）
+## 📚 文档索引
 
-对照 2026 主流 Agent 框架（LangGraph 1.x / OpenAI Agents SDK / Claude Agent SDK / Microsoft Agent Framework）补齐的能力，全部本地实现、零额外运行时依赖：
+| 文档 | 内容 |
+| --- | --- |
+| [`docs/product-roadmap.md`](docs/product-roadmap.md) | 产品路线图：现状能力矩阵、设计原则、差距与缺口 |
+| [`docs/sciflow-code-tree.html`](docs/sciflow-code-tree.html) | 全仓代码树可视化（浏览器打开） |
+| [`docs/screenshots/`](docs/screenshots/) | 工作台 / 流水线 / 写作 / 质量评分实机截图 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境、提交规范、PR 流程 |
+| [`SECURITY.md`](SECURITY.md) | 安全设计要点与漏洞披露方式 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录 |
 
-**后端（5 项）**
-- **LLM 成本追踪**：`llm_call_log` 表 + `GET /api/usage/summary`，按任务类型（caller）与近 14 天趋势统计 token 用量 / 成功率 / 延迟。
-- **结构化输出校验**：zod schema 校验大纲/章节/评审等 AI 输出，坏 JSON 自动兜底重试。
-- **Checkpoint 断点续跑**：服务重启后自动恢复 `interrupted` 状态任务，从草稿阶段幂等续跑（对应 LangGraph checkpointing）。
-- **Guardrails 基础版**：MCP 工具参数按 JSON Schema 动态校验（缺参即拒），第三方工具返回统一加 `untrustedContentHint` 与指令隔离（对应 OWASP MCP Top10 输入检查点）。
-- **RAG 检索升级**：BM25 + TF 向量余弦混合评分、上下文前缀（Contextual Retrieval 思路）、零依赖中文 Bigram 分词。
+## 🌱 演示数据说明
 
-**前端（4 项）**
-- **hash 路由**：`#/settings` 等深层链接直达（对应现代 SPA 可分享状态）。
-- **暗色模式**：`.dark` 变体 + localStorage 持久化 + 命令面板/底部栏切换。
-- **Cmd+K 命令面板**：全局搜索导航 / 新建项目 / 主题切换（Notion 式桌面体验）。
-- **Markdown 实时预览**：写作页编辑 / 预览 / 分栏三态（react-markdown + typography 排版）。
-
-**UI 重构**：大厂式左导航分组（研究工具 / 自动化 / 辅助）、Supervisor 编排按角色分组时间线、teal 统一色板替换 AI 紫。
-
-**全量回归**：`scripts/full_regression.py` 覆盖全部 66 个路由（39 项核心断言全绿 + AI 接口受外部网关限流时自动降级跳过，Guardrail 拒参 / RAG 混合检索 / 成本统计均有专项用例）。
-
-## ⚡ 性能与代码优化（审计批次）
-
-全量代码审计后的优化项（不改变任何功能语义，回归全绿）：
-
-**性能**
-- **首屏 JS 减 2.4MB → 821KB**：echarts 全量引入改为按需（`echarts/core` + 仅 RadarChart），质量评分页 `React.lazy` 路由懒加载（echarts chunk 443KB 进入页面才下载）。
-- **意图识别 N+1 修复**：`ruleMatch` 循环内每次迭代查库（17+ 意图 × 每请求）改为循环外一次性读取。
-- **模型列表 TTL 缓存**：设置页每次进入都实时请求网关 `/models` → 5 分钟缓存复用。
-
-**DRY / 结构**
-- **`CollapsibleCard` 组件**：设置页 4 个折叠卡（意图 / 提示词 / 流水线 / 权重）的标题+chevron+展开逻辑抽为公共组件，新增折叠配置只需 3 行。
-- **`AiService.buildChatRequest`**：`complete` / `completeStream` / `testConnection` 三处 OpenAI 兼容请求构造统一复用。
-
-**已核验无需改（避免重复造轮子）**
-- 文献检索已用 `Promise.allSettled` 三源并行 + 去重；前端 `request` 已有统一 60s 超时与错误提取；zod 已统一结构化输出校验。
-
-## 🛡 质量保障（流水线实测迭代）
-
-以 3S 级综述任务（图神经网络×药物发现）全自动实测，严格 7 维评审器驱动多轮迭代，修复全部系统性缺陷：
-
-- **引用真实化**：成文后自动把 `[Ref:N]` 占位符渲染为 `[作者 年份]` + 文末 GB/T 7714 参考文献列表（此前占位符被评审判定"引用造假"）。
-- **学术诚信约束**：起草 Prompt 硬性禁止虚构实验数据/性能数值，实验结论必须来自给定文献并标注（修复"综述虚构 QM9 指标"）。
-- **引用池净化**：起草只使用元数据完整（作者+年份）的文献，编号与渲染一致；无出处纯标题（Agentic RAG 补检）不再污染文献库。
-- **文献检索本地化**：已移除国外在线源（OpenAlex / arXiv / Semantic Scholar / CrossRef），零外部网络依赖，检索改走本地文献库。
-- **严格评分门**：总分 < 80 自动 Reflexion 反思落库 → 回炉重写（最多 3 轮），7 维（文献/逻辑/引用/语言/创新/图表/格式）评分 + 反馈可查。
-
-> 实测轨迹：首轮 46/100（引用占位符+虚构实验）→ 定位并修复 7 类根因 → 终验轮文献 47/47 元数据完整、综述正常成文。评分器按"苛刻同行评审"标准设计，宁严勿松。
+- 首次启动在演示项目中预置 **1 篇示例文献 + 1 份知识库资料**，便于立刻体验文献绑定、RAG 检索与流水线；
+- 全流程产物（文档/版本/引用/记忆）均存于本地 SQLite，删除 `DATABASE_PATH` 指向的 db 文件即可回到干净状态。
 
 ## 🐳 Docker 部署
 
 ```bash
-# 1. 配置环境变量（AI 网关必填）
-cp .env.example .env   # 按注释填写 AI_BASE_URL / AI_API_KEY / AI_MODEL
-
-# 2. 一键起服务（前端 :8080 → 后端 :3000，SQLite 数据持久化到 ./apps/server/data）
-docker compose up -d --build
+cp apps/server/.env.example .env   # 按注释填写 AI_BASE_URL / AI_API_KEY / AI_MODEL
+docker compose up -d --build      # 前端 nginx 静态托管 :8080 → 后端 :3000
+# 容器部署需设置 CORS_ORIGIN=http://localhost:8080
 ```
-
-- 前端 nginx 静态托管 + `/api` 反代；后端 Node 22 + SQLite（WAL）。
-- 镜像不包含 `.env`，AI 配置全部经环境变量注入（`docker-compose.yml` 中 `${AI_*}` 引用）。
-- CORS 默认仅放行 `localhost:5173`，容器部署时设置 `CORS_ORIGIN=http://localhost:8080`。
-
-## 🔒 安全说明
-
-- 本工具定位为**本地/私有部署的单机科研助手**，API 未内置账号体系——请勿直接暴露到公网，部署时务必置于反向代理/内网之后。
-- `.env` 已被 gitignore，CI 会自动校验 `.env` 不被提交；请勿把密钥写入代码。
-- 依赖安全：`pnpm audit` 已清零（drizzle-orm / esbuild / echarts 漏洞均已升级修复）。
-
-## 🛠 工程保障
-
-| 项 | 状态 |
-| --- | --- |
-| 类型检查 | server/web 双端 `tsc --noEmit`（CI 强制） |
-| 单元测试 | server vitest（CI 强制） |
-| 依赖审计 | `pnpm audit` 0 漏洞（CI 前自查） |
-| 前端分包 | echarts/react 独立 vendor chunk，主包 84KB |
-| 稳定性 | 全局 unhandledRejection/uncaughtException 兜底 + SQLite busy_timeout + 优雅关闭 |
-| CI | GitHub Actions：Node 20/22 × typecheck × test × build × 密钥校验 |
-## 📁 目录结构
-
-```
-sciflow/
-├── apps/
-│   ├── server/
-│   │   └── src/
-│   │       ├── main.ts            # 入口（CORS、全局前缀 /api）
-│   │       ├── app.module.ts      # 模块装配
-│   │       ├── db/                # Drizzle schema（18 表）+ SQLite 连接与建表
-│   │       ├── ai/                # 统一 LLM 服务 + 科研 Prompt 模板库
-│   │       ├── literature/        # 本地文献库检索（已移除国外在线源）
-│   │       ├── projects/          # 项目管理
-│   │       ├── documents/         # 文档、润色、翻译、引用、版本历史
-│   │       ├── references/        # 文献库与综述
-│   │       ├── quality/           # 7 维质量评分
-│   │       ├── pipeline/          # 8 步流水线状态机（质量门+回炉）
-│   │       ├── chat/              # SSE 流式问答
-│   │       └── submission/        # 期刊推荐/Cover Letter/审稿回复
-│   └── web/
-│       └── src/
-│           ├── api/client.ts      # API 封装 + SSE 客户端
-│           ├── components/        # 通用 UI
-│           └── pages/             # 工作台/写作/文献/流水线/评分/问答/投稿
-└── package.json                   # pnpm workspace 根
-```
-
-## 🧩 设计参考（开源项目精华）
-
-- **GPT-Academic**：三段式润色「原文 + 润色文 + 润色理由」
-- **Academic Research Skills（ARS）**：0-100 多维质量关卡、引用可核验（DOI）
-- **OpenScholar**：综述引用绑定真实文献、防幻觉
-- **STORM**：outline-first 大纲先行写作
-- **Agent Laboratory**：分阶段流水线 + 人工确认点（Human-in-the-loop）
-- **GPT Researcher**：多源检索汇总
-- **Claude Agent SDK / AutoGen**：Supervisor 多 Agent 编排、并行子任务、可观测轨迹
-- **OpenAI Deep Research**：Agentic RAG 迭代式自定向检索（边写边查）
-- **Reflexion（Shinn et al.）**：评审失败提炼语义反思指令，回炉注入重写
 
 ## 📜 License
 
-MIT
+[MIT](LICENSE) © 2026 SciFlow Contributors
