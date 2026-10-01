@@ -182,6 +182,7 @@ SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
 | 文档 | 内容 |
 | --- | --- |
 | [`docs/product-roadmap.md`](docs/product-roadmap.md) | 产品路线图：现状能力矩阵、设计原则、差距与缺口 |
+| [`docs/index.html`](docs/index.html) | 项目官网（静态单页，浏览器直开；GitHub Pages 首页） |
 | [`docs/sciflow-code-tree.html`](docs/sciflow-code-tree.html) | 全仓代码树可视化（浏览器打开） |
 | [`docs/screenshots/`](docs/screenshots/) | 工作台 / 流水线 / 写作 / 质量评分实机截图 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境、提交规范、PR 流程 |
