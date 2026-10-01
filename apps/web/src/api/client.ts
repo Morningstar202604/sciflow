@@ -173,9 +173,15 @@ export const api = {
       request<EvidenceResult>(`/api/references/evidence`, { method: 'POST', body: JSON.stringify({ projectId, question }) }),
     deepDive: (projectId: string, refId: string) => request<DeepDiveResult>(`/api/references/deep-dive`, { method: 'POST', body: JSON.stringify({ projectId, refId }) }),
     gap: (projectId: string, topic: string) => request<GapResult>(`/api/references/gap`, { method: 'POST', body: JSON.stringify({ projectId, topic }) }),
-    /* —— 科研高级功能：阅读状态 / 去重指纹 —— */
-    update: (id: string, patch: Partial<{ readingStatus: string; tags: string }>) =>
+    /* —— 科研高级功能：阅读状态 / 去重指纹 / 笔记（差距#11） —— */
+    update: (id: string, patch: Partial<{ readingStatus: string; tags: string; notes: string | null }>) =>
       request<Reference>(`/api/references/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    /* —— 差距#20：批量 DOI 本地核验（合法置 cited / 非法不动 / 不存在进 skipped，纯本地格式校验不调外部） —— */
+    verifyDois: (ids: string[]) =>
+      request<{ valid: { id: string }[]; invalid: { id: string }[]; skipped: { id: string }[] }>(
+        '/api/references/verify-dois',
+        { method: 'POST', body: JSON.stringify({ ids }) },
+      ),
     /* —— 系统综述：筛选队列 —— */
     screen: (projectId: string, referenceId: string, status: string, reason = '') =>
       request<ScreeningItem>('/api/references/screen', { method: 'POST', body: JSON.stringify({ projectId, referenceId, status, reason }) }),
@@ -291,6 +297,9 @@ export const api = {
     /** 最新一次质量评分（无记录时后端返回 null；接口未就绪时前端 catch 降级为空态） */
     latest: (documentId: string) =>
       request<QualityReport | null>(`/api/quality/latest?documentId=${encodeURIComponent(documentId)}`),
+    /** 差距#7：把最新 quality_report.feedback 结构化为 review_comment（幂等，返回 created/existing） */
+    exportComments: (documentId: string) =>
+      request<{ created: number; existing: number }>(`/api/quality/export-comments?documentId=${encodeURIComponent(documentId)}`, { method: 'POST' }),
   },
 
   pipeline: {

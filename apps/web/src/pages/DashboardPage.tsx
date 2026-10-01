@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BookOpen, Beaker, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
 import type { DashboardOverview, Doc, Project, Reference } from '../types';
-import { Button, Card, Empty, Spinner, Skeleton, Badge, jsonText, SectionTitle } from '../components/ui';
+import { Button, Card, Empty, Spinner, Skeleton, Badge, jsonText, SectionTitle, Textarea } from '../components/ui';
 import { Donut, HBar, MetricCard } from '../components/charts';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
@@ -21,6 +21,10 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
   const [newTitle, setNewTitle] = useState('');
   /** 科研全链路总览：后端未就绪/失败时为 null，前端降级为小字提示，不白屏 */
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
+  /** 差距#22：项目级系统提示（写作偏好），本地草稿态 */
+  const [prefaceDraft, setPrefaceDraft] = useState(project.preface || '');
+  const [prefaceEditing, setPrefaceEditing] = useState(false);
+  const [prefaceSaving, setPrefaceSaving] = useState(false);
   const toast = useContext(ToastContext);
 
   useEffect(() => {
@@ -50,6 +54,21 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
     openDoc(doc.id);
   };
 
+  /** 差距#22：保存项目级系统提示（每轮写作自动注入；注入逻辑在 AI 域，这里只落字段） */
+  const savePreface = async () => {
+    if (prefaceSaving) return;
+    setPrefaceSaving(true);
+    try {
+      await api.projects.update(project.id, { preface: prefaceDraft.trim() });
+      setPrefaceEditing(false);
+      toast('success', prefaceDraft.trim() ? '项目写作偏好已保存，后续写作将自动注入' : '已清空项目写作偏好');
+    } catch (e: any) {
+      toast('error', e.message || '保存失败');
+    } finally {
+      setPrefaceSaving(false);
+    }
+  };
+
   const entries = [
     { label: '论文写作', desc: '大纲 · 起草 · 润色 · 翻译', icon: BookOpen, view: 'writing' as View },
     { label: '文献调研', desc: '多源检索 · 综述 · 文献库', icon: FlaskConical, view: 'literature' as View },
@@ -67,6 +86,38 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
             <div className="text-lg font-semibold text-slate-900 dark:text-slate-100 tracking-tight">{project.name}</div>
             <div className="text-sm text-slate-400 dark:text-slate-500 mt-1">{project.description || '让科研从想法到成文，一站式完成文献、写作与投稿'}</div>
           </div>
+        </div>
+        {/* 差距#22：项目级写作偏好（系统提示，每轮写作自动注入） */}
+        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">项目写作偏好（每轮写作自动注入，留空则不注入）</span>
+            {!prefaceEditing && (
+              <Button variant="ghost" className="text-xs h-7 px-2" onClick={() => setPrefaceEditing(true)}>
+                {prefaceDraft.trim() ? '编辑' : '设置偏好'}
+              </Button>
+            )}
+          </div>
+          {prefaceEditing ? (
+            <div className="space-y-2">
+              <Textarea
+                rows={3}
+                className="text-sm"
+                placeholder="例：本项目要求——引言用漏斗式结构；方法节写明数据来源与超参数；参考文献优先引用近三年中文核心。"
+                value={prefaceDraft}
+                onChange={(e) => setPrefaceDraft(e.target.value)}
+              />
+              <div className="flex gap-2 justify-end">
+                <Button variant="ghost" className="text-xs h-7 px-2" onClick={() => { setPrefaceEditing(false); setPrefaceDraft(project.preface || ''); }}>取消</Button>
+                <Button className="text-xs h-7 px-2" onClick={savePreface} disabled={prefaceSaving}>
+                  {prefaceSaving ? '保存中…' : '保存偏好'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+              {prefaceDraft.trim() || <span className="text-slate-400 dark:text-slate-500">尚未设置。这是一段固定写作要求，后续每次 AI 写作/润色都会自动带上，等价于轻量「项目记忆」。</span>}
+            </div>
+          )}
         </div>
       </Card>
 

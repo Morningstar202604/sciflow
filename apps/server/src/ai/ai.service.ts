@@ -538,7 +538,9 @@ export class AiService {
       const res = await this.buildChatRequest(
         target,
         [{ role: 'user', content: '请只回复两个字：正常' }],
-        { temperature: 0, maxTokens: 16, stream: false },
+        // 推理型网关（u2-flash / DeepSeek-R1 兼容）会先消耗 token 在 reasoning_content 上；
+        // max_tokens 太小会把正文挤成空串，误报「空回复」。给足预算，并在正文为空时回退 reasoning 佐证连通。
+        { temperature: 0, maxTokens: 512, stream: false },
         30_000,
       );
       if (!res.ok) {
@@ -546,7 +548,15 @@ export class AiService {
         return { ok: false, reply: `HTTP ${res.status}: ${err.slice(0, 200)}`, model: target, latencyMs: Date.now() - t0 };
       }
       const data = (await res.json()) as any;
-      return { ok: true, reply: data.choices?.[0]?.message?.content ?? '（空回复）', model: target, latencyMs: Date.now() - t0 };
+      const msg = data.choices?.[0]?.message ?? {};
+      const content: string = msg.content ?? '';
+      // 正文非空直接回显；正文空但推理通道有内容，说明网关连通、只是预算被推理吃掉
+      const reply = content.trim()
+        ? content
+        : msg.reasoning_content || msg.thinking
+          ? '（连通正常：推理通道有输出，正文为空——可忽略）'
+          : '（空回复）';
+      return { ok: true, reply: reply, model: target, latencyMs: Date.now() - t0 };
     } catch (e: any) {
       return { ok: false, reply: e.message || String(e), model: target, latencyMs: Date.now() - t0 };
     }

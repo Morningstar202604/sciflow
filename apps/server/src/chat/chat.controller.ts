@@ -22,7 +22,8 @@ interface ChatRequestBody {
  *      · chunkText 截断到 ≤2000 字符，超限末尾追加 `…[已截断]`，未超限原样；字段名/长度变化不影响旧客户端。
  *        完整块可凭 chunkSeq 经 GET /api/knowledge/:id 取全文。
  *  - `data: {"delta":"..."}`                  正文增量（旧客户端兼容）
- *  - `data: {"delta":"...","reasoning":"..."}` 正文+推理过程同发（reasoning 仅在有值时附加）
+ *  - `data: {"delta":"...","reasoning":"..."}` 正文+推理过程同发（reasoning 仅在「深度思考」开启且上游有值时附加；
+ *      对无视 thinking 参数、恒输出 reasoning_content 的推理型网关，关闭开关时此处不再下发 reasoning，保持折叠思维链 UI 静默）
  *  - `data: {"usage":{prompt_tokens,completion_tokens,total_tokens}}` 收尾一次
  *  - `data: {"error":"..."}`                  异常
  *  - `data: [DONE]`                           结束
@@ -56,6 +57,10 @@ export class ChatController {
       }
     });
 
+    // 深度思考开关：仅显式开启时才把上游推理增量（delta.reasoning_content / delta.thinking）透传给前端。
+    // 部分推理型网关（如 u2-flash / DeepSeek-R1 兼容）无视 thinking 参数、每帧都带 reasoning_content；
+    // 若不在此门控，关闭「深度思考」时折叠思维链 UI 仍会收到推理流，开关语义形同虚设。
+    const forwardReasoning = body.enableThinking === true;
     try {
       const { stream, sources } = await this.chat.stream(
         body.message,
@@ -89,8 +94,8 @@ export class ChatController {
             const choice = json?.choices?.[0]?.delta || {};
             // 正文增量（行为与旧版完全一致）
             const delta: string | undefined = choice.content;
-            // 推理过程透传：DeepSeek/通义系 reasoning_content，豆包系 thinking
-            const reasoning: string | undefined = choice.reasoning_content || choice.thinking;
+            // 推理过程透传：DeepSeek/通义系 reasoning_content，豆包系 thinking；仅深度思考开启时转发
+            const reasoning: string | undefined = forwardReasoning ? choice.reasoning_content || choice.thinking : undefined;
             const chunk: Record<string, string> = {};
             if (delta) chunk.delta = delta;
             if (reasoning) chunk.reasoning = reasoning;

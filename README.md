@@ -90,6 +90,16 @@ pnpm dev
 
 未配置 Key 时应用可正常使用（项目管理/文献检索），AI 功能会给出明确配置提示，不会返回假数据。
 
+### 真实网关适配结论（以云知声 u2-flash / DeepSeek-R1 兼容 OpenAI 网关实测）
+
+以下结论在真实 Key 下端到端实测得出（密钥只放在本地 `apps/server/.env`，不入库、不写入仓库）：
+
+- **推理字段形态**：u2-flash 这类推理型网关在**非流式**响应里把正文放在 `message.content`、把思考过程放在同帧的 `message.reasoning_content`；**流式**则先吐 `delta.reasoning_content`、再吐 `delta.content`（两者可能落在同一 chunk）。本项目 `ai.service` 非流式只取 `message.content`，因此思考过程**不会**混进评审/结构化任务的 JSON，7 维评分、期刊匹配、邮件解析、证据综合等 JSON 输出均能稳定解析，无需额外去 reasoning 前缀。
+- **思考过程自适应透传**：`chat/stream` 已透传 `delta.reasoning_content / delta.thinking`，前端「深度思考」开关打开时折叠思维链 UI 实时收到推理流；关闭时后端不再把推理增量下发（对无视 `thinking` 参数、每帧都带推理的网关，开关才真正有意义）。正文与 `usage` 收尾块不受开关影响。
+- **深度思考用法**：ChatPage 顶栏「🧠 深度思考」按钮即对应请求体 `enableThinking:true`；开启后上游附带 `thinking:{type:"enabled"}`（不支持的网关静默忽略），关闭时仅影响推理流是否上屏。
+- **连通自检**：`settings/check` 对推理型网关已加大 `max_tokens` 预算并在正文为空时回退 `reasoning_content` 佐证连通，避免「推理吃光 token → 误报空回复」。
+- **已知厂商差异与建议**：① 推理型模型会消耗一部分 token 在思考上，长文/多章节流水线请把 `AI_RPM_CAP` 调到 100+ 避免排队；② 评审类 JSON 仍优先走 fast 档（`reviewPaper` 已固定 fast），稳健性更好；③ 若换用不返回 `reasoning_content` 的普通对话模型，开关关闭/打开行为一致（本就没有推理流），无副作用。
+- **mock / 真实网关切换**：`AI_MOCK=1` 时进程内 mock 网关接管（`ai.configured=true`、模型名 `mock-model`、确定性响应、零外网）；不设 `AI_MOCK` 时严格走 `AI_BASE_URL` 真实网关，两种模式互不串状态（独立进程/独立环境变量）。
 
 ## 🧪 测试
 

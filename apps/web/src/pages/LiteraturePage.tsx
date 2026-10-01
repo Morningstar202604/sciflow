@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpenCheck, ClipboardList, Download, FileDown, Filter, FlaskConical, GitCompareArrows, Lightbulb, List, ListChecks, Loader2, Minus, Network, Plus, RotateCcw, Search, Table2, Trash2, Upload, X } from 'lucide-react';
+import { BookOpenCheck, ClipboardList, Download, FileDown, Filter, FlaskConical, GitCompareArrows, Lightbulb, List, ListChecks, Loader2, Minus, Network, Plus, RotateCcw, Search, ShieldCheck, StickyNote, Table2, Trash2, Upload, X } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
@@ -100,6 +100,15 @@ const READING_TONE: Record<string, 'slate' | 'amber' | 'green' | 'blue'> = {
   read: 'green',
   cited: 'blue',
 };
+
+/** 阅读状态机中文标签（差距#1：把后端枚举本地化显示） */
+const READING_LABEL: Record<string, string> = {
+  unread: '未读',
+  reading: '在读',
+  read: '已读',
+  cited: '已引',
+};
+const READING_ORDER = ['unread', 'reading', 'read', 'cited'] as const;
 
 function ReferenceNetwork({ graph, onViewRef }: { graph: ReferenceGraph; onViewRef?: (id: string) => void }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -510,7 +519,7 @@ function ReferenceNetwork({ graph, onViewRef }: { graph: ReferenceGraph; onViewR
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <Badge tone="slate">邻居 {deg}</Badge>
-                    <Badge tone={READING_TONE[rs] || 'slate'}>{rs}</Badge>
+                    <Badge tone={READING_TONE[rs] || 'slate'}>{READING_LABEL[rs] || rs}</Badge>
                   </div>
                 </div>
                 {deg > 0 && (
@@ -532,7 +541,7 @@ function ReferenceNetwork({ graph, onViewRef }: { graph: ReferenceGraph; onViewR
         <div className="mt-3 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/40 dark:bg-teal-900/10 p-3">
           <div className="text-sm font-medium text-slate-800 dark:text-slate-100 leading-snug">{selNode.title}</div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            {selNode.year || 'n.d.'} · {selNode.venue || '未标注'} · 被引 {selNode.citationCount} · 阅读状态 {selNode.readingStatus || 'unread'}
+            {selNode.year || 'n.d.'} · {selNode.venue || '未标注'} · 被引 {selNode.citationCount} · 阅读状态 {READING_LABEL[selNode.readingStatus || 'unread'] || (selNode.readingStatus || 'unread')}
           </div>
           {selNode.tags?.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
@@ -617,6 +626,10 @@ export function LiteraturePage({ project }: { project: Project }) {
   const [showImport, setShowImport] = useState(false);
   const [bibText, setBibText] = useState('');
   const [importing, setImporting] = useState(false);
+  // —— 差距#1/#11/#20：阅读状态机 / 阅读笔记 / DOI 本地核验（后端已就绪，前端补入口） ——
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [noteEditId, setNoteEditId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
   const toast = useContext(ToastContext);
 
   useEffect(() => {
@@ -753,6 +766,64 @@ export function LiteraturePage({ project }: { project: Project }) {
   const removeRef = async (id: string) => {
     await api.references.remove(id);
     setRefs((s) => s.filter((r) => r.id !== id));
+  };
+
+  /** 差距#1：切换阅读状态机（unread/reading/read/cited），PATCH 落库并就地更新列表 */
+  const setReadingStatus = async (ref: Reference, status: string) => {
+    try {
+      const updated = await api.references.update(ref.id, { readingStatus: status });
+      setRefs((s) => s.map((r) => (r.id === ref.id ? { ...r, readingStatus: updated.readingStatus } : r)));
+      toast('success', `已标记为「${READING_LABEL[status] || status}」`);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  /** 差距#11：打开/收起某篇文献的阅读笔记编辑 */
+  const openNoteEditor = (ref: Reference) => {
+    if (noteEditId === ref.id) {
+      setNoteEditId(null);
+      setNoteDraft('');
+      return;
+    }
+    setNoteEditId(ref.id);
+    setNoteDraft(ref.notes || '');
+  };
+
+  const saveNote = async (ref: Reference) => {
+    try {
+      const updated = await api.references.update(ref.id, { notes: noteDraft.trim() });
+      setRefs((s) => s.map((r) => (r.id === ref.id ? { ...r, notes: updated.notes } : r)));
+      setNoteEditId(null);
+      setNoteDraft('');
+      toast('success', '阅读笔记已保存');
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  /** 差距#20：批量本地核验带 DOI 的文献（纯本地格式校验，合法→cited） */
+  const verifyDois = async () => {
+    const withDoi = refs.filter((r) => r.doi && r.doi.trim());
+    if (withDoi.length === 0) {
+      setError('当前文献库没有带 DOI 的文献，无法核验');
+      return;
+    }
+    setVerifyBusy(true);
+    setError('');
+    try {
+      const res = await api.references.verifyDois(withDoi.map((r) => r.id));
+      // 合法文献 readingStatus→cited，刷新列表
+      setRefs(await api.references.list(project.id));
+      toast(
+        'success',
+        `DOI 核验完成：格式合法 ${res.valid.length} 篇（已标「已引」），不合法 ${res.invalid.length} 篇`,
+      );
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setVerifyBusy(false);
+    }
   };
 
   const runSummary = async () => {
@@ -1171,13 +1242,13 @@ export function LiteraturePage({ project }: { project: Project }) {
         </Card>
       )}
 
-      {/* 工具 Tab + 文献库（移动端横向滚动） */}
-      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
+      {/* 工具 Tab + 文献库（移动端横向滚动）：min-w-0 防 flex-col 父级把 min-content 透传撑宽，按钮 shrink-0 保证横滑不被压缩 */}
+      <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto min-w-0">
         {TOOLS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTool(t.key)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px whitespace-nowrap shrink-0 ${
               tool === t.key ? 'border-teal-600 text-teal-700 font-medium' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800'
             }`}
           >
@@ -1208,6 +1279,15 @@ export function LiteraturePage({ project }: { project: Project }) {
             </Button>
             <Button variant="outline" className="text-xs h-7 px-2" onClick={() => setShowImport((v) => !v)}>
               <Upload size={12} /> 导入 BibTeX
+            </Button>
+            <Button
+              variant="outline"
+              className="text-xs h-7 px-2"
+              disabled={verifyBusy || refs.length === 0}
+              onClick={verifyDois}
+              title="本地批量核验带 DOI 文献：格式合法者自动标记为「已引」，不联网"
+            >
+              {verifyBusy ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />} 核验 DOI
             </Button>
           </div>
           {showImport && (
@@ -1308,6 +1388,54 @@ export function LiteraturePage({ project }: { project: Project }) {
                             defaultValue={sc?.reason ?? ''}
                             onBlur={(e) => doScreen(r.id, scStatus, e.target.value.trim())}
                           />
+                        )}
+                        {/* 阅读状态机（差距#1）：未读/在读/已读/已引，点击即落库 */}
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          <span className="text-[10px] text-slate-400 mr-0.5">阅读</span>
+                          {READING_ORDER.map((st) => {
+                            const active = (r.readingStatus || 'unread') === st;
+                            return (
+                              <button
+                                key={st}
+                                onClick={() => setReadingStatus(r, st)}
+                                className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
+                                  active
+                                    ? 'bg-teal-600 text-white border-teal-600'
+                                    : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-teal-300 hover:text-teal-600'
+                                }`}
+                                title={`标记为${READING_LABEL[st]}`}
+                              >
+                                {READING_LABEL[st]}
+                              </button>
+                            );
+                          })}
+                          <button
+                            onClick={() => openNoteEditor(r)}
+                            className={`ml-1 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
+                              noteEditId === r.id || r.notes
+                                ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-amber-300'
+                            }`}
+                            title="阅读笔记（读后想法，本地保存）"
+                          >
+                            <StickyNote size={11} /> {r.notes ? '笔记' : '记笔记'}
+                          </button>
+                        </div>
+                        {/* 阅读笔记编辑区（差距#11） */}
+                        {noteEditId === r.id && (
+                          <div className="mt-1.5 space-y-1.5">
+                            <Textarea
+                              rows={2}
+                              className="text-xs"
+                              placeholder="记录这篇文献的方法、结论、可用之处……"
+                              value={noteDraft}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                            />
+                            <div className="flex gap-1.5">
+                              <Button className="text-xs h-7 px-2" onClick={() => saveNote(r)}>保存笔记</Button>
+                              <Button variant="ghost" className="text-xs h-7 px-2" onClick={() => openNoteEditor(r)}>取消</Button>
+                            </div>
+                          </div>
                         )}
                       </div>
                       <button

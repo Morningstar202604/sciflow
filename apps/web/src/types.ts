@@ -5,6 +5,8 @@ export interface Project {
   status: string;
   createdAt: number;
   updatedAt: number;
+  /** 项目级系统提示（差距#22：写作偏好，每轮注入；仅字符串） */
+  preface?: string;
 }
 
 export interface Doc {
@@ -45,6 +47,8 @@ export interface Reference {
   createdAt: number;
   /** 科研高级功能扩展字段（后端返回） */
   readingStatus?: 'unread' | 'reading' | 'read' | 'cited';
+  /** 阅读笔记（差距#11：读后想法，可本地编辑落库） */
+  notes?: string;
   fingerprint?: string;
   isDuplicateOf?: string;
 }

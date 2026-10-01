@@ -138,3 +138,78 @@ sciflow 是一个**本地优先、单机部署**的 AI 科研助手：NestJS 11 
 | 本地 mock AI 网关 | `AI_MOCK=1` 起后端后跑 `full_regression.py`（见 README「本地 mock AI 网关」） | **mock 模式 PASS / FAIL 0**：无 Key 本机即可端到端跑通流水线；无 `AI_MOCK` 时回归保持 2 个 AI 未配置环境项（settings/check 503、pipeline 创建 400）不变 |
 
 > 后续每轮改造完成后，须以同一套基线（typecheck ×2 + vitest + build ×2 + `full_regression.py`）回归全绿作为合并门槛；AI 网关限流类失败仍按环境项处理并显式标注，不得静默吞掉。
+
+---
+
+## 8. 完成度核对表（截至本轮，2026-10-01）
+
+> 本轮工作：对差距表逐项做「六位一体」走查（后端契约 → 前端入口 → 数据落库 → 错误/空态 → 移动端 → 文档），
+> 发现**后端已就绪、但前端缺入口**的半成品 4 项，已在本轮全部补齐（纯前端改动，零新增依赖，不碰 AI 域与 WritingPage）。
+> 状态列：**已落地** = 六位一体齐全；**本轮补齐** = 后端早已落库/回归覆盖，本轮补前端入口；**backlog** = 明确延后；**保持不做** = 见第 5 节理由。
+
+### 8.1 差距表逐项核对（对应第 4 节 #1–#24）
+
+| # | 差距项 | 本轮前状态 | 本轮后状态 | 说明（六位一体核对结论） |
+|---|---|---|---|---|
+| 1 | 文内实时引用 `[n]` 锚点 + 换样式重排 | 已落地 | **已落地** | 编辑器锚点、`render-citations`（8 样式、著者-年 a/b 按首现序、dryRun 不落库、幂等）、CiteReorderButton 齐全；回归 R6B 覆盖 |
+| 2 | 文献库 ↔ 知识库 `referenceId` 打通 | 已落地 | **已落地** | 上传同名文档自动绑定、手动 bind/解绑、不存在文献 400；回归 #18 覆盖 |
+| 3 | RAG 引用可点（chunkId/chunkText/referenceTitle） | 已落地 | **已落地** | `knowledge/:id` 返回 chunks+outline、`search` 命中文块带 referenceTitle；回归 #18.5/#22 覆盖 |
+| 4 | submission 投稿状态机 + 状态历史 | 已落地 | **已落地** | 两层表 + 13 态 + append-only events + L1/L2/L3；回归 #17 覆盖 |
+| 5 | 选刊结果一键登记投稿 | 已落地 | **已落地** | journals-match 结果「带入登记表单」切 Tab（SubmissionPage） |
+| 6 | pipeline Research hits 自动入库 | 部分（AI 域） | **已落地（AI 域）** | knowledge-upload 自动建条目（`source=knowledge-upload`）；编排器 hits 回写在 AI 域，交并行线核对 |
+| 7 | 质量 feedback 结构化为 review_comment | 后端就绪/前端缺入口 | **本轮补齐** | 后端 `quality/export-comments`（幂等 created/existing）早已落库+回归；本轮 QualityPage 加「拆为待办清单」按钮，feedback 一键拆条 |
+| 8 | 审稿数据打通（replyReview 读 review_comment） | 已落地 | **已落地** | SubmissionPage 回复 Tab 直接读本文档 review_comment 逐条生成 response 并回写状态 |
+| 9 | 编码表/筛选队列产物流向 | 已落地 | **已落地** | 纳入文献 → 对比表 MD / 综述草稿（带 [作者 年份]）/ 编码表 CSV（BOM），纯前端 Blob |
+| 10 | 参考文献样式扩展（citeproc 8 种） | 已落地 | **已落地** | render-citations 支持多样式实时重排，无需引 citeproc-js（自绘格式化零依赖） |
+| 11 | 文献笔记 notes | 后端就绪/前端缺入口 | **本轮补齐** | 后端 PATCH notes（可清空）早已落库+回归；本轮 LiteraturePage 每篇卡片加「记笔记」内联编辑，失焦/保存落库 |
+| 12 | BibTeX/RIS 导入导出 | 已落地 | **已落地** | 导出 BibTeX/RIS、导入粘贴/选文件（指纹去重 imported/skipped）；回归 #19 覆盖 |
+| 13 | 写作防抖自动保存 + 版本快照 | 已落地 | **已落地** | WritingPage 自动保存 + versions JSON 快照 + version-name 命名 |
+| 14 | 移动端响应式 | 已落地 | **已落地** | 抽屉侧栏、表格 `overflow-auto`、卡片网格 `lg:` 断点；本轮新增控件均 `flex-wrap` 不溢出 |
+| 15 | 文献空态引导 + 文案止血 | 已落地 | **已落地** | 搜索框「在我的文献库中检索」、空态三步引导（粘贴 DOI/导入 BibTeX/手动录入） |
+| 16 | 版本 diff + 命名版本 | 已落地 | **已落地** | VersionDiffModal + version-name 幂等命名；回归 #23 覆盖 |
+| 17 | 项目/文档大纲模板（综述/IMRaD/基金） | 待办 | **backlog（P2）** | 需在 WritingPage 内预制大纲，触碰 449.48KB 体积红线，本轮不强推以免压破；下轮以极小 JSON 模板注入 |
+| 18 | ⌘K 命令面板接文献/知识库搜索 | 已落地 | **已落地** | CommandPalette 并行检索 references.search + knowledge list 前端过滤 |
+| 19 | 导航信息架构 + 写作面包屑 | 已落地 | **已落地** | 左导航分组、写作面包屑补「项目 > 论文写作 > 文档名」 |
+| 20 | 批量 DOI 本地核验 | 后端就绪/前端缺入口 | **本轮补齐** | 后端 `verify-dois` 三分桶（valid/invalid/skipped，合法→cited）早已落库+回归；本轮 LiteraturePage 工具区加「核验 DOI」按钮 |
+| 21 | 导出只读快照发给合作者 | 已落地 | **已落地** | ChatPage「导出快照」把会话+来源序列化为自包含 Markdown Blob 下载；写作页另可导出 .md/.docx |
+| 22 | 项目级系统提示 preface | 后端就绪/前端缺入口 | **本轮补齐** | 后端 PATCH preface（仅字符串校验）早已落库+回归；本轮 Dashboard 项目卡加「项目写作偏好」内联编辑器 |
+| 23 | 实验记录二期（多次执行历史 / QuickJS） | 部分 | **部分已落地 / QuickJS backlog** | 「重新运行」已落地（每次 run 即一行执行历史）；QuickJS 不可信 JS 兜底仍为 backlog（P2） |
+| 24 | NotebookLM 式学习/复盘 | 已落地 | **已落地** | KnowledgePage 纯前端规则版复习卡（挖空/问答）+ 自绘 SVG 思维导图（优先真实章节标题），无 AI key 可用 |
+| — | 外部学术 API / PDF 阅读器 / Pyodide / TeX Live / 协作 / 爬虫等 | 保持不做 | **保持不做** | 理由见第 5 节，本轮无变化 |
+
+### 8.2 本轮新补齐的半成品（六位一体闭环）
+
+| 功能 | 补齐的环节 | 落点文件 |
+|---|---|---|
+| 文献阅读状态机（未读/在读/已读/已引） | 前端设置入口（原仅网络图只读英文显示，全前端无 PATCH 调用）+ 状态本地化 | LiteraturePage.tsx |
+| 文献阅读笔记 notes | 前端查看/编辑入口（后端字段早已落库） | LiteraturePage.tsx |
+| 批量 DOI 本地核验 | 前端按钮（原后端端点+回归就绪、零 UI） | LiteraturePage.tsx / api/client.ts |
+| 质量反馈拆条（export-comments） | 前端按钮（原 feedback 仅长文本展示） | QualityPage.tsx / api/client.ts |
+| 项目级写作偏好 preface | 前端编辑器 + type 字段补全（原后端字段就绪、零 UI） | DashboardPage.tsx / types.ts |
+
+### 8.3 对标主流补充差距清单（NotebookLM / Notion / Zotero / Overleaf / Elicit / ResearchRabbit）
+
+| 功能 | 现状 | 补法 | 优先级 | 工作量 | 结论 |
+|---|---|---|---|---|---|
+| 引用格式切换（8 样式） | 已自绘实现，无 citeproc 依赖 | — | — | — | **已覆盖** |
+| BibTeX/RIS 导入导出 + 指纹去重 | 已实现 | — | — | — | **已覆盖** |
+| Markdown / Word(.docx) 导出 | 已实现 | — | — | — | **已覆盖** |
+| 本地 BM25+向量 RAG + 可点来源 | 已实现（chunkId/chunkText/referenceTitle） | — | — | — | **已覆盖** |
+| 系统综述 PRISMA 筛选 + 编码矩阵 | 已实现（纳入/排除/不确定 + CSV/对比表/综述草稿产出） | — | — | — | **已覆盖** |
+| 引用网络（共引 + 去重力导向图） | 已实现（FR 布局、渐进展开、卡片兜底） | — | — | — | **已覆盖** |
+| LaTeX `.tex` 源文件导出 | 仅 .md/.docx | 纯前端 markdown→tex 文本变换 | P2 | M | **backlog**：非编译（编译=整包 TeX Live 已明确不做），但 markdown→tex 转写易错，本轮不强推以免出半成品；下轮以受限子集实现 |
+| 自包含 HTML 快照（Notion 式分享） | 已有 Markdown 会话快照 + .docx | 需 markdown→HTML 字符串渲染器 | P2 | S–M | **backlog**：react-markdown 产出 React 而非字符串，另引 marked 违背零新依赖/.md+.docx 已满足「发给合作者」 |
+| 大纲模板（IMRaD/综述/基金） | 无 | WritingPage 预制大纲 JSON | P2 | S | **backlog**（即 #17）：碰 WritingPage 体积红线，下轮小步注入 |
+| 在线被引图谱 / 前后向引用跳转 | 需外部被引数据 | — | — | — | **保持不做**（国外 API 硬约束） |
+| 内置 PDF.js 阅读器 + 高亮批注 | 无（知识库 PDF 仅分块） | — | — | — | **保持不做**（工作量 L、与轻量冲突） |
+| 多人实时协作 / 在线分享链接 | 无（单机定位） | — | — | — | **保持不做**（无 user/team 表，用导出快照替代） |
+
+### 8.4 本轮验证
+
+| 验证项 | 命令 | 结果 |
+|---|---|---|
+| Web 类型检查 | `pnpm --filter @sciflow/web typecheck` | **绿**（tsc --noEmit 无错） |
+| Web 构建 | `pnpm --filter @sciflow/web build` | **绿**；WritingPage chunk 仍 449.48KB（本轮未改）、主包 index 83.55KB、LiteraturePage 55.24KB（懒加载 chunk，不进首屏） |
+| Server | 本轮**未改任何后端文件** | 维持基线：typecheck/test(5/5)/build 全绿，回归 mock PASS 146/0、无 mock 126/2（2 项为无 AI key 环境语义） |
+
+> 本轮改动文件（5 个，全部前端、非 AI 域）：`apps/web/src/types.ts`、`apps/web/src/api/client.ts`、`pages/LiteraturePage.tsx`、`pages/QualityPage.tsx`、`pages/DashboardPage.tsx`。未 commit（提交由组织者统一执行）。

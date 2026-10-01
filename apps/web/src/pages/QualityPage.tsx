@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Gauge, Loader2, Sparkles } from 'lucide-react';
+import { useEffect, useState, useContext } from 'react';
+import { Gauge, Loader2, Sparkles, ListChecks } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, QualityReport } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Select, Spinner, jsonText } from '../components/ui';
+import { ToastContext } from '../App';
 import { HBar, LineChart, ProgressRing } from '../components/charts';
 
 const DIMS = [
@@ -69,6 +70,9 @@ export function QualityPage({ project }: { project: Project }) {
   const [report, setReport] = useState<(QualityReport & { scoresObj: Record<string, number> }) | null>(null);
   const [history, setHistory] = useState<QualityReport[]>([]);
   const [selectedHist, setSelectedHist] = useState<(QualityReport & { scoresObj: Record<string, number> }) | null>(null);
+  /** 差距#7：把改进建议拆为可勾选待办（写入 review_comment）的导出态 */
+  const [exporting, setExporting] = useState(false);
+  const toast = useContext(ToastContext);
 
   useEffect(() => {
     api.documents.list(project.id).then((d) => {
@@ -103,6 +107,22 @@ export function QualityPage({ project }: { project: Project }) {
       setError(e.message);
     } finally {
       setScoring(false);
+    }
+  };
+
+  /** 差距#7：把最新 quality_report.feedback 按句拆成 review_comment 待办（幂等），供写作页/投稿页复用 */
+  const doExportComments = async () => {
+    if (!docId || exporting) return;
+    setExporting(true);
+    setError('');
+    try {
+      const res = await api.quality.exportComments(docId);
+      if (res.created > 0) toast('success', `已拆出 ${res.created} 条改进待办（写入审稿意见表，写作/投稿页可见）`);
+      else toast('info', `无新增：已有 ${res.existing} 条待办，未重复创建`);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -159,7 +179,18 @@ export function QualityPage({ project }: { project: Project }) {
             </div>
           </Card>
           <Card className="p-4">
-            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">改进建议</div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">改进建议</div>
+              <Button
+                variant="outline"
+                className="text-xs"
+                disabled={exporting || !current.feedback}
+                onClick={doExportComments}
+                title="把上方改进建议按句拆成可勾选待办，写入审稿意见表（写作页/投稿页复用）"
+              >
+                {exporting ? <Loader2 size={13} className="animate-spin" /> : <ListChecks size={13} />} 拆为待办清单
+              </Button>
+            </div>
             <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
               {current.feedback || '暂无反馈'}
             </div>
