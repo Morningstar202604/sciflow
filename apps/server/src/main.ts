@@ -1,4 +1,9 @@
 import 'dotenv/config';
+import { join } from 'node:path';
+import { config as loadEnv } from 'dotenv';
+// 显式加载 apps/server/.env：dotenv/config 只读 cwd/.env，从仓库根目录启动（node apps/server/dist/main.js）会漏读，
+// 导致 AI_BASE_URL/AI_MODEL/AI_API_KEY 等配置丢失（settings/check 503、流水线创建 400 的根因）。
+loadEnv({ path: join(__dirname, '..', '.env') });
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 

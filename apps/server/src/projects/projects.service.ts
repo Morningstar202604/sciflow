@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments, experiments, submissions, submissionStatusEvents } from '../db/schema';
+import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments, experiments, submissions, submissionStatusEvents, citations, qualityReports, polishRecords, knowledgeDocs, knowledgeChunks, memoryLogs } from '../db/schema';
 
 @Injectable()
 export class ProjectsService {
@@ -56,12 +56,22 @@ export class ProjectsService {
     // 科研高级功能级联清理：审稿意见（按文档）、筛选队列（按项目）、抽取取值与字段（按项目）
     for (const docId of docIds) {
       db.delete(reviewComments).where(eq(reviewComments.documentId, docId)).run();
+      db.delete(citations).where(eq(citations.documentId, docId)).run();
+      db.delete(qualityReports).where(eq(qualityReports.documentId, docId)).run();
+      db.delete(polishRecords).where(eq(polishRecords.documentId, docId)).run();
     }
     db.delete(screeningQueue).where(eq(screeningQueue.projectId, id)).run();
     for (const fieldId of fieldIds) {
       db.delete(extractionValues).where(eq(extractionValues.fieldId, fieldId)).run();
     }
     db.delete(extractionFields).where(eq(extractionFields.projectId, id)).run();
+    // 知识库级联清理：分块先于文档
+    const kdIds = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, id)).all().map((k) => k.id);
+    for (const kdId of kdIds) {
+      db.delete(knowledgeChunks).where(eq(knowledgeChunks.docId, kdId)).run();
+    }
+    db.delete(knowledgeDocs).where(eq(knowledgeDocs.projectId, id)).run();
+    db.delete(memoryLogs).where(eq(memoryLogs.projectId, id)).run();
     // 投稿跟踪级联清理：状态流水先于投稿记录删除
     const subIds = db.select().from(submissions).where(eq(submissions.projectId, id)).all().map((s) => s.id);
     for (const sid of subIds) {

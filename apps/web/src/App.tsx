@@ -440,7 +440,7 @@ function AppInner() {
                 {view === 'experiments' && currentProject && <SuspensePage><ExperimentsPage project={currentProject} /></SuspensePage>}
                 {view === 'knowledge' && currentProject && <SuspensePage><KnowledgePage project={currentProject} /></SuspensePage>}
                 {view === 'memory' && currentProject && <SuspensePage><MemoryPage /></SuspensePage>}
-                {view === 'pipeline' && currentProject && <SuspensePage><PipelinePage project={currentProject} /></SuspensePage>}
+                {view === 'pipeline' && currentProject && <SuspensePage><PipelinePage project={currentProject} onOpenDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage>}
                 {view === 'quality' && currentProject && (
                   <Suspense fallback={<div className="p-8 text-sm text-slate-400">加载质量评分…</div>}>
                     <QualityPage project={currentProject} />

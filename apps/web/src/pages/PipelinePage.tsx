@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Bot, Brain, Check, ChevronRight, CircleDashed, Eye, Loader2, RotateCcw, Workflow, Zap } from 'lucide-react';
+import { Activity, Bot, Brain, Check, ChevronRight, CircleDashed, Eye, Loader2, Plus, RotateCcw, Workflow, Zap } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
@@ -30,11 +30,13 @@ const AGENT_MAP: Record<string, { role: string; tone: 'blue' | 'green' | 'teal' 
   complete: { role: 'Manager', tone: 'slate' },
 };
 
-/* =====================================================================
+/**
  * 大纲模板（差距 #17）：前端常量，零 AI 依赖
  * 流水线后端 create 只收 topic 文本，故选中模板后把章节结构
  * 以纯文本形式追加到 topic 末尾，Planner/写作 Agent 自然遵循。
- * ===================================================================== */
+ * P2 扩展：自定义模板按项目隔离（localStorage sciflow:templates:<projectId>），
+ * 内置预设只读；自定义模板可增/删/改，并可「一键套用」创建带章节骨架的草稿文档。
+ */
 interface OutlineTemplate {
   label: string;
   desc: string;
@@ -80,11 +82,73 @@ const OUTLINE_TEMPLATES: Record<string, OutlineTemplate> = {
   },
 };
 
-export function PipelinePage({ project }: { project: Project }) {
+/* ---------------- 模板管理：内置预设（只读）+ 自定义（按项目 localStorage） ---------------- */
+interface ManagedTemplate {
+  id: string;
+  label: string;
+  desc: string;
+  builtin: boolean;
+  sections: { title: string; hint: string }[];
+}
+/** 内置预设，不可删除/改名 */
+const PRESET_TEMPLATES: ManagedTemplate[] = Object.entries(OUTLINE_TEMPLATES).map(([id, t]) => ({
+  id,
+  label: t.label,
+  desc: t.desc,
+  builtin: true,
+  sections: t.sections,
+}));
+const tplStorageKey = (pid: string) => `sciflow:templates:${pid}`;
+function loadCustomTemplates(pid: string): ManagedTemplate[] {
+  try {
+    const raw = localStorage.getItem(tplStorageKey(pid));
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((t: any) => t && typeof t === 'object')
+      .map((t: any, i: number) => ({
+        id: typeof t.id === 'string' && t.id ? t.id : `c_${Date.now()}_${i}`,
+        label: String(t.label || '未命名模板'),
+        desc: String(t.desc || ''),
+        builtin: false,
+        sections: Array.isArray(t.sections)
+          ? t.sections
+              .filter((s: any) => s && s.title)
+              .map((s: any) => ({ title: String(s.title), hint: String(s.hint || '') }))
+          : [],
+      }));
+  } catch {
+    return [];
+  }
+}
+function persistCustomTemplates(pid: string, list: ManagedTemplate[]) {
+  try {
+    localStorage.setItem(
+      tplStorageKey(pid),
+      JSON.stringify(list.map(({ id, label, desc, sections }) => ({ id, label, desc, sections }))),
+    );
+  } catch {
+    /* 存储满/隐私模式静默失败 */
+  }
+}
+
+export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenDoc?: (docId: string) => void }) {
   const [tasks, setTasks] = useState<PipelineTask[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [topic, setTopic] = useState('');
-  const [templateKey, setTemplateKey] = useState<'' | keyof typeof OUTLINE_TEMPLATES>('');
+  const [templateId, setTemplateId] = useState<string>('');
+  /* —— 模板管理：自定义模板（按项目 localStorage 持久化）—— */
+  const [customs, setCustoms] = useState<ManagedTemplate[]>([]);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null); // null = 新增
+  const [draft, setDraft] = useState<{ label: string; desc: string; sections: { title: string; hint: string }[] }>({
+    label: '',
+    desc: '',
+    sections: [{ title: '', hint: '' }],
+  });
+  const [applying, setApplying] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -97,6 +161,15 @@ export function PipelinePage({ project }: { project: Project }) {
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const active = tasks.find((t) => t.id === activeId) ?? null;
+
+  /** 自定义模板按项目隔离加载（切换项目时读取该项目专属模板） */
+  useEffect(() => {
+    setCustoms(loadCustomTemplates(project.id));
+  }, [project.id]);
+
+  /** 全部模板 = 内置预设 + 当前项目自定义 */
+  const templates: ManagedTemplate[] = [...PRESET_TEMPLATES, ...customs];
+  const selected = templates.find((t) => t.id === templateId) || null;
 
   /** 研究计划（Planner 输出，存在 topic-verify 步骤的 output JSON 中） */
   const activePlan = (() => {
@@ -172,7 +245,7 @@ export function PipelinePage({ project }: { project: Project }) {
     setError('');
     try {
       // 差距#17：选中大纲模板后，把章节结构以文本形式追加到主题，供 Planner/写作 Agent 遵循
-      const tpl = templateKey ? OUTLINE_TEMPLATES[templateKey] : null;
+      const tpl = selected;
       const finalTopic = tpl
         ? `${topic.trim()}\n\n[写作大纲模板：${tpl.label}] 请按以下章节结构组织全文：\n${tpl.sections.map((s, i) => `${i + 1}. ${s.title}——${s.hint}`).join('\n')}`
         : topic.trim();
@@ -185,6 +258,74 @@ export function PipelinePage({ project }: { project: Project }) {
       setError(e.message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  /* —— 模板管理：新增/编辑/删除（仅自定义模板；内置预设只读）—— */
+  const openEditor = (id: string | null) => {
+    setEditingId(id);
+    if (id) {
+      const t = customs.find((x) => x.id === id);
+      setDraft(t ? { label: t.label, desc: t.desc, sections: t.sections.map((s) => ({ ...s })) } : { label: '', desc: '', sections: [{ title: '', hint: '' }] });
+    } else {
+      setDraft({ label: '', desc: '', sections: [{ title: '', hint: '' }] });
+    }
+    setEditorOpen(true);
+  };
+
+  const saveEditor = () => {
+    const label = draft.label.trim();
+    if (!label) {
+      toast('error', '请填写模板名称');
+      return;
+    }
+    const sections = draft.sections.filter((s) => s.title.trim());
+    if (!sections.length) {
+      toast('error', '请至少保留一个章节标题');
+      return;
+    }
+    const record = { label, desc: draft.desc.trim(), sections };
+    let next: ManagedTemplate[];
+    if (editingId && customs.some((x) => x.id === editingId)) {
+      next = customs.map((x) => (x.id === editingId ? { ...x, ...record } : x));
+    } else {
+      next = [...customs, { id: `c_${Date.now()}`, builtin: false, ...record }];
+    }
+    setCustoms(next);
+    persistCustomTemplates(project.id, next);
+    setEditorOpen(false);
+    toast('success', editingId ? '模板已更新' : `已新增自定义模板「${label}」`);
+  };
+
+  const removeTemplate = (id: string) => {
+    const t = customs.find((x) => x.id === id);
+    if (!t) return;
+    const next = customs.filter((x) => x.id !== id);
+    setCustoms(next);
+    persistCustomTemplates(project.id, next);
+    if (templateId === id) setTemplateId('');
+    toast('info', `已删除模板「${t.label}」`);
+  };
+
+  /** 一键套用：用模板章节标题创建带正文骨架的新草稿文档，并跳转写作页 */
+  const applyTemplateToDoc = async (tpl: ManagedTemplate) => {
+    if (!project?.id) {
+      toast('error', '请先选择项目');
+      return;
+    }
+    setApplying(true);
+    setError('');
+    try {
+      const doc = await api.documents.create(project.id, `${tpl.label}草稿`);
+      const skeleton = tpl.sections.map((s) => `## ${s.title}\n\n> ${s.hint}\n\n（在此撰写「${s.title}」章节正文…）\n`).join('\n');
+      await api.documents.update(doc.id, { content: skeleton });
+      toast('success', `已按「${tpl.label}」创建草稿，跳转写作页`);
+      onOpenDoc?.(doc.id);
+    } catch (e: any) {
+      setError(e?.message || '创建草稿失败');
+      toast('error', '创建草稿失败：' + (e?.message || '未知错误'));
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -239,33 +380,53 @@ export function PipelinePage({ project }: { project: Project }) {
           输入研究主题 → 多智能体自动完成 文献调研 → 大纲确认 → 分章起草 → 7 维质量门（&lt;80 自动回炉打磨）→ 润色定稿 → 引用格式化
         </div>
 
-        {/* 差距#17：大纲模板选择（前端常量，零 AI） */}
+        {/* 差距#17：大纲模板选择（前端常量，零 AI）；P2：自定义模板管理 + 一键套用草稿 */}
         <div className="mb-3">
-          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">大纲模板（可选）</div>
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">大纲模板（可选）</div>
+            <button
+              onClick={() => setManageOpen(true)}
+              className="text-[11px] text-teal-600 dark:text-teal-400 hover:underline"
+            >
+              管理模板{customs.length ? `（${customs.length} 自定义）` : ''}
+            </button>
+          </div>
           <div className="flex flex-wrap gap-2">
-            {Object.entries(OUTLINE_TEMPLATES).map(([key, tpl]) => (
+            {templates.map((tpl) => (
               <button
-                key={key}
-                onClick={() => setTemplateKey((cur) => (cur === key ? '' : (key as typeof cur)))}
+                key={tpl.id}
+                onClick={() => setTemplateId((cur) => (cur === tpl.id ? '' : tpl.id))}
                 title={tpl.desc}
                 className={`rounded-lg border px-2.5 py-1.5 text-xs transition-all ${
-                  templateKey === key
+                  templateId === tpl.id
                     ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/25 text-teal-700 dark:text-teal-200 border-l-[3px] border-l-teal-500'
                     : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-teal-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'
                 }`}
               >
                 {tpl.label}
+                {!tpl.builtin && <span className="ml-1 text-[9px] opacity-60">自</span>}
               </button>
             ))}
           </div>
-          {templateKey && (
+          {selected && (
             <div className="mt-2 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 px-2.5 py-2">
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                已选择模板：<span className="font-medium text-teal-600 dark:text-teal-400">{OUTLINE_TEMPLATES[templateKey].label}</span>
-                <span className="text-slate-400 dark:text-slate-500">（{OUTLINE_TEMPLATES[templateKey].desc}）</span>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  已选择模板：<span className="font-medium text-teal-600 dark:text-teal-400">{selected.label}</span>
+                  <span className="text-slate-400 dark:text-slate-500">（{selected.desc || selected.sections.length + ' 个章节'}）</span>
+                </div>
+                <Button
+                  variant="success"
+                  className="text-[11px] px-2 py-1 h-7"
+                  loading={applying}
+                  onClick={() => applyTemplateToDoc(selected)}
+                  title="把模板章节标题作为正文骨架，创建一篇新草稿文档并跳转写作页"
+                >
+                  <Zap size={11} /> 一键套用为草稿
+                </Button>
               </div>
               <div className="mt-1 flex flex-wrap gap-1">
-                {OUTLINE_TEMPLATES[templateKey].sections.map((s, i) => (
+                {selected.sections.map((s, i) => (
                   <span key={i} className="inline-flex items-center rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-600 dark:text-slate-300" title={s.hint}>
                     {i + 1}. {s.title}
                   </span>
@@ -604,6 +765,120 @@ export function PipelinePage({ project }: { project: Project }) {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* 模板管理弹窗：内置预设只读，自定义模板可编辑/删除/新增（按项目隔离存储） */}
+      <Modal open={manageOpen} title="大纲模板管理" onClose={() => setManageOpen(false)} width="max-w-lg">
+        <div className="space-y-2 max-h-80 overflow-y-auto">
+          {templates.map((t) => (
+            <div key={t.id} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                  {t.label}
+                  {t.builtin ? <Badge tone="slate">内置</Badge> : <Badge tone="teal">自定义</Badge>}
+                </div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                  {t.sections.length} 章 · {t.desc || '自定义结构'}
+                </div>
+              </div>
+              {t.builtin ? (
+                <span className="text-[11px] text-slate-300 dark:text-slate-600 shrink-0">内置预设只读</span>
+              ) : (
+                <div className="flex gap-1 shrink-0">
+                  <Button variant="outline" className="text-[11px] px-2 py-1 h-7" onClick={() => openEditor(t.id)}>
+                    编辑
+                  </Button>
+                  <Button variant="danger" className="text-[11px] px-2 py-1 h-7" onClick={() => removeTemplate(t.id)}>
+                    删除
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-between items-center">
+          <span className="text-[11px] text-slate-400 dark:text-slate-500">自定义模板按项目保存，仅本项目可见</span>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setManageOpen(false)}>
+              关闭
+            </Button>
+            <Button
+              onClick={() => {
+                setManageOpen(false);
+                openEditor(null);
+              }}
+            >
+              <Plus size={13} /> 新增自定义模板
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 模板编辑器弹窗：名称 + 简介 + 章节列表（标题/说明）增删 */}
+      <Modal open={editorOpen} title={editingId ? '编辑自定义模板' : '新增自定义模板'} onClose={() => setEditorOpen(false)} width="max-w-lg">
+        <div className="space-y-2">
+          <div>
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">模板名称</div>
+            <Input
+              placeholder="如：案例分析 / 综述（领域定制）"
+              value={draft.label}
+              onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+            />
+          </div>
+          <div>
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">一句话说明（可选）</div>
+            <Input placeholder="这个模板适合什么场景" value={draft.desc} onChange={(e) => setDraft({ ...draft, desc: e.target.value })} />
+          </div>
+          <div>
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 mb-1">章节列表（标题 + 写作要点）</div>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {draft.sections.map((s, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <input
+                    className="w-2/5 rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 text-sm bg-transparent"
+                    placeholder="章节标题"
+                    value={s.title}
+                    onChange={(e) => {
+                      const sections = [...draft.sections];
+                      sections[i] = { ...s, title: e.target.value };
+                      setDraft({ ...draft, sections });
+                    }}
+                  />
+                  <input
+                    className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 text-sm bg-transparent"
+                    placeholder="该章写作要点"
+                    value={s.hint}
+                    onChange={(e) => {
+                      const sections = [...draft.sections];
+                      sections[i] = { ...s, hint: e.target.value };
+                      setDraft({ ...draft, sections });
+                    }}
+                  />
+                  <Button
+                    variant="danger"
+                    className="px-2 py-1 text-xs shrink-0"
+                    onClick={() => setDraft({ ...draft, sections: draft.sections.filter((_, j) => j !== i) })}
+                  >
+                    删除
+                  </Button>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                className="text-xs w-full"
+                onClick={() => setDraft({ ...draft, sections: [...draft.sections, { title: '', hint: '' }] })}
+              >
+                + 添加章节
+              </Button>
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setEditorOpen(false)}>
+            取消
+          </Button>
+          <Button onClick={saveEditor}>保存模板</Button>
+        </div>
       </Modal>
     </div>
   );

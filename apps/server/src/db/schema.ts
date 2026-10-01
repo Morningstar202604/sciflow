@@ -82,6 +82,11 @@ export const pipelineTasks = sqliteTable('pipeline_task', {
   retryCount: integer('retry_count').default(0),
   trace: text('trace').default('[]'), // JSON: ReAct 轨迹 [{round,thought,action,observation}]
   lastError: text('last_error').default(''),
+  // 流水线 Research 阶段跨库检索增强：
+  // researchNotice —— 跨库（文献库+知识库）命中 0 时的结构化引导文案，命中>0 时为 null（前端可读）
+  researchNotice: text('research_notice'),
+  // researchMeta —— 命中>0 时持久化的跨库命中摘要 JSON：{ lib:[{title,score}], kn:PaperHit[] }，供产物参考文献块回标来源/匹配度
+  researchMeta: text('research_meta').default(''),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });

@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS pipeline_task (
   retry_count INTEGER DEFAULT 0,
   trace TEXT DEFAULT '[]',
   last_error TEXT DEFAULT '',
+  research_notice TEXT,
+  research_meta TEXT DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -357,6 +359,9 @@ function ensureColumn(table: string, column: string, ddl: string) {
   }
 }
 ensureColumn('pipeline_task', 'trace', "TEXT DEFAULT '[]'");
+// Research 阶段跨库检索增强：命中 0 引导文案（null）+ 命中>0 命中摘要 JSON（''）
+ensureColumn('pipeline_task', 'research_notice', "TEXT");
+ensureColumn('pipeline_task', 'research_meta', "TEXT DEFAULT ''");
 // 知识库 Contextual Retrieval 升级：旧库补齐 context/vector 列（RAG 混合检索依赖）
 ensureColumn('knowledge_chunk', 'context', "TEXT DEFAULT ''");
 ensureColumn('knowledge_chunk', 'vector', "TEXT DEFAULT '[]'");

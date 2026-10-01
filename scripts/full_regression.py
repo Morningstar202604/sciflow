@@ -879,6 +879,68 @@ if st in (200, 201) and up.get("id"):
     except Exception as e:
         print(f"  ⏭ R6B·chunkText 截断 — SSE 读取失败（{e}），跳过")
 
+# ---------- 25. Research 阶段跨库检索增强（纯本地 references LIKE + knowledge BM25，零外部 API） ----------
+# mock 模式下 research 阶段返回确定性 hits：命中>0（干净项目种 2 条带元数据文献）与
+# 命中 0（干净空项目）两条路径都可断言。无 mock 时整段跳过（流水线端到端需 mock 网关）。
+if MOCK:
+    print("  —— 25. Research 跨库检索增强（命中>0 来源标记 / 命中0 引导） ——")
+
+    def _wait_pipe(run_id, targets, timeout=120):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            stg, cur = req("GET", f"/api/pipeline/{run_id}", timeout=10)
+            if stg == 200 and cur.get("status") in targets:
+                return cur
+            time.sleep(0.5)
+        return None
+
+    # 25.1 命中>0：干净项目种 2 条带元数据文献（摘要均含 graph neural network，保证项目级 LIKE 命中）
+    st, pj = req("POST", "/api/projects", {"name": "跨库命中项目", "description": "cross-search hit path"})
+    hit_pid = pj.get("id") if st == 201 else None
+    if hit_pid:
+        for t, ab in [("Conformal Prediction for Molecular Property Prediction",
+                       "graph neural network conformal prediction uncertainty molecular property"),
+                      ("Equivariant GNN for Drug Binding",
+                       "graph neural network equivariant drug binding affinity")]:
+            req("POST", "/api/references", {"projectId": hit_pid, "hit": {
+                "title": t, "authors": ["A Li", "B Wang"], "year": 2023, "venue": "J. Chem.",
+                "abstract": ab}})
+        st, pl = req("POST", "/api/pipeline", {"projectId": hit_pid, "topic": "分子性质预测的不确定性估计方法综述"})
+        run2 = pl.get("id") if st == 201 else None
+        if run2 and _wait_pipe(run2, {"awaiting_confirmation"}):
+            req("POST", f"/api/pipeline/{run2}/confirm-outline", {})
+            fin2 = _wait_pipe(run2, {"completed", "failed"})
+            check("25.1 跨库命中>0 流水线完成", fin2 is not None and fin2.get("status") == "completed",
+                  f"status={(fin2 or {}).get('status')} err={(fin2 or {}).get('lastError')}")
+            if fin2 and fin2.get("status") == "completed":
+                check("25.1 命中>0 时 researchNotice 为空", not fin2.get("researchNotice"),
+                      f"notice={fin2.get('researchNotice')!r}")
+                sd, dd = req("GET", f"/api/documents/{fin2.get('documentId')}")
+                c2 = dd.get("content", "") if sd == 200 else ""
+                check("25.1 产物参考文献块含「（文献库 · 匹配」来源/匹配度标记",
+                      "（文献库 · 匹配" in c2, f"len={len(c2)}")
+                check("25.1 产物仍含「## 参考文献」块（既有契约不破）", "## 参考文献" in c2, "")
+
+    # 25.2 命中0：干净空项目（无文献/无知识库）跑流水线 → researchNotice 非空 + 产物含引导段
+    st, pj0 = req("POST", "/api/projects", {"name": "跨库零命中项目", "description": "cross-search zero-hit path"})
+    zero_pid = pj0.get("id") if st == 201 else None
+    if zero_pid:
+        st, pl0 = req("POST", "/api/pipeline", {"projectId": zero_pid, "topic": "古瓷器修复工艺中的材料科学研究"})
+        run0 = pl0.get("id") if st == 201 else None
+        if run0 and _wait_pipe(run0, {"awaiting_confirmation"}):
+            req("POST", f"/api/pipeline/{run0}/confirm-outline", {})
+            fin0 = _wait_pipe(run0, {"completed", "failed"})
+            check("25.2 命中0 流水线完成", fin0 is not None and fin0.get("status") == "completed",
+                  f"status={(fin0 or {}).get('status')} err={(fin0 or {}).get('lastError')}")
+            if fin0 and fin0.get("status") == "completed":
+                check("25.2 命中0 时 researchNotice 非空且含引导文案（API 字段）",
+                      bool(fin0.get("researchNotice")) and "未在本地文献库" in fin0.get("researchNotice", ""),
+                      f"notice={fin0.get('researchNotice')!r}")
+                sd0, dd0 = req("GET", f"/api/documents/{fin0.get('documentId')}")
+                c0 = dd0.get("content", "") if sd0 == 200 else ""
+                check("25.2 产物文档正文含零命中结构化引导段",
+                      "研究阶段未在本地文献库" in c0, f"len={len(c0)} tail={c0[-160:]!r}")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL}")
 if FAILED:

@@ -6,7 +6,8 @@ import { pipelineTasks, documents, references, polishRecords, qualityReports, re
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
 import { QualityService } from '../research/quality.service';
-import { AgentOrchestratorService } from '../orchestrator/orchestrator.service';
+import { AgentOrchestratorService, ResearchPlan } from '../orchestrator/orchestrator.service';
+import { KnowledgeService } from '../knowledge/knowledge.service';
 
 export interface PipelineStepState {
   key: string;
@@ -30,6 +31,18 @@ const STEPS: { key: string; label: string }[] = [
 const MAX_RETRY = 2;
 const QUALITY_THRESHOLD = 80;
 
+/** 跨库检索命中摘要（持久化到 pipeline_task.research_meta，供产物参考文献块回标来源/匹配度） */
+interface ResearchMeta {
+  /** 文献库命中：title → 匹配度 */
+  lib: { title: string; score: number }[];
+  /** 知识库命中（资料片段，不进 references 表） */
+  kn: PaperHit[];
+}
+
+/** 跨库（文献库+知识库）命中 0 时写入产物文档与 pipeline_task.researchNotice 的结构化引导 */
+const ZERO_HIT_NOTICE =
+  '研究阶段未在本地文献库/知识库检索到相关条目，已依赖模型知识完成起草；建议到「文献调研」页添加相关文献（粘贴 DOI/导入 BibTeX）、检查关键词拼写，或在知识库上传资料后重新运行。';
+
 @Injectable()
 export class PipelineService {
   private readonly logger = new Logger(PipelineService.name);
@@ -40,6 +53,7 @@ export class PipelineService {
     private readonly references: ReferencesService,
     private readonly quality: QualityService,
     private readonly orchestrator: AgentOrchestratorService,
+    private readonly knowledge: KnowledgeService,
   ) {}
 
   /** 步骤启停：用户可在设置页自定义（pipeline_config 表），默认全部启用 */
@@ -210,15 +224,30 @@ export class PipelineService {
     await this.advance(taskId, 'literature', 'running');
     const { hits, trace } = await this.orchestrator.researchAgents(taskId, task.topic, plan);
     db.update(pipelineTasks).set({ trace: JSON.stringify(trace), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
-    if (hits.length > 0) {
+
+    // 跨库检索增强：文献库（ReAct 已按项目级 LIKE 命中）+ 知识库（复用本地 BM25），汇总排序、回标来源/匹配度。
+    // 命中 0 时写 researchNotice（API 可读）+ 产物文档引导段；命中>0 时持久化命中摘要供参考文献块回标。
+    const enriched = await this.crossEnrichResearch(task.projectId, task.topic, plan, hits);
+    db.update(pipelineTasks)
+      .set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), updatedAt: Date.now() })
+      .where(eq(pipelineTasks.id, taskId))
+      .run();
+
+    if (enriched.libraryHits.length > 0) {
       // 差距 #6：ResearchAgent hits 自动入库（source='pipeline-research'，标题指纹命中同项目则跳过，多轮重跑幂等）
-      this.references.importPipelineHits(task.projectId, hits);
+      this.references.importPipelineHits(task.projectId, enriched.libraryHits);
     }
     const refs = this.references.list(task.projectId);
     const summary = refs.length
       ? await this.ai.summarizeLiterature(task.topic, refs.slice(0, 10).map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}）`).join('\n'))
       : '（未检索到文献，将按通用学术结构起草）';
-    await this.advance(taskId, 'literature', 'done', `检索到 ${hits.length} 篇文献\n${summary.slice(0, 500)}`);
+    const totalFound = enriched.libraryHits.length + enriched.knowledgeHits.length;
+    await this.advance(
+      taskId,
+      'literature',
+      'done',
+      `跨库检索到 ${totalFound} 条（文献库 ${enriched.libraryHits.length} / 知识库 ${enriched.knowledgeHits.length}）\n${summary.slice(0, 500)}`,
+    );
 
     await this.continueFromOutline(taskId, verifiedTopic, summary);
     return;
@@ -311,6 +340,11 @@ export class PipelineService {
     const doc = db.select().from(documents).where(eq(documents.id, documentId)).get()!;
     const outline = JSON.parse(doc.outline || '[]') as { title: string; sections: { title: string; subsections: string[] }[] };
 
+    // Research 阶段跨库命中摘要（持久化）：产物参考文献块回标来源/匹配度；命中 0 时据 notice 写引导段
+    const researchMeta = this.parseResearchMeta(task.researchMeta);
+    const researchNotice = task.researchNotice?.trim() || null;
+    const libScore = new Map(researchMeta.lib.map((l) => [l.title, l.score]));
+
     let retry = 0;
     const maxRetry = MAX_RETRY;
     let report: { totalScore: number; feedback: string } | undefined;
@@ -353,7 +387,8 @@ export class PipelineService {
         }
       });
       // 引用渲染：占位符 [Ref:N] → 顺序编码制 [N] + 文末参考文献列表（含补充文献），并幂等回填 citations 表
-      const rendered = this.renderCitations(task.projectId, documentId, writerRes.content, refPool, agenticHits, suppRefIds);
+      // 命中>0：文献库条目回标「（文献库 · 匹配 x.xx）」，知识库命中单列「知识库参考」小节
+      const rendered = this.renderCitations(task.projectId, documentId, writerRes.content, refPool, agenticHits, suppRefIds, libScore, researchMeta.kn);
       // 自动配图：生成 2-3 个 mermaid 学术图表（仅首次起草，回炉复用省额度）
       let finalContent = rendered + prevFigures;
       if (retry === 0 && this.stepEnabled('figures')) {
@@ -477,6 +512,18 @@ export class PipelineService {
     // ⑧ 完成 + Phase 2a：先沉淀情景记忆，再置 completed（保证完成即记忆可查）
     await this.advance(taskId, 'complete', 'done');
     db.update(documents).set({ status: 'final', updatedAt: Date.now() }).where(eq(documents.id, documentId)).run();
+
+    // 命中 0 结构化引导：仅在跨库命中 0 时，把引导段写入产物文档正文（幂等，避免回炉重复追加）
+    if (researchNotice) {
+      const cur = db.select().from(documents).where(eq(documents.id, documentId)).get();
+      const body = cur?.content ?? '';
+      if (!body.includes('研究阶段未在本地文献库')) {
+        db.update(documents)
+          .set({ content: body + `\n\n---\n\n## 研究说明\n\n> ${researchNotice}\n`, updatedAt: Date.now() })
+          .where(eq(documents.id, documentId))
+          .run();
+      }
+    }
     try {
       const finalMem = db.select().from(documents).where(eq(documents.id, documentId)).get();
       const mem = await this.ai.extractEpisodic(
@@ -501,6 +548,120 @@ export class PipelineService {
       this.logger.warn(`情景记忆沉淀失败: ${e.message}`);
     }
     this.setStatus(taskId, 'completed', 'complete');
+  }
+
+  // ---------- Research 阶段跨库检索增强（文献库 LIKE + 知识库本地 BM25，零外部 API） ----------
+
+  /** 轻量分词：英文按词、中文按 bigram（与 knowledge 检索同口径，零依赖） */
+  private static tokenize(text: string): string[] {
+    const t = (text || '').toLowerCase();
+    const toks: string[] = [];
+    for (const m of t.matchAll(/[a-z][a-z0-9_-]{1,}/g)) toks.push(m[0]);
+    const cn = t.replace(/[^一-龥]/g, '');
+    for (let i = 0; i < cn.length - 1; i++) toks.push(cn.slice(i, i + 2));
+    return toks;
+  }
+
+  /** 文献库命中匹配度（0~1）：查询词在标题/摘要的命中比例，标题命中额外加权 */
+  private static scoreLibraryHit(query: string, hit: PaperHit): number {
+    const qt = new Set(PipelineService.tokenize(query));
+    if (qt.size === 0) return 0.5;
+    const titleT = PipelineService.tokenize(hit.title);
+    const abT = PipelineService.tokenize(hit.abstract || '');
+    let hitCount = 0;
+    let titleHits = 0;
+    for (const t of qt) {
+      if (titleT.includes(t)) {
+        hitCount++;
+        titleHits++;
+      } else if (abT.includes(t)) {
+        hitCount++;
+      }
+    }
+    const ratio = hitCount / qt.size;
+    const titleBonus = Math.min(1, titleHits / qt.size);
+    return Math.min(1, Math.round((ratio * 0.7 + titleBonus * 0.3) * 100) / 100);
+  }
+
+  /** BM25/余弦混合分压缩到 0~1（知识库 search 返回分无界，展示用） */
+  private static normalizeKnScore(score: number): number {
+    return Math.min(1, Math.round(Math.max(0, score) / 8 * 100) / 100);
+  }
+
+  /**
+   * 跨库检索汇总：
+   * - libraryHits：ReAct 已按项目级 LIKE 命中的文献库条目，补匹配度分数（来源=文献库）；
+   * - knowledgeHits：复用 KnowledgeService 本地 BM25，按主题/关键词检索项目知识库，映射为资料片段（来源=知识库）；
+   * - 命中总数为 0 时 notice 给出结构化引导，否则 notice=null；
+   * - meta 持久化命中摘要，供产物参考文献块回标「（文献库 · 匹配 x）/（知识库 · 匹配 x）」。
+   */
+  private async crossEnrichResearch(
+    projectId: string,
+    topic: string,
+    plan: ResearchPlan,
+    libraryHits: PaperHit[],
+  ): Promise<{ libraryHits: PaperHit[]; knowledgeHits: PaperHit[]; notice: string | null; meta: ResearchMeta }> {
+    const queryBag = [topic, ...(plan.searchStrategy?.keywords || [])].filter(Boolean).join(' ');
+    const lib: PaperHit[] = libraryHits.map((h) => ({
+      ...h,
+      origin: 'library' as const,
+      matchScore: PipelineService.scoreLibraryHit(queryBag, h),
+    }));
+
+    const knQueries = [topic, ...(plan.searchStrategy?.keywords || [])].filter(Boolean).slice(0, 4);
+    const knSeen = new Set<string>();
+    const knAll: PaperHit[] = [];
+    for (const q of knQueries) {
+      try {
+        const chunks = await this.knowledge.search(projectId, q, 3);
+        for (const c of chunks) {
+          const key = `${c.docId || c.id}:${c.id}`;
+          if (knSeen.has(key)) continue;
+          knSeen.add(key);
+          knAll.push({
+            title: c.docName || '未命名资料',
+            authors: [],
+            year: null,
+            venue: '知识库',
+            doi: '',
+            url: '',
+            abstract: (c.content || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+            source: 'manual',
+            citationCount: 0,
+            origin: 'knowledge' as const,
+            matchScore: PipelineService.normalizeKnScore(c.score),
+          });
+        }
+      } catch (e: any) {
+        this.logger.warn(`知识库跨库检索失败 [${q}]: ${e?.message || e}`);
+      }
+    }
+    // 同文档去重保留最高分，按匹配度降序，最多 5 条
+    const knByDoc = new Map<string, PaperHit>();
+    for (const h of knAll) {
+      const ex = knByDoc.get(h.title);
+      if (!ex || (h.matchScore || 0) > (ex.matchScore || 0)) knByDoc.set(h.title, h);
+    }
+    const kn = [...knByDoc.values()].sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0)).slice(0, 5);
+
+    const total = lib.length + kn.length;
+    const notice = total === 0 ? ZERO_HIT_NOTICE : null;
+    const meta: ResearchMeta = {
+      lib: lib.map((h) => ({ title: h.title, score: h.matchScore ?? 0 })),
+      kn,
+    };
+    return { libraryHits: lib, knowledgeHits: kn, notice, meta };
+  }
+
+  /** 解析持久化的 researchMeta（容错：损坏/空串返回空） */
+  private parseResearchMeta(raw: string | null | undefined): ResearchMeta {
+    if (!raw) return { lib: [], kn: [] };
+    try {
+      const o = JSON.parse(raw) as ResearchMeta;
+      return { lib: Array.isArray(o.lib) ? o.lib : [], kn: Array.isArray(o.kn) ? o.kn : [] };
+    } catch {
+      return { lib: [], kn: [] };
+    }
   }
 
   /** 供起草引用的文献池：只取元数据完整（有作者或年份）的文献，避免模型引用 [Unknown n.d.] */
@@ -552,6 +713,8 @@ export class PipelineService {
     refPool: ReturnType<PipelineService['refsForDraft']>,
     supplementHits: PaperHit[] = [],
     suppRefIds: (string | null)[] = [],
+    libScore: Map<string, number> = new Map(),
+    knowledgeHits: PaperHit[] = [],
   ): string {
     if (!content) return content;
     const refs = refPool;
@@ -596,15 +759,27 @@ export class PipelineService {
           return '佚名';
         }
       })();
-      list.push(`[${list.length + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi.replace(/^https?:\/\//, '')}` : ''}`);
+      // Research 阶段跨库命中回标：仅在标题命中持久化匹配表时追加后缀，不改变既有 a/b 顺序编码契约
+      const score = libScore.get(r.title);
+      const tag = typeof score === 'number' ? `（文献库 · 匹配 ${score.toFixed(2)}）` : '';
+      list.push(`[${list.length + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi.replace(/^https?:\/\//, '')}` : ''}${tag}`);
     }
     for (const idx of suppOrder) {
       const h = supplementHits[idx];
       const authors = (h.authors || []).join(', ') || '佚名';
       list.push(`[${list.length + 1}] ${authors}. ${h.title}[J].${h.venue ? ` ${h.venue},` : ''} ${h.year ? `${h.year}.` : 'n.d.'}${h.doi ? ` https://doi.org/${h.doi.replace(/^https?:\/\//, '')}` : ''}`);
     }
-    if (list.length) {
-      out += `\n\n## 参考文献\n\n${list.join('\n')}`;
+    // 参考文献块：顺序编码列表 + 知识库参考小节（资料片段不参与顺序编码，单列以便用户看到「从哪来」）
+    const blocks: string[] = [];
+    if (list.length) blocks.push(list.join('\n'));
+    if (knowledgeHits.length) {
+      const knLines = knowledgeHits
+        .map((k) => `- 《${k.title}》（知识库 · 匹配 ${(k.matchScore ?? 0).toFixed(2)}）：${(k.abstract || '').slice(0, 100).trim()}`)
+        .join('\n');
+      blocks.push(`### 知识库参考（研究阶段本地检索）\n\n${knLines}`);
+    }
+    if (blocks.length) {
+      out += `\n\n## 参考文献\n\n${blocks.join('\n\n')}`;
     }
     // 把正文实际引用到的文献幂等写入 citations 表（同一 document+reference 只留一条），
     // 让写作页引用管理 / 核验率 / 共引网络图 / 结构化导出一次性点亮，无需手工重新 addCitation。

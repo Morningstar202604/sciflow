@@ -100,6 +100,16 @@ export class AgentOrchestratorService {
     }
   }
 
+  /** taskId → projectId（研究阶段文献/知识库检索均限定本项目，避免跨项目串数据） */
+  private projectIdOf(taskId: string): string | null {
+    try {
+      const task = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, taskId)).get();
+      return task?.projectId || null;
+    } catch {
+      return null;
+    }
+  }
+
   async plannerAgent(taskId: string, topic: string): Promise<{ verifiedTopic: string; plan: ResearchPlan }> {
     const preface = this.projectPreface(taskId);
     const res = await this.runAgent(taskId, 'planner', 'planner#research-plan', `主题：${topic}`, async () => {
@@ -142,6 +152,7 @@ export class AgentOrchestratorService {
     topic: string,
     plan: ResearchPlan,
   ): Promise<{ hits: PaperHit[]; trace: ReActTrace[] }> {
+    const projectId = this.projectIdOf(taskId);
     const seeds = [...new Set([...plan.searchStrategy.keywords, ...plan.researchQuestions].filter(Boolean))].slice(0, 6);
     // 分成 3 组（对应 3 路并行 ResearchAgent，各组聚焦不同子问题）
     const groups: string[][] = [[], [], []];
@@ -151,7 +162,7 @@ export class AgentOrchestratorService {
     const results = await Promise.allSettled(
       groups.map((qs, idx) =>
         this.runAgent(taskId, 'research', `research#${idx + 1}`, `子问题组：${qs.join(' / ')}`, async () => {
-          const { hits, trace } = await this.reactLoop(taskId, topic, plan, qs);
+          const { hits, trace } = await this.reactLoop(taskId, projectId, topic, plan, qs);
           return {
             output: `检索 ${trace.length} 轮，命中 ${hits.length} 篇`,
             detail: { queries: trace.filter((t) => t.action === 'search').map((t) => t.query), trace, hits: hits.slice(0, 30).map((h) => ({ title: h.title, authors: h.authors, year: h.year, venue: h.venue, doi: h.doi, url: h.url, abstract: (h.abstract || '').slice(0, 400), source: h.source, citationCount: h.citationCount })) },
@@ -182,9 +193,10 @@ export class AgentOrchestratorService {
     return { hits, trace };
   }
 
-  /** 单路 ReAct 循环（think → act → observe） */
+  /** 单路 ReAct 循环（think → act → observe）；文献检索限定 projectId（本项目文献库） */
   private async reactLoop(
     taskId: string,
+    projectId: string | null,
     topic: string,
     plan: ResearchPlan,
     seeds: string[],
@@ -194,11 +206,11 @@ export class AgentOrchestratorService {
     const hits: PaperHit[] = [];
     for (const q of seeds) {
       try {
-        const res = await this.references.search(q, 5);
+        const res = await this.references.search(q, 5, projectId ?? undefined);
         for (const h of res) {
           if (!seen.has(h.title)) {
             seen.add(h.title);
-            hits.push(h);
+            hits.push({ ...h, origin: 'library' as const });
           }
         }
         trace.push({ round: trace.length + 1, thought: '按研究计划覆盖信息缺口', action: 'search', query: q, found: res.length });
@@ -215,11 +227,11 @@ export class AgentOrchestratorService {
         break;
       }
       try {
-        const res = await this.references.search(decision.query, 6);
+        const res = await this.references.search(decision.query, 6, projectId ?? undefined);
         const added = res.filter((h) => !seen.has(h.title));
         for (const h of added) {
           seen.add(h.title);
-          hits.push(h);
+          hits.push({ ...h, origin: 'library' as const });
         }
         trace.push({ round: trace.length + 1, thought: decision.thought, action: 'search', query: decision.query, found: added.length });
       } catch (e: any) {
@@ -350,6 +362,7 @@ export class AgentOrchestratorService {
    * 不再一次性检索，而是「检索 → 评估缺口 → 补检 → 收尾」的迭代循环（对标 Deep Research 的迭代式研究）
    */
   private async agenticSearch(taskId: string, question: string, topic: string): Promise<{ hits: PaperHit[]; rounds: number }> {
+    const projectId = this.projectIdOf(taskId);
     const seen = new Set<string>();
     const hits: PaperHit[] = [];
     const budget = 2;
@@ -358,7 +371,7 @@ export class AgentOrchestratorService {
       rounds += 1;
       let res: PaperHit[] = [];
       try {
-        res = await this.references.search(question, 5);
+        res = (await this.references.search(question, 5, projectId ?? undefined)).map((h) => ({ ...h, origin: 'library' as const }));
       } catch {
         /* 源限流时跳过本路 */
       }
@@ -372,7 +385,7 @@ export class AgentOrchestratorService {
         try {
           const decision = await this.ai.reactThink(`${topic}（当前章节：${question}）`, [], [{ round: r + 1, query: question, found: hits.length }]);
           if (decision.action === 'done' || decision.coverage >= 85 || !decision.query) break;
-          const next = await this.references.search(decision.query, 4);
+          const next = (await this.references.search(decision.query, 4, projectId ?? undefined)).map((h) => ({ ...h, origin: 'library' as const }));
           for (const h of next) {
             if (h.title && !seen.has(h.title)) {
               seen.add(h.title);
