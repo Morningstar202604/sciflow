@@ -1,6 +1,8 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import pLimit from 'p-limit';
+import pRetry from 'p-retry';
 import { sqlite } from '../db/database';
 import { db } from '../db/database';
 import { llmCallLogs, customPrompts, appSettings } from '../db/schema';
@@ -38,6 +40,8 @@ interface CompleteOptions {
   signal?: AbortSignal;
   /** 思考模式开关：仅 true 时附加上下文厂商 thinking 参数；不支持的厂商静默忽略 */
   enableThinking?: boolean;
+  /** JSON Schema 结构化输出（OpenAI response_format: json_schema）—— 传入后模型保证输出合法 JSON，无需手工 strip 修复 */
+  jsonSchema?: { name: string; schema: Record<string, unknown> };
 }
 
 /**
@@ -179,28 +183,9 @@ export class AiService {
     }
   }
 
-  // ---------- 全局令牌桶（适配免费版 RPM 限流：稳定排队，避免 429 风暴） ----------
-  private static tokens = Number(process.env.AI_RPM_CAP || 5); // 桶容量（每分钟额度）
-  private static lastRefill = Date.now();
-
-  private async acquireToken() {
-    const refillMs = 60_000;
-    while (true) {
-      const now = Date.now();
-      const elapsed = now - AiService.lastRefill;
-      if (elapsed >= refillMs) {
-        const refills = Math.floor(elapsed / refillMs);
-        AiService.tokens = Math.min(Number(process.env.AI_RPM_CAP || 5), AiService.tokens + refills);
-        AiService.lastRefill = now;
-      }
-      if (AiService.tokens >= 1) {
-        AiService.tokens -= 1;
-        return;
-      }
-      // 等待下一次补充（下限 1s 防止负 delay 忙等空转，上限 30s 避免静默死锁）
-      await new Promise((r) => setTimeout(r, Math.max(1000, Math.min(refillMs - elapsed + 200, 30_000))));
-    }
-  }
+  // ---------- 并发限流（p-limit：轻量、并发安全，替代手搓令牌桶） ----------
+  // RPM 换算为并发上限：假设单请求 ~10s，RPM 60 → 最多 6 并发；取保守值避免 429
+  private readonly limit = pLimit(Math.max(1, Math.floor(Number(process.env.AI_RPM_CAP || 60) / 6)));
 
   /** 统一构造 OpenAI 兼容补全请求（complete / completeStream / testConnection 共用） */
   private buildChatRequest(
@@ -221,6 +206,10 @@ export class AiService {
     if (opts.stream && opts.streamIncludeUsage) body.stream_options = { include_usage: true };
     // 推理开关：仅显式开启时附加方舟/智谱系 thinking 参数；不支持的厂商静默忽略
     if (opts.enableThinking) body.thinking = { type: 'enabled' };
+    // JSON Schema 结构化输出：让模型保证合法 JSON（替代手工 strip 修复）
+    if (opts.jsonSchema) {
+      body.response_format = { type: 'json_schema', json_schema: { name: opts.jsonSchema.name, strict: true, schema: opts.jsonSchema.schema } };
+    }
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     return fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -233,62 +222,59 @@ export class AiService {
     });
   }
 
-  /** 非流式补全（全局令牌桶排队 + 429 退避重试 + token 成本追踪） */
+  /** 非流式补全（p-limit 限流 + p-retry 指数退避重试 + token 成本追踪） */
   async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
     this.assertConfigured();
     const t0 = Date.now();
     const model = this.resolveModel(opts);
     const caller = opts.context || 'general';
-    const maxAttempts = 3;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      await this.acquireToken();
-      try {
-        const res = await this.buildChatRequest(model, messages, { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false }, 180_000);
-        if (res.status === 429 && attempt < maxAttempts) {
-          const backoff = attempt * 10000;
-          console.warn(`[AiService] 429 限流，${backoff / 1000}s 后重试 (${attempt}/${maxAttempts - 1})`);
-          await new Promise((r) => setTimeout(r, backoff));
-          continue;
-        }
-        if (!res.ok) {
-          const errText = await res.text().catch(() => '');
-          throw new HttpException(`AI 服务调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
-        }
-        const data = (await res.json()) as any;
-        const content = data.choices?.[0]?.message?.content ?? '';
-        // 免费网关偶发返回 200 但内容为空 → 按失败重试
-        if (!String(content).trim() && attempt < maxAttempts) {
-          console.warn(`[AiService] 空响应重试 (${attempt}/${maxAttempts - 1})`);
-          await new Promise((r) => setTimeout(r, attempt * 3000));
-          continue;
-        }
-        const usage = (data.usage || {}) as any;
-        this.logLlmCall({
-          caller,
-          model,
-          promptTokens: Number(usage.prompt_tokens) || 0,
-          completionTokens: Number(usage.completion_tokens) || 0,
-          latencyMs: Date.now() - t0,
-          success: true,
-        });
-        return String(content);
-      } catch (e) {
-        if (e instanceof HttpException) {
-          if (attempt >= maxAttempts) {
-            this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: e.message });
+
+    return this.limit(async () =>
+      pRetry(
+        async () => {
+          const res = await this.buildChatRequest(model, messages, { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false }, 180_000);
+          if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            // 429 触发重试；其他 HTTP 错误立即抛出不重试
+            if (res.status === 429) {
+              throw new HttpException(`AI 限流 (429)`, 429);
+            }
+            throw new HttpException(`AI 服务调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
           }
-          throw e;
-        }
-        if (attempt < maxAttempts) {
-          await new Promise((r) => setTimeout(r, attempt * 3000));
-          continue;
-        }
-        this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: (e as Error).message });
-        throw e;
-      }
-    }
-    this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: '多次重试后仍失败' });
-    throw new HttpException('AI 服务调用失败（多次重试后仍失败）', HttpStatus.BAD_GATEWAY);
+          const data = (await res.json()) as any;
+          const content = String(data.choices?.[0]?.message?.content ?? '').trim();
+          // 空响应按失败重试
+          if (!content) throw new HttpException('AI 返回空响应', 429);
+          return { content, data };
+        },
+        {
+          retries: 3,
+          factor: 2,
+          minTimeout: 1000,
+          maxTimeout: 30_000,
+          onFailedAttempt: (err) => {
+            console.warn(`[AiService] 重试 ${err.attemptNumber}/${err.retriesLeft + err.attemptNumber - 1}: ${err.message}`);
+          },
+          // 仅对 429 限流重试；其他错误立即抛出
+          shouldRetry: (err) => Number(err?.status) === 429,
+        },
+      ),
+    ).then(({ content, data }) => {
+      const usage = (data?.usage || {}) as any;
+      this.logLlmCall({
+        caller,
+        model,
+        promptTokens: Number(usage.prompt_tokens) || 0,
+        completionTokens: Number(usage.completion_tokens) || 0,
+        latencyMs: Date.now() - t0,
+        success: true,
+      });
+      return content;
+    }).catch((err) => {
+      this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: err?.message });
+      if (err instanceof HttpException) throw err;
+      throw new HttpException('AI 服务调用失败（多次重试后仍失败）', HttpStatus.BAD_GATEWAY);
+    });
   }
 
   /** 流式补全，返回上游响应体（Web ReadableStream），用于 SSE 转发 */
@@ -304,28 +290,30 @@ export class AiService {
       streamIncludeUsage: opts.streamIncludeUsage,
       enableThinking: opts.enableThinking,
     };
-    let res = await this.buildChatRequest(model, messages, reqOpts, 300_000, opts.signal);
-    // 部分厂商拒绝 stream_options.include_usage → 去掉该参数容错重试一次（拿不到 usage 也不阻断正文流）
-    if (!res.ok && opts.streamIncludeUsage) {
-      const status = res.status;
-      await res.body?.cancel().catch(() => undefined);
-      console.warn(`[AiService] 上游拒绝 stream_options.include_usage (HTTP ${status})，去掉该参数重试`);
-      res = await this.buildChatRequest(
-        model,
-        messages,
-        { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: true, enableThinking: opts.enableThinking },
-        300_000,
-        opts.signal,
-      );
-    }
-    if (!res.ok || !res.body) {
-      const errText = await res.text().catch(() => '');
-      this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: `HTTP ${res.status}` });
-      throw new HttpException(`AI 流式调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
-    }
-    // 流式调用无法提前拿到 usage：至少记录调用发生与耗时（token 在非流式链路全覆盖）
-    this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: true });
-    return res.body;
+    // 用 p-limit 排队，避免并发流式请求打爆上游
+    return this.limit(async () => {
+      let res = await this.buildChatRequest(model, messages, reqOpts, 300_000, opts.signal);
+      // 部分厂商拒绝 stream_options.include_usage → 去掉该参数容错重试一次
+      if (!res.ok && opts.streamIncludeUsage) {
+        const status = res.status;
+        await res.body?.cancel().catch(() => undefined);
+        console.warn(`[AiService] 上游拒绝 stream_options.include_usage (HTTP ${status})，去掉该参数重试`);
+        res = await this.buildChatRequest(
+          model,
+          messages,
+          { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: true, enableThinking: opts.enableThinking },
+          300_000,
+          opts.signal,
+        );
+      }
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => '');
+        this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: `HTTP ${res.status}` });
+        throw new HttpException(`AI 流式调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
+      }
+      this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: true });
+      return res.body;
+    });
   }
 
   private jsonOf<T>(text: string): T {
@@ -458,14 +446,42 @@ export class AiService {
     return this.complete([{ role: 'user', content: prompts.TRANSLATE(text, targetLang) }], { temperature: 0.3 });
   }
 
-  /** 7 维质量评审（AI 输出缺维度时按 0 分兜底，防止总分异常） */
+  /** 7 维质量评审（结构化输出：response_format json_schema 保证 JSON 合法，无需手工 strip 修复） */
   async reviewPaper(title: string, content: string): Promise<{
     scores: { literature: number; logic: number; citation: number; language: number; novelty: number; figures: number; format: number };
     feedback: string;
     totalScore: number;
   }> {
-    // 评审用 fast 模型：思考型强模型输出带 reasoning 前缀会破坏 JSON 平衡解析（曾导致全 0 分）
-    const raw = await this.complete([{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }], { temperature: 0.3, model: 'fast', context: 'reviewPaper' });
+    // JSON Schema：强制模型输出合法 JSON，避免 reasoning 前缀/多余文本/不平衡括号等问题
+    const reviewSchema = {
+      name: 'review_result',
+      schema: {
+        type: 'object',
+        properties: {
+          scores: {
+            type: 'object',
+            properties: {
+              literature: { type: 'number', minimum: 0, maximum: 100 },
+              logic: { type: 'number', minimum: 0, maximum: 100 },
+              citation: { type: 'number', minimum: 0, maximum: 100 },
+              language: { type: 'number', minimum: 0, maximum: 100 },
+              novelty: { type: 'number', minimum: 0, maximum: 100 },
+              figures: { type: 'number', minimum: 0, maximum: 100 },
+              format: { type: 'number', minimum: 0, maximum: 100 },
+            },
+            required: ['literature', 'logic', 'citation', 'language', 'novelty', 'figures', 'format'],
+            additionalProperties: false,
+          },
+          feedback: { type: 'string' },
+        },
+        required: ['scores', 'feedback'],
+        additionalProperties: false,
+      },
+    };
+    const raw = await this.complete(
+      [{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }],
+      { temperature: 0.3, model: 'fast', context: 'reviewPaper', jsonSchema: reviewSchema },
+    );
     let parsed: { scores?: Record<string, number>; feedback?: string } = {};
     try {
       parsed = this.jsonOf<{ scores: Record<string, number>; feedback: string }>(raw);

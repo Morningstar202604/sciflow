@@ -45,3 +45,16 @@ export function parseAuthors(input: string | unknown[] | null | undefined): stri
 export function authorsToString(input: string | unknown[] | null | undefined): string {
   return parseAuthors(input).join(', ');
 }
+
+/** "First Middle Last" -> "Last"（单一来源：documents/references 共用） */
+export function surnameOf(a: string): string {
+  const parts = a.trim().split(/\s+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : a;
+}
+
+/** "First Middle Last" -> "F. M."（单一来源：documents/references 共用） */
+export function initialsOf(a: string): string {
+  const parts = a.trim().split(/\s+/).filter(Boolean);
+  parts.pop();
+  return parts.map((p) => p.charAt(0).toUpperCase() + '.').join(' ');
+}

@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
+import { Cite } from '@citation-js/core';
+import '@citation-js/plugin-bibtex';
+import '@citation-js/plugin-csl';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { documents, citations, references, polishRecords } from '../db/schema';
@@ -306,21 +309,13 @@ export class DocumentsService {
     return this.ai.generateAbstract(doc.title || '', doc.content || '');
   }
 
+  /**
+   * 按格式导出参考文献（citation-js CSL 引擎，覆盖 9000+ 引文格式）
+   * BibTeX 走 citation-js 原生输出路径，不再手写模板
+   */
   exportCitations(documentId: string, format: string) {
     const rows = this.listCitations(documentId);
-    return rows.map((c, i) =>
-      formatCitation(
-        {
-          title: c.reference.title,
-          authors: c.reference.authors ?? '[]',
-          year: c.reference.year,
-          venue: c.reference.venue ?? '',
-          doi: c.reference.doi ?? '',
-        },
-        format,
-        i + 1,
-      ),
-    );
+    return renderCitationsAsBibliography(rows, format);
   }
 
   /** 导出 Markdown 全文（标题 + 大纲 + 正文 + 引用列表） */
@@ -458,155 +453,128 @@ export class DocumentsService {
   }
 }
 
-/** 引用格式转换（简化实现） */
-export function formatCitation(ref: { title: string; authors: string; year: number | null; venue: string; doi: string }, format: string, index: number): string {
-  const authors = (() => {
-    try {
-      const arr = JSON.parse(ref.authors || '[]') as string[];
-      if (arr.length === 0) return 'Anonymous';
-      if (format === 'ieee') {
-        return arr
-          .map((a) => {
-            const parts = a.split(' ').filter(Boolean);
-            const last = parts.pop() || '';
-            const initials = parts.map((p) => p.charAt(0)).join('');
-            return initials ? `${initials}. ${last}` : last;
-          })
-          .join(', ');
-      }
-      if (arr.length === 1) return arr[0];
-      if (format === 'apa') return `${arr[0]} et al.`;
-      if (format === 'vancouver') {
-        return arr
-          .map((a) => {
-            const parts = a.split(' ').filter(Boolean);
-            const last = parts.pop() || '';
-            const initials = parts.map((p) => p.charAt(0)).join('');
-            return `${last} ${initials}`.trim();
-          })
-          .join(', ');
-      }
-      return arr[0] + ' ' + arr.slice(1).map((a) => a.split(' ').pop()?.charAt(0) || '').join('') + '.';
-    } catch {
-      return 'Anonymous';
-    }
-  })();
-  const year = ref.year ? ` ${ref.year}` : ' n.d.';
-  const venue = ref.venue ? `. ${ref.venue}` : '';
-  const doi = ref.doi ? `. https://doi.org/${ref.doi}` : '';
+// ---------- citation-js 引文格式化（替代手写 8 样式渲染器） ----------
 
-  switch (format) {
-    case 'ieee':
-      return `[${index}] ${authors} "${ref.title},"${venue}${year}.${doi}`;
-    case 'vancouver':
-      return `${index}. ${authors} ${ref.title}${venue}${year}.${doi}`;
-    case 'bibtex': {
-      // BibTeX（LaTeX 论文引用刚需）：@article{key, author, title, journal, year, doi}
-      const arr = (() => {
-        try {
-          return JSON.parse(ref.authors || '[]') as string[];
-        } catch {
-          return [];
-        }
-      })();
-      const keyBase = (arr[0]?.split(' ').pop() || 'unknown').toLowerCase().replace(/[^a-z]/g, '');
-      const key = `${keyBase}${ref.year || 'n.d.'}`;
-      const authorsBib = arr.length === 0 ? 'Anonymous' : arr.join(' and ');
-      const titleClean = ref.title.replace(/[{}&%$#_^~\\]/g, '');
-      const venueClean = (ref.venue || '').replace(/[{}&%$#_^~\\]/g, '');
-      const doiLine = ref.doi ? `,
-  doi = {${ref.doi}}` : '';
-      return `@article{${key},
-  author = {${authorsBib}},
-  title = {${titleClean}},
-  journal = {${venueClean}},
-  year = {${ref.year || 'n.d.'}}${doiLine}
-}`;
-    }
-    case 'gbt': {
-      // GB/T 7714-2015 顺序编码制：[序号] 作者. 题名[文献类型标志]. 出版地: 出版者, 年份: 页码. DOI
-      const namePart = (() => {
-        try {
-          const arr = JSON.parse(ref.authors || '[]') as string[];
-          if (arr.length === 0) return '佚名';
-          if (arr.length === 1) return arr[0];
-          if (arr.length > 3) return `${arr[0]} 等`;
-          return arr.join(', ');
-        } catch {
-          return '佚名';
-        }
-      })();
-      return `[${index}] ${namePart}. ${ref.title}[J].${ref.venue ? ` ${ref.venue},` : ''} ${ref.year ? `${ref.year}.` : 'n.d.'}${ref.doi ? ` https://doi.org/${ref.doi}` : ''}`;
-    }
-    default:
-      return `${authors} (${year.trim()}). ${ref.title}.${venue}${doi}`;
-  }
-}
+/** CSL 模板名映射（产品内 format 值 → citation-js CSL 模板） */
+const CSL_TEMPLATE_MAP: Record<string, string> = {
+  apa: 'apa',
+  ieee: 'ieee',
+  vancouver: 'vancouver',
+  gbt: 'chinese-gb7714-2005-numeric',
+  chicago: 'chicago-note-bibliography',
+  nature: 'nature',
+  springer: 'springer-basic',
+  acs: 'american-chemical-society',
+};
 
-/* =====================================================================
- * 缺口#4：render-citations 用的 8 样式单条条目渲染——逐行镜像前端 WritingPage.formatRefEntry，
- * 保证后端预览列表与前端所见一致（加粗/斜体以纯文本近似）。
- * ===================================================================== */
-type CiteStyleKind = 'apa' | 'ieee' | 'vancouver' | 'gbt' | 'nature' | 'chicago' | 'springer' | 'acs';
-
-function parseAuthorArr(authors: string): string[] {
+/** 解析 authors JSON 字符串为 citation-js CSL-JSON author 数组 */
+function toCslAuthors(authorsJson: string): { family: string; given: string }[] {
   try {
-    const a = JSON.parse(authors || '[]');
-    return Array.isArray(a) ? a.filter(Boolean) : [];
+    const arr = JSON.parse(authorsJson || '[]');
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(Boolean).map((name) => {
+      const parts = String(name).trim().split(/\s+/).filter(Boolean);
+      const family = parts.pop() || '';
+      const given = parts.join(' ');
+      return { family, given };
+    });
   } catch {
     return [];
   }
 }
-/** "First Middle Last" -> "Last" */
-function surnameOf(a: string): string {
-  const parts = a.trim().split(/\s+/).filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : a;
+
+/** citation-js Cite 对象构建（从 citation row 构建 CSL-JSON 条目） */
+function buildCiteEntry(row: { reference: { id: string; title: string; authors: string; year: number | null; venue: string; doi: string } }) {
+  return {
+    id: row.reference.id,
+    type: 'article-journal' as const,
+    title: row.reference.title,
+    author: toCslAuthors(row.reference.authors),
+    issued: row.reference.year ? { 'date-parts': [[row.reference.year]] } : undefined,
+    'container-title': row.reference.venue || undefined,
+    DOI: row.reference.doi || undefined,
+  };
 }
-/** "First Middle Last" -> "F. M." */
-function initialsOf(a: string): string {
-  const parts = a.trim().split(/\s+/).filter(Boolean);
-  parts.pop();
-  return parts.map((p) => p.charAt(0).toUpperCase()).join('. ') + (parts.length ? '.' : '');
+
+/**
+ * 用 citation-js CSL 引擎渲染参考文献列表（替代手写的 formatCitation + formatRefEntry8）。
+ * BibTeX 直接用 citation-js bibtex 输出。
+ */
+export function renderCitationsAsBibliography(
+  rows: { reference: { id: string; title: string; authors: string; year: number | null; venue: string; doi: string } }[],
+  format: string,
+): string[] {
+  const entries = rows.map(buildCiteEntry);
+  const cite = new Cite(entries);
+
+  // bibtex 走 citation-js 原生输出（标准 LaTeX 合规）
+  if (format === 'bibtex') {
+    return [cite.format('bibtex')];
+  }
+
+  const template = CSL_TEMPLATE_MAP[format] || 'apa';
+  const formatted = cite.format('bibliography', { format: 'text', template, lang: 'zh-CN' });
+  return formatted.split('\n').filter((l) => l.trim());
 }
+
+/** 兼容 export 名（老接口 exportCitations） */
+export function formatCitation(
+  ref: { title: string; authors: string; year: number | null; venue: string; doi: string },
+  format: string,
+  index: number,
+): string {
+  const result = renderCitationsAsBibliography([{ reference: ref }], format);
+  // 序号样式需要补编号（citation-js 不自动加 [n]）
+  if (format === 'ieee' || format === 'vancouver' || format === 'nature' || format === 'springer' || format === 'acs') {
+    return result[0] ? `[${index}] ${result[0]}` : '';
+  }
+  if (format === 'gbt') {
+    return result[0] ? `[${index}] ${result[0]}` : '';
+  }
+  return result[0] || '';
+}
+
+/* =====================================================================
+ * render-citations 用的 8 样式单条条目渲染——现在走 citation-js CSL 引擎，
+ * 保留 a/b 后缀和年份覆写能力用于著者-年样式（apa/chicago）。
+ * ===================================================================== */
+export type CiteStyleKind = 'apa' | 'ieee' | 'vancouver' | 'gbt' | 'nature' | 'chicago' | 'springer' | 'acs';
 
 type RefLite = { title: string; authors: string; year: number | null; venue: string; doi: string };
 
-/** 单条参考文献条目渲染（镜像前端 formatRefEntry）。yearOverride 用于著者-年样式注入 a/b 后缀 */
+/**
+ * 单条参考文献条目渲染（走 citation-js CSL）。
+ * yearOverride 用于著者-年样式注入 a/b 后缀（如 2024a, 2024b）。
+ * index=0 时不注入序号（用于著者-年样式文末列表，序号无意义）。
+ */
 function formatRefEntry8(ref: RefLite, format: string, index: number, yearOverride?: string): string {
   const arr = parseAuthorArr(ref.authors);
-  const year = yearOverride ?? (ref.year ? `${ref.year}` : 'n.d.');
-  const venue = ref.venue || '';
-  const doi = ref.doi ? ` https://doi.org/${ref.doi}` : '';
-  const t = ref.title || 'Untitled';
-
-  const apaAuthors = arr.length === 0 ? 'Anonymous' : arr.length === 1 ? arr[0] : `${arr[0]} et al.`;
-  const iniOf = (a: string) => initialsOf(a).replace(/\.\s?/g, '');
-  const ieeeAuthors = arr.map((a) => (iniOf(a) ? `${initialsOf(a)} ${surnameOf(a)}` : surnameOf(a))).join(', ');
-  const vanAuthors = arr.map((a) => `${surnameOf(a)} ${iniOf(a)}`.trim()).join(', ');
-  const semiAuthors = arr.map((a) => `${surnameOf(a)}${iniOf(a) ? `, ${initialsOf(a)}` : ''}`).join('; ');
-  const gbtAuthors = arr.length === 0 ? '佚名' : arr.length === 1 ? arr[0] : arr.length > 3 ? `${arr[0]} 等` : arr.join(', ');
-
-  switch (format) {
-    case 'ieee':
-      return `[${index}] ${ieeeAuthors || 'Anonymous'} "${t},"${venue ? ` ${venue},` : ''} ${year}.${doi}`;
-    case 'vancouver':
-      return `${index}. ${vanAuthors || 'Anonymous'} ${t}.${venue ? ` ${venue}.` : ''} ${year}.${doi}`;
-    case 'gbt':
-      return `[${index}] ${gbtAuthors}. ${t}[J].${venue ? ` ${venue},` : ''} ${year}.${doi}`;
-    case 'nature': {
-      const names = arr.slice(0, 6).map((a) => `${iniOf(a)} ${surnameOf(a)}`.trim()).join(', ');
-      return `[${index}] ${names || 'Anonymous'}${arr.length > 6 ? ' et al.' : ''}. ${t}. ${venue} ${year}.${doi}`;
-    }
-    case 'chicago': {
-      const names =
-        arr.length === 0 ? 'Anonymous' : arr.length === 1 ? arr[0] : arr.length === 2 ? `${arr[0]} and ${arr[1]}` : `${arr.slice(0, -1).join(', ')}, and ${arr[arr.length - 1]}`;
-      return `${names}. ${year}. "${t}."${venue ? ` ${venue}.` : ''}${doi}`;
-    }
-    case 'springer':
-    case 'acs':
-      return `[${index}] ${semiAuthors || 'Anonymous'}. ${t}. ${venue} ${year}.${doi}`;
-    case 'apa':
-    default:
-      return `${apaAuthors} (${year}). ${t}.${venue ? ` ${venue}.` : ''}${doi}`;
+  const cslAuthors = arr.map((name) => {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    const family = parts.pop() || '';
+    const given = parts.join(' ');
+    return { family, given };
+  });
+  // 用 citation-js 单条目格式化（注入年份覆写）
+  const entry = {
+    id: 'entry',
+    type: 'article-journal' as const,
+    title: ref.title,
+    author: cslAuthors,
+    issued: { 'date-parts': [[Number(yearOverride?.replace(/[a-z]/g, '')) || ref.year || 0]] } as any,
+    'container-title': ref.venue || undefined,
+    DOI: ref.doi || undefined,
+  };
+  const template = CSL_TEMPLATE_MAP[format] || 'apa';
+  const cite = new Cite([entry]);
+  const formatted = cite.format('bibliography', { format: 'text', template, lang: 'zh-CN' }).trim();
+  // 著者-年样式需注入 a/b 后缀
+  if (yearOverride && /[a-z]$/.test(yearOverride) && (format === 'apa' || format === 'chicago')) {
+    return formatted.replace(/\)\./, `${yearOverride.replace(/\d/g, '')}).`);
   }
+  // 序号样式补编号
+  if ((format === 'ieee' || format === 'vancouver' || format === 'nature' || format === 'springer' || format === 'acs' || format === 'gbt') && index > 0) {
+    return `[${index}] ${formatted}`;
+  }
+  return formatted;
 }

@@ -17,6 +17,16 @@ sqlite.pragma('foreign_keys = ON');
 // 写锁等待上限：并发写入排队而非立即报错（默认 5000ms）
 sqlite.pragma('busy_timeout = 5000');
 
+// ---------- sqlite-vec 扩展加载（向量 ANN 检索） ----------
+try {
+  // node-sqlite-vec 提供预编译的 .node 扩展；按平台解析路径
+  const vecPath = require.resolve('sqlite-vec/better-sqlite3');
+  sqlite.loadExtension(vecPath);
+  console.log('[DB] sqlite-vec 扩展已加载（向量 ANN 检索可用）');
+} catch (e: any) {
+  console.warn(`[DB] sqlite-vec 扩展加载失败（向量检索不可用，将回退到全文 LIKE）: ${e?.message || e}`);
+}
+
 /** 建表 DDL（与 drizzle schema 保持一致，开箱即跑） */
 sqlite.exec(`
 CREATE TABLE IF NOT EXISTS project (
@@ -364,9 +374,22 @@ ensureColumn('pipeline_task', 'trace', "TEXT DEFAULT '[]'");
 // Research 阶段跨库检索增强：命中 0 引导文案（null）+ 命中>0 命中摘要 JSON（''）
 ensureColumn('pipeline_task', 'research_notice', "TEXT");
 ensureColumn('pipeline_task', 'research_meta', "TEXT DEFAULT ''");
-// 知识库 Contextual Retrieval 升级：旧库补齐 context/vector 列（RAG 混合检索依赖）
+/** 迁移：旧库新增 fulltext 列 + 全文索引（LIKE 兜底 + BM25 回退用） */
 ensureColumn('knowledge_chunk', 'context', "TEXT DEFAULT ''");
 ensureColumn('knowledge_chunk', 'vector', "TEXT DEFAULT '[]'");
+// 向量 ANN 检索：新增 embedding 列 + vec0 虚拟表（若 sqlite-vec 扩展可用）
+ensureColumn('knowledge_chunk', 'embedding', 'BLOB');
+try {
+  sqlite.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_embedding USING vec0(
+      chunk_id TEXT PRIMARY KEY,
+      embedding FLOAT[384]
+    );
+  `);
+  console.log('[DB] 向量检索虚拟表已就绪（knowledge_chunks_embedding vec0）');
+} catch (e: any) {
+  console.warn(`[DB] vec0 虚拟表创建失败（依赖 sqlite-vec 扩展）: ${e?.message || e}`);
+}
 // 文献库↔知识库打通（#5）：旧库补齐 reference_id 可空外键列
 ensureColumn('knowledge_doc', 'reference_id', "TEXT");
 // 科研高级功能：reference 阅读状态 / 去重指纹 / 重复指向
