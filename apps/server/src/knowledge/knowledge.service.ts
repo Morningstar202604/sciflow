@@ -1,11 +1,12 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { sqlite } from '../db/database';
 import { knowledgeDocs, knowledgeChunks, references } from '../db/schema';
 import { eq, inArray, and, asc } from 'drizzle-orm';
 import { AiService } from '../ai/ai.service';
 import { EmbeddingService } from './embedding.service';
+import { fingerprint } from '../common/fingerprint';
 
 const CHUNK_SIZE = 800; // 每块约 800 字（段落聚合，与文档切分逻辑保持一致）
 
@@ -46,16 +47,9 @@ export class KnowledgeService {
   }
 
   // ---------- 文献库↔知识库打通（#5） ----------
-  /** 标题归一化指纹：与 references.service 同一规则（lowercase + 去标点空白，取短 md5） */
-  private fingerprint(title: string): string {
-    const norm = (title || '').toLowerCase().replace(/[^a-z0-9一-鿿]/g, '');
-    if (!norm) return '';
-    return createHash('md5').update(norm).digest('hex').slice(0, 16);
-  }
-
   /** 上传时按标题自动命中项目内已有文献：先指纹精确，再忽略大小写标题兜底；命中不中都可继续（不强绑） */
   private matchReference(projectId: string, title: string): string | null {
-    const fp = this.fingerprint(title);
+    const fp = fingerprint(title);
     const all = db.select().from(references).where(eq(references.projectId, projectId)).all();
     const hit = all.find(
       (r) => (fp && r.fingerprint === fp) || (r.title || '').trim().toLowerCase() === (title || '').trim().toLowerCase(),
@@ -74,7 +68,7 @@ export class KnowledgeService {
     const title = (name || '').replace(/\.[a-zA-Z0-9]{1,12}$/, '').trim();
     if (title.length < 4) return null;
     if (/笔记|纪要|备忘录|会议|草稿|提纲|notes?|memo|minutes|agenda|todo/i.test(title)) return null;
-    const fp = this.fingerprint(title);
+    const fp = fingerprint(title);
     if (fp) {
       const dup = db.select().from(references).where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp))).get();
       if (dup) return dup.id;

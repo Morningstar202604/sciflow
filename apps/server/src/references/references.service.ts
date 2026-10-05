@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { sql, eq, and } from 'drizzle-orm';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { Cite } from '@citation-js/core';
+import '@citation-js/plugin-bibtex';
 import { z } from 'zod';
 import { db } from '../db/database';
 import { references, screeningQueue, extractionFields, extractionValues, documents, citations } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { parseAuthors } from '../common/authors';
+import { fingerprint } from '../common/fingerprint';
+import { parseTagsJson } from '../common/json-guard';
 
 /** 文献命中条目（本地文献库检索/入库共用） */
 export interface PaperHit {
@@ -69,13 +73,6 @@ export class ReferencesService {
     return row;
   }
 
-  /** 标题归一化指纹：lowercase + 去标点空白（保留字母数字与中日韩），再取短 md5（项目内去重依据） */
-  private fingerprint(title: string): string {
-    const norm = (title || '').toLowerCase().replace(/[^a-z0-9一-鿿]/g, '');
-    if (!norm) return '';
-    return createHash('md5').update(norm).digest('hex').slice(0, 16);
-  }
-
   /** 手动/检索结果入库（自动计算去重指纹，同项目内重复则标记 isDuplicateOf） */
   create(projectId: string, hit: Partial<PaperHit> & { title: string }) {
     if (!hit.title) throw new BadRequestException('文献标题必填');
@@ -84,7 +81,7 @@ export class ReferencesService {
     const authorsOk = (hit.authors || []).length > 0;
     if (!authorsOk && !hit.year) return null;
     // 标题归一化指纹去重：命中同项目已存在文献时，新条目标记为其重复（保留两条记录供筛选流程核对）
-    const fp = this.fingerprint(hit.title);
+    const fp = fingerprint(hit.title);
     const dupOf = fp
       ? db
           .select()
@@ -200,38 +197,12 @@ export class ReferencesService {
     let skipped = 0;
     for (const hit of hits || []) {
       if (!hit.title) continue;
-      const fp = this.fingerprint(hit.title);
+      const fp = fingerprint(hit.title);
       if (fp) {
-        const dup = db
-          .select()
-          .from(references)
-          .where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp)))
-          .get();
-        if (dup) {
-          skipped++;
-          continue;
-        }
+        const dup = db.select().from(references).where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp))).get();
+        if (dup) { skipped++; continue; }
       }
-      db.insert(references)
-        .values({
-          id: randomUUID(),
-          projectId,
-          title: hit.title,
-          authors: JSON.stringify(hit.authors || []),
-          year: hit.year ?? null,
-          venue: hit.venue || '',
-          doi: hit.doi || '',
-          url: hit.url || '',
-          abstract: hit.abstract || '',
-          source: 'pipeline-research',
-          tags: '[]',
-          citationCount: hit.citationCount || 0,
-          readingStatus: 'unread',
-          fingerprint: fp,
-          isDuplicateOf: '',
-          createdAt: Date.now(),
-        })
-        .run();
+      db.insert(references).values({ id: randomUUID(), projectId, title: hit.title, authors: JSON.stringify(hit.authors || []), year: hit.year ?? null, venue: hit.venue || '', doi: hit.doi || '', url: hit.url || '', abstract: hit.abstract || '', source: 'pipeline-research', tags: '[]', citationCount: hit.citationCount || 0, readingStatus: 'unread', fingerprint: fp, isDuplicateOf: '', createdAt: Date.now() }).run();
       imported++;
     }
     return { imported, skipped, total: (hits || []).length };
@@ -434,16 +405,6 @@ export class ReferencesService {
     };
   }
 
-  /** 解析 tags JSON 字符串为数组（导出/网络图共用） */
-  private parseTags(json: string | null): string[] {
-    try {
-      const t = JSON.parse(json || '[]');
-      return Array.isArray(t) ? t.map(String) : [];
-    } catch {
-      return [];
-    }
-  }
-
   // ---------- 引用网络图（共引 + 去重边，前端自研力导向布局） ----------
 
   /**
@@ -461,7 +422,7 @@ export class ReferencesService {
       year: r.year,
       venue: r.venue || '',
       citationCount: r.citationCount ?? 0,
-      tags: this.parseTags(r.tags),
+      tags: parseTagsJson(r.tags),
       readingStatus: r.readingStatus || 'unread',
       isDuplicateOf: r.isDuplicateOf || '',
     }));
@@ -515,171 +476,58 @@ export class ReferencesService {
     return { nodes, edges };
   }
 
-  // ---------- BibTeX / RIS 导出导入 ----------
+  // ---------- BibTeX / RIS 导出导入（citation-js 替代手搓全栈） ----------
 
-  /** 导出项目全部文献为 BibTeX 或 RIS 文本 */
+  /** 导出项目全部文献为 BibTeX 或 RIS 文本（citation-js 自动生成标准合规格式） */
   exportRefs(projectId: string, format: string) {
     const refs = this.list(projectId);
     return (format || 'bibtex').toLowerCase() === 'ris' ? this.toRis(refs) : this.toBibtex(refs);
   }
 
+  /** citation-js 共享 CSL-JSON 构造 */
+  private toCslJson(refs: (typeof references.$inferSelect)[]) {
+    return refs.map((r) => ({
+      id: r.id,
+      type: 'article-journal' as const,
+      title: r.title,
+      author: parseAuthors(r.authors).map((a) => { const p = a.trim().split(/\s+/); const family = p.pop() || ''; return { family, given: p.join(' ') }; }),
+      issued: r.year ? { 'date-parts': [[r.year]] } : undefined,
+      'container-title': r.venue || undefined,
+      DOI: r.doi || undefined,
+    }));
+  }
+
   private toBibtex(refs: (typeof references.$inferSelect)[]): string {
-    return refs
-      .map((r, i) => {
-        const key = (r.fingerprint || '').slice(0, 8) || `ref${i + 1}`;
-        const authors = this.parseAuthors(r.authors).join(' and ');
-        const tags = this.parseTags(r.tags);
-        const fields: [string, string][] = [
-          ['title', r.title],
-          ...(authors ? [['author', authors] as [string, string]] : []),
-          ...(r.year ? [['year', String(r.year)] as [string, string]] : []),
-          ...(r.venue ? [['journal', r.venue] as [string, string]] : []),
-          ...(r.doi ? [['doi', r.doi] as [string, string]] : []),
-          ...(r.abstract ? [['abstract', r.abstract] as [string, string]] : []),
-          ...(tags.length ? [['keywords', tags.join(', ')] as [string, string]] : []),
-        ];
-        const body = fields.map(([k, v]) => `  ${k} = {${v}}`).join(',\n');
-        return `@article{${key},\n${body}\n}`;
-      })
-      .join('\n\n');
+    return new Cite(this.toCslJson(refs)).format('bibtex');
   }
 
   private toRis(refs: (typeof references.$inferSelect)[]): string {
-    return refs
-      .map((r) => {
-        const lines: string[] = ['TY  - JOUR', `TI  - ${r.title}`];
-        for (const a of this.parseAuthors(r.authors)) lines.push(`AU  - ${a}`);
-        if (r.year) lines.push(`PY  - ${r.year}`);
-        if (r.venue) lines.push(`JO  - ${r.venue}`);
-        if (r.doi) lines.push(`DO  - ${r.doi}`);
-        if (r.abstract) lines.push(`AB  - ${r.abstract}`);
-        for (const t of this.parseTags(r.tags)) lines.push(`KW  - ${t}`);
-        lines.push('ER  - ');
-        return lines.join('\n');
-      })
-      .join('\n\n');
+    return new Cite(this.toCslJson(refs)).format('ris');
   }
 
-  /** 清洗 BibTeX 字段中的 LaTeX 转义与分组花括号：\{ \} \_ \& 等还原，{} 包裹去除 */
-  private cleanLatex(s: string): string {
-    return s
-      .replace(/\\([{}&_#$%])/g, '$1')
-      .replace(/[{}]/g, '')
-      .trim();
-  }
-
-  /** 正则/扫描式解析 BibTeX 文本（大括号匹配，支持嵌套），不引第三方依赖 */
-  private parseBibtex(text: string) {
-    const out: { title: string; authors: string[]; year: number | null; journal: string; doi: string; abstract: string }[] = [];
-    const s = text || '';
-    let i = 0;
-    while (true) {
-      const at = s.indexOf('@', i);
-      if (at < 0) break;
-      let j = at + 1;
-      while (j < s.length && s[j] !== '{' && s[j] !== '(') j++;
-      if (j >= s.length) break;
-      const open = s[j];
-      let depth = 0;
-      let k = j;
-      for (; k < s.length; k++) {
-        if (s[k] === '{' || s[k] === '(') depth++;
-        else if (s[k] === '}' || s[k] === ')') {
-          depth--;
-          if (depth === 0) {
-            k++;
-            break;
-          }
-        }
-      }
-      const entryBody = s.slice(j + 1, k - 1);
-      const commaIdx = entryBody.indexOf(',');
-      const body = commaIdx >= 0 ? entryBody.slice(commaIdx + 1) : entryBody;
-      // 字段扫描：name = {value} / "value" / bare
-      const fields: Record<string, string> = {};
-      let p = 0;
-      while (p < body.length) {
-        const eq = body.indexOf('=', p);
-        if (eq < 0) break;
-        // 前一个字段值结尾的 `},` 会留下前导逗号/空白，需一并剥离
-        const name = body.slice(p, eq).replace(/^[,\s]+/, '').trim().toLowerCase();
-        let q = eq + 1;
-        while (q < body.length && /\s/.test(body[q])) q++;
-        let val = '';
-        if (body[q] === '{' || body[q] === '"') {
-          const openC = body[q];
-          let d2 = 0;
-          let m = q;
-          for (; m < body.length; m++) {
-            if (openC === '{' && body[m] === '{') d2++;
-            else if (openC === '{' && body[m] === '}') {
-              d2--;
-              if (d2 === 0) {
-                m++;
-                break;
-              }
-            } else if (openC === '"' && body[m] === '"') {
-              m++;
-              break;
-            }
-          }
-          val = body.slice(q + 1, m - 1);
-          p = m;
-        } else {
-          const e2 = body.indexOf(',', q);
-          const end = e2 < 0 ? body.length : e2;
-          val = body.slice(q, end).trim();
-          p = end + 1;
-        }
-        fields[name] = this.cleanLatex(val);
-      }
-      out.push({
-        title: fields['title'] || '',
-        authors: (fields['author'] || '').split(/\s+and\s+/i).map((a) => a.trim()).filter(Boolean),
-        year: fields['year'] ? parseInt(fields['year'], 10) : null,
-        journal: fields['journal'] || fields['booktitle'] || '',
-        doi: fields['doi'] || '',
-        abstract: fields['abstract'] || '',
-      });
-      i = k;
-    }
-    return out;
-  }
-
-  /** 导入 BibTeX 文本：逐条复用创建逻辑，指纹命中已存在文献则跳过并计数 */
+  /** 导入 BibTeX 文本：citation-js 解析（替代手搓 parseBibtex 75 行） */
   importBibtex(projectId: string, text: string) {
-    const entries = this.parseBibtex(text);
     let imported = 0;
     let skipped = 0;
-    for (const e of entries) {
-      if (!e.title) {
-        skipped++;
-        continue;
+    try {
+      const cite = new Cite(text);
+      for (const entry of cite.data) {
+        const title = entry.title || '';
+        if (!title) { skipped++; continue; }
+        const fp = fingerprint(title);
+        if (fp) { const dup = db.select().from(references).where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp))).get(); if (dup) { skipped++; continue; } }
+        const yearRaw = entry.issued?.['date-parts']?.[0]?.[0];
+        const year = yearRaw ? Number(yearRaw) : null;
+        const venue = entry['container-title'] || entry['collection-title'] || '';
+        const doi = entry.DOI || '';
+        const authors = (entry.author || []).map((a) => `${a.given || ''} ${a.family || ''}`.trim()).filter(Boolean);
+        const created = this.create(projectId, { title, authors, year, venue, doi, abstract: entry.abstract || '' });
+        if (created) imported++; else skipped++;
       }
-      const fp = this.fingerprint(e.title);
-      if (fp) {
-        const dup = db
-          .select()
-          .from(references)
-          .where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp)))
-          .get();
-        if (dup) {
-          skipped++;
-          continue;
-        }
-      }
-      const created = this.create(projectId, {
-        title: e.title,
-        authors: e.authors,
-        year: e.year,
-        venue: e.journal,
-        doi: e.doi,
-        abstract: e.abstract,
-      });
-      if (created) imported++;
-      else skipped++;
+      return { imported, skipped, total: cite.data.length };
+    } catch (e: any) {
+      throw new BadRequestException(`BibTeX 解析失败: ${e.message}`);
     }
-    return { imported, skipped, total: entries.length };
   }
 
   /** AI 文献综述（只基于文献库内真实文献，禁止编造） */
