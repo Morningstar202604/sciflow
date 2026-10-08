@@ -9,7 +9,7 @@
  */
 
 /** 单个作者元素归一化为展示用姓名字符串；不可解析返回空串（由上层 filter 过滤） */
-export function authorToName(a: unknown): string {
+function authorToName(a: unknown): string {
   if (typeof a === 'string') return a.trim();
   if (a && typeof a === 'object') {
     const o = a as Record<string, unknown>;
@@ -42,7 +42,7 @@ export function parseAuthors(input: string | unknown[] | null | undefined): stri
 }
 
 /** 归一化后拼成展示用作者串（逗号分隔）；空数组返回空串 */
-export function authorsToString(input: string | unknown[] | null | undefined): string {
+function authorsToString(input: string | unknown[] | null | undefined): string {
   return parseAuthors(input).join(', ');
 }
 
@@ -52,9 +52,3 @@ export function surnameOf(a: string): string {
   return parts.length ? parts[parts.length - 1] : a;
 }
 
-/** "First Middle Last" -> "F. M."（单一来源：documents/references 共用） */
-export function initialsOf(a: string): string {
-  const parts = a.trim().split(/\s+/).filter(Boolean);
-  parts.pop();
-  return parts.map((p) => p.charAt(0).toUpperCase() + '.').join(' ');
-}

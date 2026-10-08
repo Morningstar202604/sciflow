@@ -50,7 +50,7 @@ async function bootstrap() {
   await app.listen(port, host);
   console.log(`[SciFlow] API 已启动: http://localhost:${port}/api/health （仅监听 ${host}）`);
 
-  // ---------- Checkpoint 断点续跑：重启后恢复中断的流水线任务（对标 LangGraph checkpointer） ----------
+  // ---------- 断点续跑：重启后恢复 status=running 的流水线任务（DAG 事务落盘回放） ----------
   try {
     const { PipelineService } = await import('./pipeline/pipeline.service');
     const pipeline = app.get(PipelineService);

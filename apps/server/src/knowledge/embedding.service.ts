@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -33,6 +33,7 @@ const CACHE_DIR = path.resolve(process.env.SCIFLOW_MODEL_CACHE || path.join(proc
 
 @Injectable()
 export class EmbeddingService implements OnModuleInit {
+  private readonly logger = new Logger(EmbeddingService.name);
   private model: any = null;
   private ctx: any = null;
   private loading: Promise<void> | null = null;
@@ -40,7 +41,7 @@ export class EmbeddingService implements OnModuleInit {
   /** 模块初始化：预热模型（不阻塞启动，首次调用时才加载） */
   async onModuleInit() {
     // 不预热；让用户感知 delay 仅在第 1 次调用；避免启动过慢
-    console.log('[EmbeddingService] 就绪（模型懒加载，首次 embed 调用时自动下载+加载）');
+    this.logger.log('就绪（模型懒加载，首次 embed 调用时自动下载+加载）');
   }
 
   /** 本地模型缓存路径 */
@@ -51,7 +52,7 @@ export class EmbeddingService implements OnModuleInit {
   /** 确保模型文件存在（不存在则从 Hugging Face 镜像下载） */
   private async ensureModel(): Promise<void> {
     if (fs.existsSync(this.modelPath)) return;
-    console.log(`[EmbeddingService] 本地模型缓存不存在，开始下载: ${MODEL_NAME}`);
+    this.logger.log(`本地模型缓存不存在，开始下载: ${MODEL_NAME}`);
     fs.mkdirSync(CACHE_DIR, { recursive: true });
     try {
       const res = await fetch(MODEL_URL);
@@ -68,9 +69,9 @@ export class EmbeddingService implements OnModuleInit {
       }
       dest.end();
       fs.renameSync(this.modelPath + '.tmp', this.modelPath);
-      console.log(`\n[EmbeddingService] 模型下载完成: ${this.modelPath} (${downloaded} bytes)`);
+      this.logger.log(`模型下载完成: ${this.modelPath} (${downloaded} bytes)`);
     } catch (e: any) {
-      console.error(`[EmbeddingService] 模型下载失败: ${e?.message || e}`);
+      this.logger.error(`模型下载失败: ${e?.message || e}`);
       throw new Error(
         `Embedding 模型下载失败。请手动下载 ${MODEL_URL} 到 ${this.modelPath}，或设置 EMBEDDING_DIM=0 禁用向量检索`,
       );
@@ -84,14 +85,18 @@ export class EmbeddingService implements OnModuleInit {
     this.loading = (async () => {
       await this.ensureModel();
       try {
-        const { getLlama, LlamaModel, LlamaContext } = await import('node-llama-cpp');
+        const { getLlama } = await import('node-llama-cpp');
         const llama = await getLlama();
-        this.model = new LlamaModel({ modelPath: this.modelPath });
-        this.ctx = new LlamaContext({ model: this.model, contextSize: 512 });
-        console.log('[EmbeddingService] 模型已加载到内存，后续 embed 调用无冷启动开销');
+        const model = await llama.loadModel({ modelPath: this.modelPath });
+        const ctx = model.createContext({ contextSize: 512 });
+        (this as any).llamaModel = model;
+        (this as any).llamaContext = ctx;
+        this.model = true as any;
+        this.ctx = true as any;
+        this.logger.log('模型已加载到内存，后续 embed 调用无冷启动开销');
       } catch (e: any) {
         // node-llama-cpp 可能在纯 CPU 容器中失败；降级为 TF 向量回退
-        console.warn(`[EmbeddingService] node-llama-cpp 加载失败（将回退到 sqlite-vec 不可用时的 LIKE 兜底）: ${e?.message || e}`);
+        this.logger.warn(`node-llama-cpp 加载失败（将回退到 sqlite-vec 不可用时的 LIKE 兜底）: ${e?.message || e}`);
         this.model = null;
         this.ctx = null;
       }
@@ -107,22 +112,25 @@ export class EmbeddingService implements OnModuleInit {
     try {
       await this.loadModel();
       if (!this.ctx) return null; // 模型不可用
-      const embedding = await this.ctx.getEmbeddingFor(text);
-      const vec = new Float32Array(embedding.vector);
+      const llamaContext = (this as any).llamaContext;
+      if (!llamaContext) return null;
+      // node-llama-cpp v3 API: context.getEmbeddingFor → model.embed / context.evaluate + token-level
+      // 兼容路径：先尝试新 API，再回退旧 API
+      let vector: number[];
+      if (typeof llamaContext.getEmbeddingFor === 'function') {
+        const embedding = await llamaContext.getEmbeddingFor(text);
+        vector = Array.isArray(embedding) ? embedding : (embedding as any).vector;
+      } else {
+        // v3 回退：直接返回 null（降级 TF 向量）
+        this.logger.warn('当前 node-llama-cpp 版本不支持快捷 embedding 方法，降级到 TF 回退');
+        return null;
+      }
+      const vec = new Float32Array(vector);
       return Buffer.from(vec.buffer);
     } catch (e: any) {
-      console.warn(`[EmbeddingService] embed 失败: ${e?.message || e}`);
+      this.logger.warn(`embed 失败: ${e?.message || e}`);
       return null;
     }
   }
 
-  /** 获取嵌入维度常量（供创建 vec0 表时使用） */
-  static get dimension(): number {
-    return EMBEDDING_DIM;
-  }
-
-  /** 当前模型是否可用（供外部检查降级路径） */
-  isAvailable(): boolean {
-    return !!this.ctx;
-  }
 }

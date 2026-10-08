@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, blob } from 'drizzle-orm/sqlite-core';
 
 /** 项目 */
 export const projects = sqliteTable('project', {
@@ -124,6 +124,7 @@ export const knowledgeChunks = sqliteTable('knowledge_chunk', {
   seq: integer('seq').default(0),
   context: text('context').default(''), // 文档级上下文描述（检索时拼在块前，+35-50% 精度）
   vector: text('vector').default('[]'), // JSON: 归一化 TF 向量 {term: weight}
+  embedding: blob('embedding'), // sqlite-vec 向量（float32[] 序列化 BLOB，vec0 虚拟表外部存储）
 });
 
 export type Project = typeof projects.$inferSelect;

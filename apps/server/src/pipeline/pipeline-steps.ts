@@ -65,7 +65,7 @@ export async function executeDAG(
     } catch (err: any) {
       // human gate 信号不视为错误，向上透传以中断前段 DAG
       if (err?.cause === AWAITING_CONFIRMATION || err === AWAITING_CONFIRMATION) {
-        await notify(step, { status: 'awaiting_confirmation' });
+        await notify(step, { status: 'awaiting_confirmation', output: (err as any)?._outline ? JSON.stringify((err as any)._outline) : undefined });
         throw err;
       }
       const action = step.onError

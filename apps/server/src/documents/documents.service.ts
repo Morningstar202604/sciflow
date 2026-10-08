@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { Cite } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
 import '@citation-js/plugin-csl';
@@ -8,6 +8,7 @@ import { db } from '../db/database';
 import { documents, citations, references, polishRecords } from '../db/schema';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx';
 import { AiService } from '../ai/ai.service';
+import { parseAuthors as parseAuthorArr, surnameOf } from '../common/authors';
 
 const MAX_VERSIONS = 20;
 
@@ -16,7 +17,7 @@ export class DocumentsService {
   constructor(private readonly ai: AiService) {}
 
   list(projectId: string) {
-    return db.select().from(documents).where(eq(documents.projectId, projectId)).orderBy(documents.updatedAt);
+    return db.select().from(documents).where(eq(documents.projectId, projectId)).orderBy(documents.updatedAt).all();
   }
 
   get(id: string) {
@@ -261,7 +262,7 @@ export class DocumentsService {
   }
 
   listPolishRecords(id: string) {
-    return db.select().from(polishRecords).where(eq(polishRecords.documentId, id)).orderBy(polishRecords.createdAt);
+    return db.select().from(polishRecords).where(eq(polishRecords.documentId, id)).orderBy(polishRecords.createdAt).all();
   }
 
   // ---------- 引用管理（Citation -> Reference 可追溯） ----------
@@ -323,9 +324,8 @@ export class DocumentsService {
     const doc = this.get(id);
     const outline = this.parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline || '[]');
     const citeRows = db.select().from(citations).where(eq(citations.documentId, id)).all();
-    const refList = citeRows
-      .map((c) => db.select().from(references).where(eq(references.id, c.referenceId)).get())
-      .filter(Boolean) as any[];
+    const refIds = citeRows.map((c) => c.referenceId).filter(Boolean);
+    const refList = refIds.length ? db.select().from(references).where(inArray(references.id, refIds)).all() : [];
     const lines: string[] = [];
     lines.push(`# ${doc.title}`);
     lines.push('');
@@ -375,9 +375,8 @@ export class DocumentsService {
     const doc = this.get(id);
     const outline = this.parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline || '[]');
     const citeRows = db.select().from(citations).where(eq(citations.documentId, id)).all();
-    const refList = citeRows
-      .map((c) => db.select().from(references).where(eq(references.id, c.referenceId)).get())
-      .filter(Boolean) as any[];
+    const refIds = citeRows.map((c) => c.referenceId).filter(Boolean);
+    const refList = refIds.length ? db.select().from(references).where(inArray(references.id, refIds)).all() : [];
 
     const children: Paragraph[] = [
       new Paragraph({ text: doc.title || '未命名论文', heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }),
@@ -468,7 +467,7 @@ const CSL_TEMPLATE_MAP: Record<string, string> = {
 };
 
 /** 解析 authors JSON 字符串为 citation-js CSL-JSON author 数组 */
-function toCslAuthors(authorsJson: string): { family: string; given: string }[] {
+function toCslAuthors(authorsJson: string | null): { family: string; given: string }[] {
   try {
     const arr = JSON.parse(authorsJson || '[]');
     if (!Array.isArray(arr)) return [];
@@ -484,7 +483,7 @@ function toCslAuthors(authorsJson: string): { family: string; given: string }[] 
 }
 
 /** citation-js Cite 对象构建（从 citation row 构建 CSL-JSON 条目） */
-function buildCiteEntry(row: { reference: { id: string; title: string; authors: string; year: number | null; venue: string; doi: string } }) {
+function buildCiteEntry(row: { reference: { id: string; title: string; authors: string | null; year: number | null; venue: string | null; doi: string | null } }) {
   return {
     id: row.reference.id,
     type: 'article-journal' as const,
@@ -501,7 +500,7 @@ function buildCiteEntry(row: { reference: { id: string; title: string; authors: 
  * BibTeX 直接用 citation-js bibtex 输出。
  */
 export function renderCitationsAsBibliography(
-  rows: { reference: { id: string; title: string; authors: string; year: number | null; venue: string; doi: string } }[],
+  rows: { reference: { id: string; title: string; authors: string | null; year: number | null; venue: string | null; doi: string | null } }[],
   format: string,
 ): string[] {
   const entries = rows.map(buildCiteEntry);
@@ -523,7 +522,7 @@ export function formatCitation(
   format: string,
   index: number,
 ): string {
-  const result = renderCitationsAsBibliography([{ reference: ref }], format);
+  const result = renderCitationsAsBibliography([{ reference: { ...ref, id: 'entry', authors: ref.authors || null, venue: ref.venue || null, doi: ref.doi || null } }], format);
   // 序号样式需要补编号（citation-js 不自动加 [n]）
   if (format === 'ieee' || format === 'vancouver' || format === 'nature' || format === 'springer' || format === 'acs') {
     return result[0] ? `[${index}] ${result[0]}` : '';

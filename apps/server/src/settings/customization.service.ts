@@ -94,14 +94,6 @@ export class CustomizationService {
     return { ok: true };
   }
 
-  /** 供流水线引擎读取：stepKey -> enabled */
-  getPipelineStepMap(): Record<string, number> {
-    const rows = db.select().from(pipelineConfigs).all();
-    const m: Record<string, number> = {};
-    for (const r of rows) m[r.stepKey] = r.enabled ?? 1;
-    return m;
-  }
-
   // ---------- 质量评分权重 ----------
   listQualityWeights() {
     const DIMS = [
@@ -130,12 +122,6 @@ export class CustomizationService {
     if (existing) db.update(appSettings).set({ value: JSON.stringify(weights) }).where(eq(appSettings.key, 'quality_weights')).run();
     else db.insert(appSettings).values({ key: 'quality_weights', value: JSON.stringify(weights) }).run();
     return this.listQualityWeights();
-  }
-
-  /** 供评分引擎读取 */
-  getQualityWeightsMap(): Record<string, number> {
-    const row = db.select().from(appSettings).where(eq(appSettings.key, 'quality_weights')).get();
-    try { return JSON.parse(row?.value || '{}'); } catch { return {}; }
   }
 
   // ---------- 意图判断模式 ----------

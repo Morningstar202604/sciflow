@@ -6,7 +6,7 @@ import { ReferencesService } from '../references/references.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 
 /** MCP 工具定义（符合 Model Context Protocol 2026 的 Tool 结构：name/description/inputSchema） */
-export interface McpTool {
+interface McpTool {
   name: string;
   description: string;
   inputSchema: Record<string, any>;

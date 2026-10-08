@@ -168,17 +168,17 @@ export class KnowledgeService {
         referenceId,
         createdAt: Date.now(),
       }).run();
-      const insertChunk = db.prepare(
-        `INSERT INTO knowledge_chunk (id, doc_id, content, seq, context, vector, embedding) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      const insertChunk = sqlite.prepare(
+        `INSERT INTO knowledge_chunk (id, doc_id, content, seq, context, embedding) VALUES (?, ?, ?, ?, ?, ?)`
       );
       const insertVec = sqlite.prepare(
         `INSERT OR REPLACE INTO knowledge_chunks_embedding (chunk_id, embedding) VALUES (?, ?)`
       );
-      const legacyVec = (text: string) => JSON.stringify(this.legacyTfVector(text));
       for (let i = 0; i < chunks.length; i++) {
         const chunkId = randomUUID();
-        insertChunk.run(chunkId, docId, chunks[i], i, context, legacyVec(chunks[i]), embeddings[i]);
-        insertVec.run(chunkId, embeddings[i]);
+        insertChunk.run(chunkId, docId, chunks[i], i, context, embeddings[i] ?? null);
+        // vec0 仅在有向量时写入（无向量则走 LIKE/BM25 兜底检索）
+        if (embeddings[i]) insertVec.run(chunkId, embeddings[i]);
       }
     };
     insertDoc();
@@ -186,30 +186,9 @@ export class KnowledgeService {
     return { id: docId, name, chunkCount: chunks.length, referenceId: referenceId || null };
   }
 
-  /** 为多段文本生成 embedding 数组（返回 Float32Array 序列化后的 Buffer） */
-  private async embedChunks(texts: string[]): Promise<Buffer[]> {
+  /** 为多段文本生成 embedding 数组（返回 Float32Array 序列化后的 Buffer；失败时对应位置为 null） */
+  private async embedChunks(texts: string[]): Promise<(Buffer | null)[]> {
     return Promise.all(texts.map((t) => this.embedding.embed(t)));
-  }
-
-  /** 旧版 TF 向量（保留用于兼容旧数据格式；新数据直接使用 sqlite-vec） */
-  private legacyTfVector(text: string): Record<string, number> {
-    const tokens = this.legacyTokenize(text);
-    const freq: Record<string, number> = {};
-    for (const tk of tokens) freq[tk] = (freq[tk] || 0) + 1;
-    const norm = Math.sqrt(Object.values(freq).reduce((s, v) => s + v * v, 0)) || 1;
-    const vec: Record<string, number> = {};
-    for (const [k, v] of Object.entries(freq)) vec[k] = v / norm;
-    return vec;
-  }
-
-  /** 轻量 tokenize：英文按词、中文按 bigram（零依赖，用于 legacy TF 回退） */
-  private legacyTokenize(text: string): string[] {
-    const t = text.toLowerCase();
-    const tokens: string[] = [];
-    for (const m of t.matchAll(/[a-z][a-z0-9_-]{1,}/g)) tokens.push(m[0]);
-    const cn = t.replace(/[^一-龥]/g, '');
-    for (let i = 0; i < cn.length - 1; i++) tokens.push(cn.slice(i, i + 2));
-    return tokens;
   }
 
   /** 项目知识库列表：每条嵌入绑定文献的摘要（未绑定时 reference=null） */
@@ -349,8 +328,10 @@ export class KnowledgeService {
         docId: row.doc_id,
         docName: row.doc_name,
         content: row.content,
+        context: row.context || null,
         seq: row.seq,
-        score: row.distance < 999 ? Math.max(0, Math.round((1 - row.distance) * 100)) : Math.round(Math.random() * 30),
+        // ANN 距离有效时用 (1-distance)*100 换算百分制；兜底 LIKE 命中给固定中间分，保证排序稳定
+        score: row.distance < 999 ? Math.max(0, Math.round((1 - row.distance) * 100)) : 15,
         referenceId: row.reference_id || null,
         referenceTitle: row.reference_id ? (refMap.get(row.reference_id)?.title || null) : null,
         referenceAuthors: row.reference_id ? (refMap.get(row.reference_id)?.authors || null) : null,
@@ -373,7 +354,7 @@ export class KnowledgeService {
       sources: hits.map((h) => ({
         docName: h.docName,
         snippet: h.content.slice(0, 120),
-        score: Math.round(h.score * 100),
+        score: h.score,
         chunkId: h.id,
         chunkText: h.content,
         chunkSeq: h.seq,

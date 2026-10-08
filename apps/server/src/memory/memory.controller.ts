@@ -12,12 +12,13 @@ export class MemoryController {
     return this.memory.add(type, body.content, body.projectId, body.keywords || []);
   }
 
-  /** 记忆列表：?type=procedural|episodic&q=关键词 */
+  /** 记忆列表：?type=procedural|episodic&q=关键词&projectId=项目ID */
   @Get()
-  list(@Query('type') type?: string, @Query('q') q?: string) {
+  list(@Query('type') type?: string, @Query('q') q?: string, @Query('projectId') projectId?: string) {
     return this.memory.list(
       type === 'procedural' || type === 'episodic' ? type : undefined,
       q,
+      projectId,
     );
   }
 

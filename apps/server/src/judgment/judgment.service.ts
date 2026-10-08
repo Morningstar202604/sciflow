@@ -12,7 +12,7 @@ import { eq } from 'drizzle-orm';
  * provider 可插拔：配置 JUDGMENT_BASE_URL / JUDGMENT_API_KEY 后自动切换到 Jev 类判别器 API。
  */
 
-export interface IntentResult {
+interface IntentResult {
   intent: string;
   label: string;
   confidence: number;
@@ -21,7 +21,7 @@ export interface IntentResult {
   matchedBy: 'rule' | 'llm';
 }
 
-export const INTENTS: { key: string; label: string; route: string; keywords: string[] }[] = [
+const INTENTS: { key: string; label: string; route: string; keywords: string[] }[] = [
   { key: 'search_literature', label: '检索文献', route: '/literature', keywords: ['查文献', '搜文献', '检索', '找论文', '找文献', '搜索文献', '查一下文献', '相关文献'] },
   { key: 'summarize', label: '文献综述', route: '/literature', keywords: ['综述', '总结文献', '文献总结', '梳理文献', 'literature review', 'survey'] },
   { key: 'extract', label: '结构化提取', route: '/literature', keywords: ['结构化提取', '提取文献', '对比表', '方法对比'] },
@@ -40,20 +40,6 @@ export const INTENTS: { key: string; label: string; route: string; keywords: str
   { key: 'quality', label: '质量评分', route: '/quality', keywords: ['评分', '质量', '打几分', '哪里有问题', '缺陷', '7维'] },
   { key: 'qa', label: '科研问答', route: '/chat', keywords: ['什么是', '解释', '原理', '为什么', '机制', '概念', '讲一下', '科普'] },
 ];
-
-const ROUTE_LABEL: Record<string, string> = {
-  '/literature': '文献调研',
-  '/writing': '论文写作',
-  '/pipeline': '全自动流水线',
-  '/quality': '质量评分',
-  '/chat': '科研问答',
-};
-
-const intentSchema = z.object({
-  intent: z.string(),
-  confidence: z.number().min(0).max(1),
-  topic: z.string(),
-});
 
 @Injectable()
 export class JudgmentService {
@@ -207,8 +193,4 @@ export class JudgmentService {
     return cleaned.split(/[，。？！,?!；;]/)[0].slice(0, 40) || '';
   }
 
-  /** 路由说明（给前端展示用） */
-  routeLabel(route: string): string {
-    return ROUTE_LABEL[route] || '科研助手';
-  }
 }

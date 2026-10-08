@@ -7,7 +7,7 @@ import { projects, documents, references, pipelineTasks, agentRuns, reflexionLog
 @Injectable()
 export class ProjectsService {
   list() {
-    return db.select().from(projects).orderBy(projects.updatedAt);
+    return db.select().from(projects).orderBy(projects.updatedAt).all();
   }
 
   get(id: string) {

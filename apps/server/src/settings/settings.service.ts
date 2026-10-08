@@ -20,7 +20,7 @@ const MODELS_TTL_MS = 5 * 60 * 1000;
  *  - 其他 key：等长星号掩码，仅保留尾4（等长便于前端判断"已配置"且不泄露长度语义之外的内容）
  *  - 空值原样返回空串
  */
-export function maskApiKey(key: unknown): string {
+function maskApiKey(key: unknown): string {
   const k = String(key ?? '');
   if (!k) return '';
   const tail = k.slice(-4);

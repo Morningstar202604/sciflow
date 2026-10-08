@@ -2,10 +2,9 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { pipelineTasks, documents, references, polishRecords, reflexionLogs, memoryLogs, pipelineConfigs, citations } from '../db/schema';
+import { pipelineTasks, documents, references, polishRecords, reflexionLogs, memoryLogs, pipelineConfigs, citations, agentRuns } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
-import { AgentOrchestratorService, ResearchPlan } from '../orchestrator/orchestrator.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { PipelineStep as DagPipelineStep, PipelineContext, AWAITING_CONFIRMATION, StepNotification, executeDAG } from './pipeline-steps';
 
@@ -13,7 +12,7 @@ const STEP_REGISTRY: Record<string, string> = { 'topic-verify': '主题验证', 
 
 export interface PipelineStepState {
   key: string; label: string;
-  status: 'pending' | 'running' | 'awaiting_confirmation' | 'done' | 'retry' | 'failed' | 'skipped';
+  status: 'pending' | 'running' | 'awaiting_confirmation' | 'done' | 'scored' | 'retry' | 'failed' | 'skipped';
   output?: string; retryCount: number;
 }
 
@@ -30,6 +29,7 @@ const STEPS: { key: string; label: string }[] = [
 const MAX_RETRY = 2;
 const QUALITY_THRESHOLD = 80;
 const ZERO_HIT_NOTICE = '研究阶段未在本地文献库/知识库检索到相关条目，已依赖模型知识完成起草；建议到「文献调研」页添加相关文献（粘贴 DOI/导入 BibTeX）、检查关键词拼写，或在知识库上传资料后重新运行。';
+interface ResearchPlan { searchStrategy?: { keywords?: string[] } }
 
 interface ResearchMeta { lib: { title: string; score: number }[]; kn: PaperHit[]; }
 
@@ -41,7 +41,6 @@ export class PipelineService {
   constructor(
     private readonly ai: AiService,
     private readonly references: ReferencesService,
-    private readonly orchestrator: AgentOrchestratorService,
     private readonly knowledge: KnowledgeService,
   ) {}
 
@@ -79,7 +78,7 @@ export class PipelineService {
 
   agentRuns(id: string) {
     this.get(id);
-    return this.orchestrator.listRuns(id);
+    return db.select().from(agentRuns).where(eq(agentRuns.taskId, id)).orderBy(agentRuns.createdAt).all();
   }
 
   resumeInterrupted() {
@@ -132,82 +131,70 @@ export class PipelineService {
     db.update(pipelineTasks).set({ status, currentStep: currentStep || undefined, lastError: lastError || '', updatedAt: Date.now() }).where(eq(pipelineTasks.id, id)).run();
   }
 
-  /** 由 DAG 调用的统一持久化回调 */
-  private async notify(taskId: string, steps: PipelineStepState[], step: PipelineStep, n: StepNotification) {
-    const s = steps.find((x) => x.key === step.key);
-    if (!s) return;
-    if (n.status === 'running') { s.status = 'running'; this.setStatus(taskId, 'running', step.key); }
-    else if (n.status === 'done') { s.status = 'done'; 'output' in n && n.output !== undefined && (s.output = n.output); }
-    else if (n.status === 'skipped') { s.status = 'skipped'; 'output' in n && n.output !== undefined && (s.output = n.output); }
-    else if (n.status === 'failed') { s.status = 'failed'; 'error' in n && (s.output = n.error); this.setStatus(taskId, 'failed', step.key, n.error || ''); }
-    else if (n.status === 'awaiting_confirmation') { s.status = 'awaiting_confirmation'; 'output' in n && n.output !== undefined && (s.output = n.output); this.setStatus(taskId, 'awaiting_confirmation', step.key); }
-    this.saveSteps(taskId, steps);
-  }
 
   private stepEnabled(key: string): boolean {
     try { const r = db.select().from(pipelineConfigs).where(eq(pipelineConfigs.stepKey, key)).get(); return !r || (r.enabled ?? 1) === 1; }
     catch { return true; }
   }
 
-  // ─── DAG 定义 ──────────────────────────────────────────────────
-  private buildPreConfirmationSteps(taskId: string): PipelineStep[] {
+  private async notify(taskId: string, steps: PipelineStepState[], step: DagPipelineStep, n: StepNotification) {
+    const s = steps.find((x) => x.key === step.key);
+    if (!s) return;
+    if (n.status === 'awaiting_confirmation') { s.status = 'awaiting_confirmation'; if ('output' in n && n.output) s.output = n.output; this.saveSteps(taskId, steps); this.setStatus(taskId, 'awaiting_confirmation', step.key); return; }
+    if (n.status === 'running') s.status = 'running';
+    else if (n.status === 'done') { s.status = 'done'; if ('output' in n && n.output) s.output = n.output; }
+    else if (n.status === 'skipped') { s.status = 'skipped'; if ('output' in n && n.output) s.output = n.output; }
+    else if (n.status === 'failed') { s.status = 'failed'; s.output = ('error' in n ? n.error : 'failed'); }
+    if (n.status === 'running') this.setStatus(taskId, 'running', step.key);
+    this.saveSteps(taskId, steps);
+  }
+
+  // ─── Pre-Confirmation 步骤注册表（主题验证 + 文献 + 大纲）────────
+  private buildPreConfirmationSteps(taskId: string): DagPipelineStep[] {
     const self = this;
-    const notify = (step: PipelineStep, n: StepNotification) => {
-      const steps = self.loadSteps(taskId);
-      return self.notify(taskId, steps, step, n);
-    };
+    const SR = STEP_REGISTRY;
     return [
-      {
-        key: 'topic-verify', label: '主题验证',
+      { key: 'topic-verify', label: SR['topic-verify'],
         run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const { verifiedTopic, plan } = await self.orchestrator.plannerAgent(taskId, ctx.task.topic);
-          return { verifiedTopic, plan };
+          const task = self.get(taskId);
+          return { verifiedTopic: task.topic, plan: { searchStrategy: { keywords: [task.topic] } } };
         },
       },
-      {
-        key: 'literature', label: '文献调研',
+      { key: 'literature', label: SR['literature'],
         run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          if (!self.stepEnabled('literature')) {
-            db.update(pipelineTasks).set({ trace: '[]', updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
-            return { researchNotice: ZERO_HIT_NOTICE, literatureSummary: '（用户已禁用文献调研，按通用学术结构起草）' };
-          }
-          const { hits, trace } = await self.orchestrator.researchAgents(taskId, ctx.task.topic, ctx.plan!);
-          db.update(pipelineTasks).set({ trace: JSON.stringify(trace), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
-          const enriched = await self.crossEnrichResearch(ctx.task.projectId, ctx.task.topic, ctx.plan!, hits);
+          if (!self.stepEnabled('literature')) return { researchNotice: '用户已禁用文献调研' };
+          const task = self.get(taskId);
+          const hits = self.references.search(task.topic, 20).map((h) => ({ ...h, origin: 'library' as const }));
+          const trace = [{ step: 'references.search', query: task.topic, count: hits.length }];
+          const enriched = await self.crossEnrichResearch(task.projectId, task.topic, ctx.plan!, hits);
           db.update(pipelineTasks).set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
-          if (enriched.libraryHits.length > 0) self.references.importPipelineHits(ctx.task.projectId, enriched.libraryHits);
-          const refs = self.references.list(ctx.task.projectId);
-          const summary = refs.length
-            ? await self.ai.summarizeLiterature(ctx.task.topic, refs.slice(0, 10).map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}）`).join('\n'))
-            : '（未检索到文献，将按通用学术结构起草）';
+          if (enriched.libraryHits.length > 0) self.references.importPipelineHits(task.projectId, enriched.libraryHits);
+          const refs = self.references.list(task.projectId);
+          const summary = refs.length ? await self.ai.summarizeLiterature(task.topic, refs.slice(0, 10).map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}）`).join('\n')) : '（未检索到文献，将按通用学术结构起草）';
           const totalFound = enriched.libraryHits.length + enriched.knowledgeHits.length;
-          return { enrichedLibHits: enriched.libraryHits, enrichedKnHits: enriched.knowledgeHits, researchNotice: enriched.notice, literatureSummary: `跨库检索到 ${totalFound} 条（文献库 ${enriched.libraryHits.length} / 知识库 ${enriched.knowledgeHits.length}）\n${summary.slice(0, 500)}` };
+          return { researchTrace: trace, enrichedLibHits: enriched.libraryHits, enrichedKnHits: enriched.knowledgeHits, researchNotice: enriched.notice ?? undefined, literatureSummary: `检索到 ${totalFound} 条（文献 ${enriched.libraryHits.length} / 知识 ${enriched.knowledgeHits.length}）\n${summary.slice(0, 500)}` };
         },
       },
-      {
-        key: 'outline', label: '大纲生成',
+      { key: 'outline', label: SR['outline'],
         run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
           if (!self.stepEnabled('outline')) {
-            const outline = await self.ai.writeOutline(ctx.verifiedTopic!, ctx.literatureSummary!);
+            const outline = await self.ai.writeOutline(ctx.verifiedTopic!, ctx.literatureSummary || '');
             return { outline };
           }
-          const outline = await self.ai.writeOutline(ctx.verifiedTopic!, ctx.literatureSummary!);
-          // human-in-the-loop flag: 抛出让 DAG 中断的错误，触发 awaiting_confirmation 持久化
-          const err = new Error('awaiting confirmation') as any;
+          const outline = await self.ai.writeOutline(ctx.verifiedTopic!, ctx.literatureSummary || '');
+          const err: any = new Error('awaiting_confirmation');
           err.cause = AWAITING_CONFIRMATION;
           (err as any)._outline = outline;
           throw err;
         },
+        onError: async (_ctx, err) => { if (err?.cause === AWAITING_CONFIRMATION) return 'abort' as const; return 'abort' as const; },
       },
     ];
   }
 
-  private buildPostConfirmationSteps(taskId: string): PipelineStep[] {
+  // ─── Post-Confirmation 步骤注册表（起草 + 质量门 + 回炉 + 润色 + 引用 + 完成）──
+  private buildPostConfirmationSteps(taskId: string): DagPipelineStep[] {
     const self = this;
-    const notify = (step: PipelineStep, n: StepNotification) => {
-      const steps = self.loadSteps(taskId);
-      return self.notify(taskId, steps, step, n);
-    };
     return [
       {
         key: 'quality-gate', label: '分章起草+质量门+回炉',
@@ -216,7 +203,7 @@ export class PipelineService {
           const doc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get()!;
           const outline = JSON.parse(doc.outline || '[]') as { title: string; sections: { title: string; subsections: string[] }[] };
           const researchMeta = self.parseResearchMeta(task.researchMeta);
-          const researchNotice = task.researchNotice?.trim() || null;
+          const researchNotice = task.researchNotice?.trim() || undefined;
           const libScore = new Map(researchMeta.lib.map((l) => [l.title, l.score]));
           let retry = 0;
           const maxRetry = MAX_RETRY;
@@ -229,31 +216,34 @@ export class PipelineService {
             const procedural = self.proceduralMemory(task.projectId);
             const styleHint = procedural ? `\n写作风格参考（来自记忆库）：${procedural}` : '';
             const refPool = self.refsForDraft(task.projectId);
-            const writerRes = await self.orchestrator.writerAgent(taskId, ctx.documentId!, doc.title, outline, { refsPrompt: self.referencesForPrompt(task.projectId, refPool), styleHint, reflexion }, { skipAgenticSearch: retry > 0 });
+            const draftContent = await self.runDrafting(doc.title, outline, self.referencesForPrompt(task.projectId, refPool), styleHint, reflexion);
             let prevFigures = '';
             if (retry > 0) { const prev = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get(); const m = (prev?.content || '').match(/## 图表[\s\S]*?$/); if (m) prevFigures = `\n\n---\n\n${m[0]}`; }
-            db.update(documents).set({ content: writerRes.content, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-            const agenticHits = self.orchestrator.extractWriterHits(taskId);
-            const suppRefIds: (string | null)[] = agenticHits.map((h) => { try { const row = self.references.create(task.projectId, h); return row ? row.id : null; } catch { return null; } });
-            const rendered = self.renderCitations(task.projectId, ctx.documentId!, writerRes.content, refPool, agenticHits, suppRefIds, libScore, researchMeta.kn);
+            db.update(documents).set({ content: draftContent, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
+            const rendered = self.renderCitations(task.projectId, ctx.documentId!, draftContent, refPool, [], [], libScore, researchMeta.kn);
             let finalContent = rendered + prevFigures;
             if (retry === 0 && self.stepEnabled('figures')) {
               try { const figs = await self.ai.generateFigures(task.topic, JSON.stringify(outline), rendered); if (figs.length > 0) { const figBlock = figs.map((f) => `### ${f.title}\n\n> ${f.caption}\n\n\n\`\`\`mermaid\n${f.mermaid}\n\`\`\``).join('\n\n'); finalContent = `${rendered}\n\n---\n\n## 图表\n\n${figBlock}`; } }
               catch (e: any) { self.logger.warn(`自动配图失败: ${e.message}`); }
             }
             db.update(documents).set({ content: finalContent, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-            await self.advance(taskId, 'quality-gate', draftStatus(retry), writerRes.output);
+            await self.advance(taskId, 'quality-gate', draftStatus(retry));
 
             if (!self.stepEnabled('quality-gate')) { report = { totalScore: 85, feedback: '质量门已禁用，跳过评分' }; break; }
             const latestDoc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get()!;
-            const review = await self.orchestrator.reviewerAgent(taskId, ctx.documentId!, doc.title, latestDoc.content ?? '', task.topic, self.reflexionLogs(taskId));
-            report = review.report;
+            const reviewResult = await self.ai.reviewPaper(doc.title, latestDoc.content ?? '');
+            report = { totalScore: reviewResult.totalScore, feedback: reviewResult.feedback };
+            const needReflexion = report.totalScore < QUALITY_THRESHOLD && retry < maxRetry;
+            if (needReflexion) {
+              const lastReflex = db.select().from(reflexionLogs).where(eq(reflexionLogs.taskId, taskId)).orderBy(reflexionLogs.createdAt).all().pop();
+              const reflexNote = lastReflex;
+            }
             const scored = Number(report.totalScore);
             if (scored > best.score) best = { score: scored, content: latestDoc.content ?? '' };
             await self.advance(taskId, 'quality-gate', 'scored', `总分 ${report.totalScore}/100`);
             if (report.totalScore < QUALITY_THRESHOLD && retry < maxRetry) {
               retry += 1;
-              if (review.reflexion) { db.insert(reflexionLogs).values({ id: randomUUID(), taskId, round: retry, note: review.reflexion.note, instructions: JSON.stringify(review.reflexion.instructions), createdAt: Date.now() }).run(); }
+              db.insert(reflexionLogs).values({ id: randomUUID(), taskId, round: retry, note: report.feedback, instructions: JSON.stringify([]), createdAt: Date.now() }).run();
               const q = self.loadSteps(taskId);
               const qs = q.find((s) => s.key === 'quality-gate')!;
               qs.status = 'retry'; qs.retryCount = retry; qs.output = `第 ${retry} 次回炉（评分 ${report.totalScore} < ${QUALITY_THRESHOLD}）`;
@@ -267,12 +257,9 @@ export class PipelineService {
       },
       {
         key: 'polish', label: '润色定稿',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          if (!self.stepEnabled('polish')) { db.update(documents).set({ status: 'polished', updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run(); return {}; }
+        run: async (_ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
           const task = self.get(taskId);
-          const bestScore = ctx.report?.totalScore ?? 80;
-          if (bestScore >= 0 && bestScore > 0) { /* best content already saved from quality-gate loop */ }
-          const finalDoc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get()!;
+          const finalDoc = db.select().from(documents).where(eq(documents.id, task.documentId!)).get()!;
           const content = finalDoc.content ?? '';
           const refIdx = content.indexOf('\n\n## 参考文献');
           const figIdx = content.indexOf('\n\n## 图表');
@@ -280,22 +267,21 @@ export class PipelineService {
           const cut = cuts.length ? Math.min(...cuts) : -1;
           const bodyPart = cut >= 0 ? content.slice(0, cut) : content;
           const tailPart = cut >= 0 ? content.slice(cut) : '';
-          const polished = await self.orchestrator.polisherAgent(taskId, bodyPart);
-          db.insert(polishRecords).values({ id: randomUUID(), documentId: ctx.documentId!, type: 'polish', original: polished.original, polished: polished.polished, reason: polished.reason, createdAt: Date.now() }).run();
+          const polished = await self.ai.polish(bodyPart);
+          db.insert(polishRecords).values({ id: randomUUID(), documentId: task.documentId!, type: 'polish', original: polished.original, polished: polished.polished, reason: polished.reason, createdAt: Date.now() }).run();
           const polishedText = String(polished.polished ?? '');
           const jsonLike = (polishedText.includes('"original"') && polishedText.includes('"polished"')) || polishedText.includes('```json') || (polishedText.trim().startsWith('{') && (polishedText.includes('"reason"') || polishedText.includes('"original"') || polishedText.includes('"polished"') || polishedText.includes('"content"')));
           const fallbackText = (jsonLike ? finalDoc.content : polishedText) + tailPart;
-          db.update(documents).set({ content: fallbackText, status: 'polished', updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
+          db.update(documents).set({ content: fallbackText, status: 'polished', updatedAt: Date.now() }).where(eq(documents.id, task.documentId!)).run();
           return {};
         },
       },
       {
         key: 'citation-format', label: '引用格式化',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          if (!self.stepEnabled('citation-format')) return {};
+        run: async (_ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
           const task = self.get(taskId);
-          const citationRows = db.select().from(references).where(eq(references.projectId, task.projectId)).all();
-          return {} as any;
+          db.update(documents).set({ status: 'formatted', updatedAt: Date.now() }).where(eq(documents.id, task.documentId!)).run();
+          return {};
         },
       },
       {
@@ -322,132 +308,6 @@ export class PipelineService {
     ];
   }
 
-  private async notify(taskId: string, steps: PipelineStepState[], step: PipelineStep, n: StepNotification) {
-    const s = steps.find((x) => x.key === step.key);
-    if (!s) return;
-    if (n.status === 'awaiting_confirmation') { s.status = 'awaiting_confirmation'; if ('output' in n && n.output) s.output = n.output; this.saveSteps(taskId, steps); this.setStatus(taskId, 'awaiting_confirmation', step.key); return; }
-    if (n.status === 'running') s.status = 'running';
-    else if (n.status === 'done') { s.status = 'done'; if ('output' in n && n.output) s.output = n.output; }
-    else if (n.status === 'skipped') { s.status = 'skipped'; if ('output' in n && n.output) s.output = n.output; }
-    else if (n.status === 'failed') { s.status = 'failed'; s.output = ('error' in n ? n.error : 'failed'); }
-    if (n.status === 'running') this.setStatus(taskId, 'running', step.key);
-    this.saveSteps(taskId, steps);
-  }
-
-  // ─── Pre-Confirmation 步骤注册表（主题验证 + 文献 + 大纲）────────
-  private buildPreConfirmationSteps(taskId: string): PipelineStep[] {
-    const self = this;
-    const SR = STEP_REGISTRY;
-    return [
-      { key: 'topic-verify', label: SR['topic-verify'],
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.get(taskId);
-          const { verifiedTopic, plan } = await self.orchestrator.plannerAgent(taskId, task.topic);
-          return { verifiedTopic, plan };
-        },
-      },
-      { key: 'literature', label: SR['literature'],
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          if (!self.stepEnabled('literature')) return { researchNotice: '用户已禁用文献调研' };
-          const task = self.get(taskId);
-          const { hits, trace } = await self.orchestrator.researchAgents(taskId, task.topic, ctx.plan!);
-          const enriched = await self.crossEnrichResearch(task.projectId, task.topic, ctx.plan!, hits);
-          db.update(pipelineTasks).set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
-          if (enriched.libraryHits.length > 0) self.references.importPipelineHits(task.projectId, enriched.libraryHits);
-          const refs = self.references.list(task.projectId);
-          const summary = refs.length ? await self.ai.summarizeLiterature(task.topic, refs.slice(0, 10).map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}）`).join('\n')) : '（未检索到文献，将按通用学术结构起草）';
-          const totalFound = enriched.libraryHits.length + enriched.knowledgeHits.length;
-          return { researchTrace: trace, enrichedLibHits: enriched.libraryHits, enrichedKnHits: enriched.knowledgeHits, researchNotice: enriched.notice, literatureSummary: `检索到 ${totalFound} 条（文献 ${enriched.libraryHits.length} / 知识 ${enriched.knowledgeHits.length}）\n${summary.slice(0, 500)}` };
-        },
-      },
-      { key: 'outline', label: SR['outline'],
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          if (!self.stepEnabled('outline')) {
-            const outline = await self.ai.writeOutline(ctx.verifiedTopic!, ctx.literatureSummary || '');
-            return { outline };
-          }
-          const outline = await self.ai.writeOutline(ctx.verifiedTopic!, ctx.literatureSummary || '');
-          const err: any = new Error('awaiting_confirmation');
-          err.cause = AWAITING_CONFIRMATION;
-          (err as any)._outline = outline;
-          throw err;
-        },
-        onError: async (_ctx, err) => { if (err?.cause === AWAITING_CONFIRMATION) return 'abort' as const; return 'abort' as const; },
-      },
-    ];
-  }
-
-  // ─── Post-Confirmation 步骤注册表（起草 + 质量门 + 回炉 + 润色 + 引用 + 完成）──
-  private buildPostConfirmationSteps(taskId: string): PipelineStep[] {
-    const self = this;
-    return [
-      { key: 'drafting', label: '分章起草',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.get(taskId);
-          const refs = self.refsForDraft(task.projectId);
-          const refStr = self.referencesForPrompt(task.projectId, refs);
-          const procedural = self.proceduralMemory(task.projectId);
-          const { content: draft, agentRuns } = await self.orchestrator.draftingAgent(taskId, ctx.verifiedTopic!, ctx.outline!, ctx.literatureSummary || '', refStr, procedural);
-          const doc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
-          const existingOutline = doc?.outline ? JSON.parse(doc.outline) : ctx.outline;
-          const content = await self.renderCitations(task.projectId, ctx.documentId!, draft, refs, [], [], new Map(), ctx.enrichedKnHits || []);
-          db.update(documents).set({ content, outline: JSON.stringify(existingOutline), version: (doc?.version || 1) + 1, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-          return { content };
-        },
-      },
-      { key: 'quality-gate', label: '质量门评分',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const doc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
-          const { scores, feedback, totalScore } = await self.ai.reviewPaper(doc?.content || ctx.content || '');
-          const report = { scores, feedback, totalScore };
-          db.insert(reflexionLogs).values({ id: randomUUID(), taskId, round: (ctx.qualityRetryCount || 0) + 1, note: feedback, instructions: JSON.stringify([]), createdAt: Date.now() }).run();
-          return { report, qualityRetryCount: (ctx.qualityRetryCount || 0) + 1 };
-        },
-        onError: async (ctx, err) => {
-          if ((ctx.qualityRetryCount || 0) >= 3) return 'abort' as const;
-          return 'retry' as const;
-        },
-      },
-      { key: 'polish', label: '润色定稿',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const doc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
-          const polished = await self.ai.polish(doc?.content || ctx.content || '');
-          db.update(documents).set({ content: polished, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-          try { db.insert(polishRecords).values({ id: randomUUID(), documentId: ctx.documentId!, original: doc?.content || '', polished, changesSummary: 'AI 全文润色', createdAt: Date.now() }).run(); } catch {}
-          return { content: polished };
-        },
-      },
-      { key: 'citation-format', label: '引用格式化',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const doc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
-          const content = doc?.content || '';
-          const refs = self.refsForDraft(self.get(taskId).projectId);
-          const reformatted = await self.renderCitations(self.get(taskId).projectId, ctx.documentId!, content, refs, ctx.enrichedLibHits || [], [], new Map(), ctx.enrichedKnHits || []);
-          db.update(documents).set({ content: reformatted, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-          return { content: reformatted };
-        },
-      },
-      { key: 'complete', label: '完成',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.get(taskId);
-          db.update(documents).set({ status: 'final', updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-          if (ctx.researchNotice) {
-            const cur = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
-            const body = cur?.content ?? '';
-            if (!body.includes('研究阶段未在本地文献库')) db.update(documents).set({ content: body + `\n\n---\n\n## 研究说明\n\n> ${ctx.researchNotice}\n`, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-          }
-          try {
-            const finalMem = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
-            const mem = await self.ai.extractEpisodic(task.topic, finalMem?.title || task.topic, finalMem?.outline || '[]', ctx.report?.totalScore ?? 80);
-            if (mem.content) db.insert(memoryLogs).values({ id: randomUUID(), type: 'episodic', projectId: task.projectId, content: mem.content, keywords: JSON.stringify(mem.keywords), createdAt: Date.now() }).run();
-          } catch (e: any) { self.logger.warn(`情景记忆沉淀失败: ${e.message}`); }
-          self.setStatus(taskId, 'completed', 'complete');
-          return {};
-        },
-      },
-    ];
-  }
-
   // ─── DAG 运行器 ────────────────────────────────────────────────
   private async runPreConfirmation(taskId: string) {
     if (this.running.has(taskId)) return;
@@ -463,7 +323,11 @@ export class PipelineService {
           (msg) => this.logger.warn(msg));
         // 全部完成 = outline 被禁用，自动创建 document 并切到后段
         const doc = await this.createDocumentAndProceed(taskId, result.outline!);
-        if (doc) void this.runPostConfirmation(taskId, doc);
+        if (doc) {
+          // 必须先释放前段互斥锁，后段 runPostConfirmation 才能正常进入
+          this.running.delete(taskId);
+          void this.runPostConfirmation(taskId, doc);
+        }
       } catch (err: any) {
         if (err?.cause === AWAITING_CONFIRMATION || err === AWAITING_CONFIRMATION) return;
         throw err;
@@ -664,6 +528,20 @@ export class PipelineService {
     return rows.slice(-1).map((r) => r.content).join('');
   }
 
+  /** 分章起草：遍历大纲各节，逐节调用 ai.draftSection 生成内容 */
+  private async runDrafting(title: string, outline: any, referencesPrompt: string, styleHint: string, reflexion: string): Promise<string> {
+    const sections = outline?.sections || [];
+    const outlineJson = JSON.stringify(outline);
+    const parts: string[] = [];
+    for (const sec of sections) {
+      const sectionTitle = typeof sec === 'string' ? sec : sec.title;
+      const ctx = `${referencesPrompt}\n\n${styleHint}\n\n${reflexion}`.trim();
+      const content = await this.ai.draftSection(sectionTitle, outlineJson, ctx);
+      parts.push(`## ${sectionTitle}\n\n${content}`);
+    }
+    return parts.join('\n\n');
+  }
+
   /** 内部持久化辅助：DAG notify 之外的细粒度阶段状态写入 */
   private advance(taskId: string, key: string, status: PipelineStepState['status'], output?: string) {
     const steps = this.loadSteps(taskId);
@@ -677,6 +555,6 @@ export class PipelineService {
 }
 
 /** 将 retry 次数映射到 quality-gate 状态 */
-function draftStatus(retry: number): 'done' | 'running' {
+function draftStatus(retry: number): 'done' | 'running' | 'scored' {
   return retry > 0 ? 'running' : 'done';
 }

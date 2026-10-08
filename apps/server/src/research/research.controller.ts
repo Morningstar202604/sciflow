@@ -5,31 +5,27 @@ import { ResearchService } from './research.service';
 export class ResearchController {
   constructor(private readonly research: ResearchService) {}
 
-  @Post('design-review')
-  async designReview(@Body() body: { idea: string; papers?: any[] }) {
-    const result = await this.research.designReview(body?.idea || '', body?.papers);
+  /** 统一处理 AI 返回的 { error } 结构：有 error 时抛 HttpException，否则返回结果 */
+  private assertNoError(result: any) {
     if ('error' in result) {
       throw new HttpException((result as { error: string }).error, HttpStatus.BAD_REQUEST);
     }
     return result;
+  }
+
+  @Post('design-review')
+  async designReview(@Body() body: { idea: string; papers?: any[] }) {
+    return this.assertNoError(await this.research.designReview(body?.idea || '', body?.papers));
   }
 
   @Post('comparison')
   async compare(@Body() body: { papers: any[] }) {
-    const result = await this.research.comparePapers(body?.papers || []);
-    if ('error' in result) {
-      throw new HttpException((result as { error: string }).error, HttpStatus.BAD_REQUEST);
-    }
-    return result;
+    return this.assertNoError(await this.research.comparePapers(body?.papers || []));
   }
 
   @Post('review')
   async review(@Body() body: { title: string; content: string }) {
-    const result = await this.research.simulatedReview(body?.title || '', body?.content || '');
-    if ('error' in result) {
-      throw new HttpException((result as { error: string }).error, HttpStatus.BAD_REQUEST);
-    }
-    return result;
+    return this.assertNoError(await this.research.simulatedReview(body?.title || '', body?.content || ''));
   }
 
   /* —— 审稿意见闭环 —— */

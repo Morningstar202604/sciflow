@@ -1,14 +1,12 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import pLimit from 'p-limit';
 import pRetry from 'p-retry';
 import { sqlite } from '../db/database';
 import { db } from '../db/database';
 import { llmCallLogs, customPrompts, appSettings } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import * as prompts from './prompts';
-import { startMockGateway } from './mock-gateway';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -50,6 +48,7 @@ interface CompleteOptions {
  */
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
   private baseUrl = (process.env.AI_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
   private apiKey = process.env.AI_API_KEY || '';
   /** fast 档：轻量快速模型（默认） */
@@ -63,15 +62,8 @@ export class AiService {
    */
   private readonly mockMode = process.env.AI_MOCK === '1';
 
-  constructor() {
+constructor() {
     this.applyActiveProvider();
-    // mock 模式优先于 DB 激活厂商：覆盖连接配置并惰性启动本地 mock 网关
-    if (this.mockMode) {
-      this.baseUrl = startMockGateway();
-      this.apiKey = 'sk-mock-local-placeholder';
-      this.fastModel = 'mock-model';
-      this.strongModel = 'mock-model';
-    }
   }
 
   /** 从 model_provider 表读取激活厂商并覆盖连接配置（LiteLLM 式多厂商切换） */
@@ -183,15 +175,45 @@ export class AiService {
     }
   }
 
-  // ---------- 并发限流（p-limit：轻量、并发安全，替代手搓令牌桶） ----------
+  // ---------- 并发限流：手写 class 版 p-limit（避免外部包运行时缺失） ----------
   // RPM 换算为并发上限：假设单请求 ~10s，RPM 60 → 最多 6 并发；取保守值避免 429
-  private readonly limit = pLimit(Math.max(1, Math.floor(Number(process.env.AI_RPM_CAP || 60) / 6)));
+  private readonly limit = this.createLimiter(Math.max(1, Math.floor(Number(process.env.AI_RPM_CAP || 60) / 6)));
+
+  /** 极简并发队列：等同 p-limit(concurrency) —— activeCount 超限时挂起，队头释放后唤醒 */
+  private createLimiter(concurrency: number) {
+    let active = 0;
+    const queue: (() => void)[] = [];
+    const next = () => {
+      if (active >= concurrency || !queue.length) return;
+      active++;
+      const fn = queue.shift()!;
+      fn();
+    };
+    return <T>(task: () => T | Promise<T>): Promise<T> =>
+      new Promise<T>((resolve, reject) => {
+        const run = () => {
+          Promise.resolve()
+            .then(task)
+            .then(resolve, reject)
+            .finally(() => {
+              active--;
+              next();
+            });
+        };
+        if (active < concurrency) {
+          active++;
+          run();
+        } else {
+          queue.push(run);
+        }
+      });
+  }
 
   /** 统一构造 OpenAI 兼容补全请求（complete / completeStream / testConnection 共用） */
   private buildChatRequest(
     model: string,
     messages: ChatMessage[],
-    opts: { temperature?: number; maxTokens?: number; stream?: boolean; streamIncludeUsage?: boolean; enableThinking?: boolean },
+    opts: { temperature?: number; maxTokens?: number; stream?: boolean; streamIncludeUsage?: boolean; enableThinking?: boolean; jsonSchema?: { name: string; schema: Record<string, unknown> } },
     timeoutMs: number,
     signal?: AbortSignal,
   ) {
@@ -253,10 +275,10 @@ export class AiService {
           minTimeout: 1000,
           maxTimeout: 30_000,
           onFailedAttempt: (err) => {
-            console.warn(`[AiService] 重试 ${err.attemptNumber}/${err.retriesLeft + err.attemptNumber - 1}: ${err.message}`);
+            // 仅对 429 限流重试；其他错误立即抛出
+            if (Number(err?.status) !== 429) throw err;
+            this.logger.warn(`重试 ${err.attemptNumber}/${err.retriesLeft + err.attemptNumber - 1}: ${err.message}`);
           },
-          // 仅对 429 限流重试；其他错误立即抛出
-          shouldRetry: (err) => Number(err?.status) === 429,
         },
       ),
     ).then(({ content, data }) => {
@@ -297,7 +319,7 @@ export class AiService {
       if (!res.ok && opts.streamIncludeUsage) {
         const status = res.status;
         await res.body?.cancel().catch(() => undefined);
-        console.warn(`[AiService] 上游拒绝 stream_options.include_usage (HTTP ${status})，去掉该参数重试`);
+        this.logger.warn(`上游拒绝 stream_options.include_usage (HTTP ${status})，去掉该参数重试`);
         res = await this.buildChatRequest(
           model,
           messages,
@@ -382,11 +404,6 @@ export class AiService {
       signal: streamOpts.signal,
       streamIncludeUsage: true,
     });
-  }
-
-  /** 选题建议 */
-  async suggestTopics(field: string, context: string): Promise<string> {
-    return this.complete([{ role: 'user', content: prompts.SUGGEST_TOPICS(field, context) }], { temperature: 0.8, context: 'suggestTopics' });
   }
 
   /** 大纲生成（outline-first）；zod 校验失败时按纯文本标题兜底 */
@@ -629,106 +646,6 @@ export class AiService {
     return this.complete([{ role: 'user', content: prompts.KNOWLEDGE_QA(question, chunks) }], { temperature: 0.3, maxTokens: 2048, context: 'knowledgeQa' });
   }
 
-  // ---------- Phase 1：Planner / ReAct / Reflexion ----------
-
-  /** 研究计划生成（对标 GPT Researcher planner）：zod 校验失败时回退标准计划 */
-  async generatePlan(topic: string, preface = ''): Promise<{
-    objective: string;
-    researchQuestions: string[];
-    searchStrategy: { keywords: string[]; minPapers: number; depth: string };
-    draftingPlan: { sections: string[]; wordCount: number };
-    risks: string[];
-  }> {
-    // preface 为空时 effTopic === topic，行为与之前完全一致；仅 Planner 首轮注入项目要求（差距 #22）
-    const effTopic = preface ? `项目要求：${preface}\n\n研究主题：${topic}` : topic;
-    const raw = await this.complete([{ role: 'user', content: prompts.PLAN_RESEARCH(effTopic) }], { temperature: 0.4, model: 'strong', context: 'generatePlan' });
-    const fallback = {
-      objective: `围绕「${topic}」完成一篇系统性综述`,
-      researchQuestions: [topic],
-      searchStrategy: { keywords: [topic], minPapers: 8, depth: 'overview' },
-      draftingPlan: { sections: ['引言', '相关工作', '方法', '实验与结果', '讨论', '结论'], wordCount: 6000 },
-      risks: [],
-    };
-    const schema = z.object({
-      objective: z.string().optional(),
-      researchQuestions: z.array(z.string()).optional(),
-      searchStrategy: z.object({
-        keywords: z.array(z.string()).optional(),
-        minPapers: z.number().optional(),
-        depth: z.string().optional(),
-      }).optional(),
-      draftingPlan: z.object({
-        sections: z.array(z.string()).optional(),
-        wordCount: z.number().optional(),
-      }).optional(),
-      risks: z.array(z.string()).optional(),
-    });
-    const p = this.safeParse(raw, schema);
-    if (!p) return fallback;
-    return {
-      objective: String(p.objective || fallback.objective),
-      researchQuestions: (p.researchQuestions?.length ? p.researchQuestions : fallback.researchQuestions).slice(0, 5).map(String),
-      searchStrategy: {
-        keywords: (p.searchStrategy?.keywords?.length ? p.searchStrategy.keywords : [topic]).slice(0, 8).map(String),
-        minPapers: Number(p.searchStrategy?.minPapers) || 8,
-        depth: String(p.searchStrategy?.depth || 'overview'),
-      },
-      draftingPlan: {
-        sections: (p.draftingPlan?.sections?.length ? p.draftingPlan.sections : fallback.draftingPlan.sections).map(String),
-        wordCount: Number(p.draftingPlan?.wordCount) || 6000,
-      },
-      risks: (p.risks || []).map(String),
-    };
-  }
-
-  /** ReAct 思考步：决定检索或收尾（对标 ReAct think-act-observe）；zod 校验失败兜底继续检索 */
-  async reactThink(
-    topic: string,
-    questions: string[],
-    past: { round: number; query: string; found: number }[],
-  ): Promise<{ thought: string; action: 'search' | 'done'; query: string; coverage: number }> {
-    const pastText = past
-      .map((p) => `第${p.round}轮：检索词「${p.query}」→ 获得 ${p.found} 条文献`)
-      .join('\n');
-    const raw = await this.complete([{ role: 'user', content: prompts.REACT_THINK(topic, questions, pastText) }], { temperature: 0.3, model: 'fast', context: 'reactThink' });
-    const schema = z.object({
-      thought: z.string().optional(),
-      action: z.enum(['search', 'done']).optional(),
-      query: z.string().optional(),
-      coverage: z.number().optional(),
-    });
-    const r = this.safeParse(raw, schema);
-    if (r) {
-      return {
-        thought: String(r.thought || ''),
-        action: r.action === 'done' ? 'done' : 'search',
-        query: String(r.query || ''),
-        coverage: Math.max(0, Math.min(100, Number(r.coverage) || 0)),
-      };
-    }
-    return { thought: '（解析失败，进入下一轮检索）', action: 'search', query: '', coverage: 0 };
-  }
-
-  /** Reflexion：把评审反馈提炼为可执行修改指令（对标 Reflexion 语义梯度）；zod 校验失败兜底 */
-  async reflect(topic: string, feedback: string, pastReflections: string): Promise<{ note: string; instructions: string[] }> {
-    const raw = await this.complete(
-      [{ role: 'user', content: prompts.REFLEXION_PROMPT(topic, feedback, pastReflections) }],
-      { temperature: 0.3, context: 'reflect' },
-    );
-    const schema = z.object({
-      note: z.string().optional(),
-      instructions: z.array(z.string()).optional(),
-    });
-    const r = this.safeParse(raw, schema);
-    if (r && (r.note || r.instructions?.length)) {
-      return {
-        note: String(r.note || '改进论文质量'),
-        instructions: (r.instructions || []).map(String).slice(0, 5),
-      };
-    }
-    return { note: '改进论文质量', instructions: [] };
-  }
-
   // ---------- Phase 2：记忆 ----------
 
   /** 情景记忆压缩（从完成的任务中提炼可复用要点） */
@@ -762,11 +679,11 @@ export class AiService {
       try {
         parsed = this.jsonOf<{ figures?: { figureType: string; title: string; caption: string; mermaid: string }[] }>(raw);
       } catch {
-        console.warn(`[sciflow] 配图 JSON 解析失败（第 ${attempt + 1} 次），重试…`);
+        this.logger.warn(`配图 JSON 解析失败（第 ${attempt + 1} 次），重试…`);
       }
     }
     if (!parsed) {
-      console.warn('[sciflow] 配图两次解析均失败，本轮跳过图表生成');
+      this.logger.warn('配图两次解析均失败，本轮跳过图表生成');
       return [];
     }
     return (parsed.figures || []).slice(0, 3).map((f) => ({
