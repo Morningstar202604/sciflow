@@ -2,11 +2,26 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { pipelineTasks, documents, references, polishRecords, reflexionLogs, memoryLogs, pipelineConfigs, citations, agentRuns } from '../db/schema';
+import { pipelineTasks, documents, references, polishRecords, reflexionLogs, memoryLogs, pipelineConfigs, agentRuns } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
+import { parseJson, parseStringList } from '../common/json-guard';
 import { KnowledgeService } from '../knowledge/knowledge.service';
-import { PipelineStep as DagPipelineStep, PipelineContext, AWAITING_CONFIRMATION, StepNotification, executeDAG } from './pipeline-steps';
+import {
+  PipelineStep as DagPipelineStep,
+  AWAITING_CONFIRMATION,
+  StepNotification,
+  executeDAG,
+} from './pipeline-steps';
+import type {
+  PipelineContext,
+  PipelineTaskRow,
+  Outline,
+  QualityReport,
+  ResearchPlan,
+  ResearchTraceEntry,
+} from './pipeline-steps';
+import { CitationRenderer } from './citation-renderer';
 
 const STEP_REGISTRY: Record<string, string> = { 'topic-verify': '主题验证', 'literature': '文献调研', 'outline': '大纲生成', 'drafting': '分章起草', 'quality-gate': '质量门评分', 'polish': '润色定稿', 'citation-format': '引用格式化', 'complete': '完成' };
 
@@ -29,13 +44,13 @@ const STEPS: { key: string; label: string }[] = [
 const MAX_RETRY = 2;
 const QUALITY_THRESHOLD = 80;
 const ZERO_HIT_NOTICE = '研究阶段未在本地文献库/知识库检索到相关条目，已依赖模型知识完成起草；建议到「文献调研」页添加相关文献（粘贴 DOI/导入 BibTeX）、检查关键词拼写，或在知识库上传资料后重新运行。';
-interface ResearchPlan { searchStrategy?: { keywords?: string[] } }
 
 interface ResearchMeta { lib: { title: string; score: number }[]; kn: PaperHit[]; }
 
 @Injectable()
 export class PipelineService {
   private readonly logger = new Logger(PipelineService.name);
+  private readonly citationRenderer = new CitationRenderer(db);
   private running = new Set<string>();
 
   constructor(
@@ -63,7 +78,7 @@ export class PipelineService {
   get(id: string) {
     const row = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, id)).get();
     if (!row) throw new NotFoundException('流水线任务不存在');
-    return { ...row, steps: JSON.parse(row.steps ?? '[]') as PipelineStepState[] };
+    return { ...row, steps: parseJson<PipelineStepState[]>(row.steps, []) };
   }
 
   listByProject(projectId: string) {
@@ -85,7 +100,7 @@ export class PipelineService {
     const rows = db.select().from(pipelineTasks).where(eq(pipelineTasks.status, 'running')).all();
     for (const t of rows) {
       if (t.documentId) {
-        const steps = JSON.parse(t.steps || '[]') as PipelineStepState[];
+        const steps = parseJson<PipelineStepState[]>(t.steps, []);
         let resumed = false;
         for (const s of steps) {
           if (s.key === 'quality-gate') { s.status = 'running'; s.output = '服务重启后续跑（checkpoint 恢复）'; resumed = true; }
@@ -107,7 +122,7 @@ export class PipelineService {
     if (task.status !== 'awaiting_confirmation') throw new BadRequestException('当前不在大纲确认节点');
     const steps = task.steps;
     const outlineStep = steps.find((s) => s.key === 'outline')!;
-    const outline = editedOutline || JSON.parse(outlineStep.output || '{}');
+    const outline = editedOutline || parseJson<Outline>(outlineStep.output, { title: task.topic, sections: [] });
     const now = Date.now();
     const doc = { id: randomUUID(), projectId: task.projectId, title: outline.title || task.topic, content: '', outline: JSON.stringify(outline), version: 1, versions: '[]', status: 'draft', createdAt: now, updatedAt: now };
     db.insert(documents).values(doc).run();
@@ -120,7 +135,7 @@ export class PipelineService {
   // ─── 状态机 ────────────────────────────────────────────────────
   private loadSteps(id: string): PipelineStepState[] {
     const row = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, id)).get();
-    return JSON.parse(row?.steps || '[]') as PipelineStepState[];
+    return parseJson<PipelineStepState[]>(row?.steps, []);
   }
 
   private saveSteps(id: string, steps: PipelineStepState[]) {
@@ -156,17 +171,17 @@ export class PipelineService {
     return [
       { key: 'topic-verify', label: SR['topic-verify'],
         run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.get(taskId);
+          const task = self.getTaskRow(taskId);
           return { verifiedTopic: task.topic, plan: { searchStrategy: { keywords: [task.topic] } } };
         },
       },
       { key: 'literature', label: SR['literature'],
         run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
           if (!self.stepEnabled('literature')) return { researchNotice: '用户已禁用文献调研' };
-          const task = self.get(taskId);
+          const task = self.getTaskRow(taskId);
           const hits = self.references.search(task.topic, 20).map((h) => ({ ...h, origin: 'library' as const }));
-          const trace = [{ step: 'references.search', query: task.topic, count: hits.length }];
-          const enriched = await self.crossEnrichResearch(task.projectId, task.topic, ctx.plan!, hits);
+          const trace: ResearchTraceEntry[] = [{ step: 'references.search', query: task.topic, count: hits.length }];
+          const enriched = await self.crossEnrichResearch(task.projectId, task.topic, ctx.plan ?? { searchStrategy: { keywords: [] } }, hits);
           db.update(pipelineTasks).set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
           if (enriched.libraryHits.length > 0) self.references.importPipelineHits(task.projectId, enriched.libraryHits);
           const refs = self.references.list(task.projectId);
@@ -187,7 +202,6 @@ export class PipelineService {
           (err as any)._outline = outline;
           throw err;
         },
-        onError: async (_ctx, err) => { if (err?.cause === AWAITING_CONFIRMATION) return 'abort' as const; return 'abort' as const; },
       },
     ];
   }
@@ -199,15 +213,15 @@ export class PipelineService {
       {
         key: 'quality-gate', label: '分章起草+质量门+回炉',
         run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.get(taskId);
+          const task = self.getTaskRow(taskId);
           const doc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get()!;
-          const outline = JSON.parse(doc.outline || '[]') as { title: string; sections: { title: string; subsections: string[] }[] };
+          const outline = parseJson<Outline>(doc.outline, { title: task.topic, sections: [] });
           const researchMeta = self.parseResearchMeta(task.researchMeta);
           const researchNotice = task.researchNotice?.trim() || undefined;
           const libScore = new Map(researchMeta.lib.map((l) => [l.title, l.score]));
           let retry = 0;
           const maxRetry = MAX_RETRY;
-          let report: { totalScore: number; feedback: string } | undefined;
+          let report: QualityReport | undefined;
           let best: { score: number; content: string } = { score: -1, content: '' };
 
           while (true) {
@@ -220,7 +234,7 @@ export class PipelineService {
             let prevFigures = '';
             if (retry > 0) { const prev = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get(); const m = (prev?.content || '').match(/## 图表[\s\S]*?$/); if (m) prevFigures = `\n\n---\n\n${m[0]}`; }
             db.update(documents).set({ content: draftContent, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-            const rendered = self.renderCitations(task.projectId, ctx.documentId!, draftContent, refPool, [], [], libScore, researchMeta.kn);
+            const rendered = self.citationRenderer.render(ctx.documentId!, draftContent, refPool, [], [], libScore, researchMeta.kn);
             let finalContent = rendered + prevFigures;
             if (retry === 0 && self.stepEnabled('figures')) {
               try { const figs = await self.ai.generateFigures(task.topic, JSON.stringify(outline), rendered); if (figs.length > 0) { const figBlock = figs.map((f) => `### ${f.title}\n\n> ${f.caption}\n\n\n\`\`\`mermaid\n${f.mermaid}\n\`\`\``).join('\n\n'); finalContent = `${rendered}\n\n---\n\n## 图表\n\n${figBlock}`; } }
@@ -233,11 +247,6 @@ export class PipelineService {
             const latestDoc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get()!;
             const reviewResult = await self.ai.reviewPaper(doc.title, latestDoc.content ?? '');
             report = { totalScore: reviewResult.totalScore, feedback: reviewResult.feedback };
-            const needReflexion = report.totalScore < QUALITY_THRESHOLD && retry < maxRetry;
-            if (needReflexion) {
-              const lastReflex = db.select().from(reflexionLogs).where(eq(reflexionLogs.taskId, taskId)).orderBy(reflexionLogs.createdAt).all().pop();
-              const reflexNote = lastReflex;
-            }
             const scored = Number(report.totalScore);
             if (scored > best.score) best = { score: scored, content: latestDoc.content ?? '' };
             await self.advance(taskId, 'quality-gate', 'scored', `总分 ${report.totalScore}/100`);
@@ -257,8 +266,8 @@ export class PipelineService {
       },
       {
         key: 'polish', label: '润色定稿',
-        run: async (_ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.get(taskId);
+        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
+          const task = self.getTaskRow(taskId);
           const finalDoc = db.select().from(documents).where(eq(documents.id, task.documentId!)).get()!;
           const content = finalDoc.content ?? '';
           const refIdx = content.indexOf('\n\n## 参考文献');
@@ -278,8 +287,8 @@ export class PipelineService {
       },
       {
         key: 'citation-format', label: '引用格式化',
-        run: async (_ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.get(taskId);
+        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
+          const task = self.getTaskRow(taskId);
           db.update(documents).set({ status: 'formatted', updatedAt: Date.now() }).where(eq(documents.id, task.documentId!)).run();
           return {};
         },
@@ -287,7 +296,7 @@ export class PipelineService {
       {
         key: 'complete', label: '完成',
         run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.get(taskId);
+          const task = self.getTaskRow(taskId);
           db.update(documents).set({ status: 'final', updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
           if (ctx.researchNotice) {
             const cur = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
@@ -313,23 +322,24 @@ export class PipelineService {
     if (this.running.has(taskId)) return;
     this.running.add(taskId);
     try {
-      const task = this.get(taskId);
+      const taskRow = this.getTaskRow(taskId);
       const steps = this.buildPreConfirmationSteps(taskId);
-      const ctx: PipelineContext = { task, qualityRetryCount: 0 };
-      const run = this.runPreConfirmation.bind(this);
+      const ctx: PipelineContext = { task: taskRow, qualityRetryCount: 0 };
       try {
         const result = await executeDAG(steps, ctx,
           async (step, n) => { const s = this.loadSteps(taskId); await this.notify(taskId, s, step, n); },
           (msg) => this.logger.warn(msg));
         // 全部完成 = outline 被禁用，自动创建 document 并切到后段
-        const doc = await this.createDocumentAndProceed(taskId, result.outline!);
-        if (doc) {
-          // 必须先释放前段互斥锁，后段 runPostConfirmation 才能正常进入
-          this.running.delete(taskId);
-          void this.runPostConfirmation(taskId, doc);
+        if (result.outline) {
+          const doc = await this.createDocumentAndProceed(taskId, result.outline);
+          if (doc) {
+            // 必须先释放前段互斥锁，后段 runPostConfirmation 才能正常进入
+            this.running.delete(taskId);
+            void this.runPostConfirmation(taskId, doc);
+          }
         }
       } catch (err: any) {
-        if (err?.cause === AWAITING_CONFIRMATION || err === AWAITING_CONFIRMATION) return;
+        if (err?.cause === AWAITING_CONFIRMATION) return;
         throw err;
       }
     } catch (e: any) {
@@ -344,8 +354,8 @@ export class PipelineService {
     }
   }
 
-  private async createDocumentAndProceed(taskId: string, outline: any): Promise<string | null> {
-    const task = this.get(taskId);
+  private async createDocumentAndProceed(taskId: string, outline: Outline): Promise<string | null> {
+    const task = this.getTaskRow(taskId);
     if (task.documentId) return null;
     const now = Date.now();
     const doc = { id: randomUUID(), projectId: task.projectId, title: outline.title || task.topic, content: '', outline: JSON.stringify(outline), version: 1, versions: '[]', status: 'draft', createdAt: now, updatedAt: now };
@@ -358,7 +368,7 @@ export class PipelineService {
     if (this.running.has(taskId)) return;
     this.running.add(taskId);
     try {
-      const task = this.get(taskId);
+      const taskRow = this.getTaskRow(taskId);
       const steps = this.buildPostConfirmationSteps(taskId);
       const stepsState = this.loadSteps(taskId);
       // 后段第一步（outline 之后的步骤）之前的全部标记 done（前段已完成）
@@ -367,7 +377,7 @@ export class PipelineService {
         if (s.status === 'pending' || s.status === 'awaiting_confirmation') s.status = 'done';
       }
       this.saveSteps(taskId, stepsState);
-      const ctx: PipelineContext = { task, documentId, qualityRetryCount: 0 };
+      const ctx: PipelineContext = { task: taskRow, documentId, qualityRetryCount: 0 };
       await executeDAG(steps, ctx,
         async (step, n) => { const s = this.loadSteps(taskId); await this.notify(taskId, s, step, n); },
         (msg) => this.logger.warn(msg));
@@ -433,16 +443,15 @@ export class PipelineService {
   }
 
   private parseResearchMeta(raw: string | null | undefined): ResearchMeta {
-    if (!raw) return { lib: [], kn: [] };
-    try { const o = JSON.parse(raw) as ResearchMeta; return { lib: Array.isArray(o.lib) ? o.lib : [], kn: Array.isArray(o.kn) ? o.kn : [] }; }
-    catch { return { lib: [], kn: [] }; }
+    const o = parseJson<ResearchMeta>(raw, { lib: [], kn: [] });
+    return { lib: Array.isArray(o.lib) ? o.lib : [], kn: Array.isArray(o.kn) ? o.kn : [] };
   }
 
   private static readonly DOMAIN_KW = ['graph neural', 'gnn', 'molecular', 'molecule', 'drug', 'protein', 'ligand', 'chemical', 'pharmaco', 'biomed', 'bioinform', 'deep learning', 'machine learning', 'neural network', 'geometric', 'equivariant', 'graph', 'neural', 'chem', '图神经', '分子', '药物', '蛋白', '几何', '深度学习', '消息传递', '药'];
 
   private refsForDraft(projectId: string) {
     const all = this.references.list(projectId);
-    const meta = all.filter((r) => { try { const a = JSON.parse(r.authors || '[]') as string[]; return a.length > 0 && !!r.year; } catch { return false; } });
+    const meta = all.filter((r) => { const a = parseStringList(r.authors); return a.length > 0 && !!r.year; });
     const rel = meta.filter((r) => { const t = (r.title || '').toLowerCase(); const ab = (r.abstract || '').toLowerCase(); return PipelineService.DOMAIN_KW.some((k) => t.includes(k) || ab.includes(k)); });
     return (rel.length >= 6 ? rel : meta).sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0)).slice(0, 20);
   }
@@ -452,70 +461,12 @@ export class PipelineService {
     return pool.map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}${r.doi ? `，DOI:${r.doi}` : ''}）`).join('\n');
   }
 
-  private renderCitations(projectId: string, documentId: string, content: string, refPool: ReturnType<PipelineService['refsForDraft']>, supplementHits: PaperHit[] = [], suppRefIds: (string | null)[] = [], libScore: Map<string, number> = new Map(), knowledgeHits: PaperHit[] = []): string {
-    if (!content) return content;
-    const refs = refPool;
-    const { poolSpot, suppSpot } = this.scanCitationSpots(content, refs.length, supplementHits.length);
-    const used = new Set<number>();
-    content.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => { const idx = Number(n) - 1; if (refs[idx]) used.add(idx); return ''; });
-    const order = [...used].sort((a, b) => a - b);
-    const numOf = new Map(order.map((idx, k) => [idx, k + 1]));
-    const usedSupp = new Set<number>();
-    content.replace(/\[补充Ref:(\d+)\]/g, (_m, n: string) => { const idx = Number(n) - 1; if (supplementHits[idx]) usedSupp.add(idx); return ''; });
-    const suppOrder = [...usedSupp].sort((a, b) => a - b);
-    const base = order.length;
-    const suppNum = new Map(suppOrder.map((idx, k) => [idx, base + k + 1]));
-    let out = content.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => { const idx = Number(n) - 1; return numOf.has(idx) ? `[${numOf.get(idx)}]` : `[文献${n}]`; });
-    out = out.replace(/\[补充Ref:(\d+)\]/g, (_m, n: string) => { const idx = Number(n) - 1; return suppNum.has(idx) ? `[${suppNum.get(idx)}]` : '[补充文献]'; });
-    const list: string[] = [];
-    for (const idx of order) { const r = refs[idx]; const authors = (() => { try { return (JSON.parse(r.authors || '[]') as string[]).join(', ') || '佚名'; } catch { return '佚名'; } })(); const score = libScore.get(r.title); const tag = typeof score === 'number' ? `（文献库 · 匹配 ${score.toFixed(2)}）` : ''; list.push(`[${list.length + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi.replace(/^https?:\/\//, '')}` : ''}${tag}`); }
-    for (const idx of suppOrder) { const h = supplementHits[idx]; const authors = (h.authors || []).join(', ') || '佚名'; list.push(`[${list.length + 1}] ${authors}. ${h.title}[J].${h.venue ? ` ${h.venue},` : ''} ${h.year ? `${h.year}.` : 'n.d.'}${h.doi ? ` https://doi.org/${h.doi.replace(/^https?:\/\//, '')}` : ''}`); }
-    const blocks: string[] = [];
-    if (list.length) blocks.push(list.join('\n'));
-    if (knowledgeHits.length) { const knLines = knowledgeHits.map((k) => `- 《${k.title}》（知识库 · 匹配 ${(k.matchScore ?? 0).toFixed(2)}）：${(k.abstract || '').slice(0, 100).trim()}`).join('\n'); blocks.push(`### 知识库参考（研究阶段本地检索）\n\n${knLines}`); }
-    if (blocks.length) out += `\n\n## 参考文献\n\n${blocks.join('\n\n')}`;
-    this.backfillCitations(documentId, refs, order, suppOrder, suppRefIds, poolSpot, suppSpot);
-    return out;
-  }
-
-  private scanCitationSpots(content: string, poolSize: number, suppSize: number) {
-    const poolSpot = new Map<number, { location: string; context: string }>();
-    const suppSpot = new Map<number, { location: string; context: string }>();
-    const tokenRe = /(#{1,6}\s+[^\n]+)|\[Ref:(\d+)\]|\[补充Ref:(\d+)\]/g;
-    let m: RegExpExecArray | null; let section = '';
-    while ((m = tokenRe.exec(content)) !== null) {
-      if (m[1] !== undefined) section = m[1].replace(/^#{1,6}\s+/, '').trim();
-      else if (m[2] !== undefined) { const idx = Number(m[2]) - 1; if (idx >= 0 && idx < poolSize && !poolSpot.has(idx)) poolSpot.set(idx, { location: section, context: this.contextAround(content, m.index, m[0].length) }); }
-      else if (m[3] !== undefined) { const idx = Number(m[3]) - 1; if (idx >= 0 && idx < suppSize && !suppSpot.has(idx)) suppSpot.set(idx, { location: section, context: this.contextAround(content, m.index, m[0].length) }); }
-    }
-    return { poolSpot, suppSpot };
-  }
-
-  private contextAround(text: string, at: number, len: number): string {
-    return text.slice(Math.max(0, at - 40), Math.min(text.length, at + len + 40)).replace(/\s+/g, ' ').trim();
-  }
-
-  private backfillCitations(documentId: string, refs: ReturnType<PipelineService['refsForDraft']>, order: number[], suppOrder: number[], suppRefIds: (string | null)[], poolSpot: Map<number, { location: string; context: string }>, suppSpot: Map<number, { location: string; context: string }>) {
-    try {
-      const existing = db.select().from(citations).where(eq(citations.documentId, documentId)).all();
-      const have = new Set(existing.map((c) => c.referenceId));
-      const now = Date.now();
-      const insertOne = (referenceId: string, spot: { location: string; context: string } | undefined, doi: string) => {
-        if (!referenceId || have.has(referenceId)) return;
-        db.insert(citations).values({ id: randomUUID(), documentId, referenceId, location: spot?.location || '', context: spot?.context || '', format: 'pipeline', verified: doi ? 1 : 0, createdAt: now }).run();
-        have.add(referenceId);
-      };
-      for (const idx of order) { const r = refs[idx]; if (!r) continue; insertOne(r.id, poolSpot.get(idx), r.doi || ''); }
-      for (const idx of suppOrder) { const refId = suppRefIds[idx]; if (!refId) continue; const ref = db.select().from(references).where(eq(references.id, refId)).get(); insertOne(refId, suppSpot.get(idx), ref?.doi || ''); }
-    } catch (e: any) { this.logger.warn(`citations 回填失败（不影响流水线产物）: ${e?.message || e}`); }
-  }
-
   private reflexionNote(taskId: string): string {
     const rows = db.select().from(reflexionLogs).where(eq(reflexionLogs.taskId, taskId)).orderBy(reflexionLogs.createdAt).all();
     if (rows.length === 0) return '';
     const last = rows[rows.length - 1];
     let instructions: string[] = [];
-    try { instructions = JSON.parse(last.instructions || '[]'); } catch { /* ignore */ }
+    instructions = parseStringList(last.instructions);
     return `${last.note}${instructions.length ? '\n具体指令：' + instructions.join('；') : ''}`;
   }
 
@@ -529,7 +480,7 @@ export class PipelineService {
   }
 
   /** 分章起草：遍历大纲各节，逐节调用 ai.draftSection 生成内容 */
-  private async runDrafting(title: string, outline: any, referencesPrompt: string, styleHint: string, reflexion: string): Promise<string> {
+  private async runDrafting(title: string, outline: Outline, referencesPrompt: string, styleHint: string, reflexion: string): Promise<string> {
     const sections = outline?.sections || [];
     const outlineJson = JSON.stringify(outline);
     const parts: string[] = [];
@@ -540,6 +491,13 @@ export class PipelineService {
       parts.push(`## ${sectionTitle}\n\n${content}`);
     }
     return parts.join('\n\n');
+  }
+
+  /** Fetch typed PipelineTaskRow (without parsed steps array, for DAG context) */
+  private getTaskRow(id: string): PipelineTaskRow {
+    const row = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, id)).get();
+    if (!row) throw new NotFoundException('流水线任务不存在');
+    return row;
   }
 
   /** 内部持久化辅助：DAG notify 之外的细粒度阶段状态写入 */

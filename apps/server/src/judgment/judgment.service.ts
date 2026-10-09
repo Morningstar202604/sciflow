@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AiService } from '../ai/ai.service';
 import { db } from '../db/database';
 import { appSettings, customIntents } from '../db/schema';
+import { parseStringList } from '../common/json-guard';
 import { eq } from 'drizzle-orm';
 
 /**
@@ -60,12 +61,7 @@ export class JudgmentService {
     try {
       const rows = db.select().from(customIntents).where(eq(customIntents.enabled, 1)).all();
       for (const r of rows) {
-        let kw: string[] = [];
-        try {
-          kw = JSON.parse(r.keywords || '[]');
-        } catch {
-          /* 忽略 */
-        }
+        const kw = parseStringList(r.keywords);
         const idx = merged.findIndex((i) => i.key === r.key);
         if (idx >= 0) {
           merged[idx] = { key: r.key, label: r.label, route: r.route, keywords: kw };

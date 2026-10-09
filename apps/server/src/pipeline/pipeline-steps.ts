@@ -7,19 +7,102 @@
  * (abort / skip / retry), and upstream onStep notifications.
  */
 
+import type { PaperHit } from '../references/references.service';
+
+// ─── Typed context interfaces ─────────────────────────────────────
+
+/** pipeline_task row shape (matches db/schema.ts pipelineTasks table produced by drizzle $inferSelect) */
+export interface PipelineTaskRow {
+  id: string;
+  projectId: string;
+  documentId: string | null;
+  topic: string;
+  currentStep: string | null;
+  status: string | null;
+  retryCount: number | null;
+  lastError: string | null;
+  researchNotice: string | null;
+  researchMeta: string | null;
+}
+
+export interface OutlineSection {
+  title: string;
+  subsections?: string[];
+}
+
+export interface Outline {
+  title: string;
+  sections: OutlineSection[];
+}
+
+export interface QualityReport {
+  totalScore: number;
+  feedback: string;
+}
+
+/** Cross-library hit enriched during cross-enrichment step. */
+export interface LibraryHit {
+  doi?: string;
+  title: string;
+  authors?: string[];
+  year?: number;
+  venue?: string;
+  abstract?: string;
+  url?: string;
+}
+
+/** Knowledge-base hit during cross-enrichment step. */
+export interface KnowledgeHit {
+  docId: string;
+  docName: string;
+  chunk: string;
+  score: number;
+}
+
+/** Result of a Polish step. */
+export interface PolishResult {
+  polished: string;
+  delta?: number;
+}
+
+export interface ResearchPlan {
+  searchStrategy?: { keywords?: string[] };
+}
+
+export interface ResearchTraceEntry {
+  step: string;
+  query: string;
+  count: number;
+}
+
+/**
+ * Mutable context that flows through the DAG.
+ * All fields that were previously `any` are now typed.
+ */
 export interface PipelineContext {
-  task: any;               // full pipeline_task row (always fresh)
+  // ── Specified fields ────────────────────────────────────────
+  task: PipelineTaskRow;
+  outline?: Outline;
+  libraryHits?: LibraryHit[];
+  knowledgeHits?: KnowledgeHit[];
+  libExpanded?: boolean;
+  draftContent?: string;
+  polishResult?: PolishResult;
+  qualityResult?: QualityReport;
+  qualityRetryCount: number;
+  finalText?: string;
+  memoryNote?: string;
+
+  // ── Legacy fields still accessed by PipelineService ─────────
   verifiedTopic?: string;
-  plan?: any;              // Planner 输出的 ResearchPlan
-  researchTrace?: any[];   // Research ReAct 轨迹
-  enrichedLibHits?: any[]; // 跨库增强文献命中
-  enrichedKnHits?: any[];  // 跨库增强知识库命中
+  plan?: ResearchPlan;
+  researchTrace?: ResearchTraceEntry[];
+  enrichedLibHits?: PaperHit[];
+  enrichedKnHits?: PaperHit[];
   researchNotice?: string;
-  documentId?: string;     // 产物文档 ID
-  outline?: any;           // { title, sections }
+  documentId?: string;
   literatureSummary?: string;
-  qualityRetryCount?: number;
-  report?: { totalScore: number; feedback: string };
+  report?: QualityReport;
 }
 
 export interface PipelineStep {
@@ -28,6 +111,8 @@ export interface PipelineStep {
   run: (ctx: PipelineContext) => Promise<Partial<PipelineContext> | void>;
   onError?: (ctx: PipelineContext, err: Error) => Promise<'abort' | 'skip' | 'retry'>;
 }
+
+// ─── Symbols / constants ──────────────────────────────────────────
 
 /** human-in-the-loop 等待确认哨兵（outline 步骤抛出以中断前段 DAG） */
 export const AWAITING_CONFIRMATION = Symbol('AWAITING_CONFIRMATION');
@@ -64,7 +149,7 @@ export async function executeDAG(
       await notify(step, { status: 'done' });
     } catch (err: any) {
       // human gate 信号不视为错误，向上透传以中断前段 DAG
-      if (err?.cause === AWAITING_CONFIRMATION || err === AWAITING_CONFIRMATION) {
+      if (err?.cause === AWAITING_CONFIRMATION) {
         await notify(step, { status: 'awaiting_confirmation', output: (err as any)?._outline ? JSON.stringify((err as any)._outline) : undefined });
         throw err;
       }

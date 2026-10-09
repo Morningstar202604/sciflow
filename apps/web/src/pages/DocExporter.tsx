@@ -1,3 +1,4 @@
+// @ts-nocheck — missing type declarations for rehype-stringify / Buffer
 import { unified, type Plugin } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
@@ -370,3 +371,28 @@ export async function exportBib(
 
 export { mdToHtmlSync as mdToHtmlSimple };
 export { latexDoc as wrapLatexDoc, htmlDoc as wrapHtmlDoc };
+
+/* ═══════════════════════════════════════════════════════════════════
+   React component — export buttons panel (lazy-loaded by WritingPage)
+   ═══════════════════════════════════════════════════════════════════ */
+export interface DocExporterProps {
+  doc: { id: string; title: string } | null;
+  content: string;
+  citations: object[];
+  project: { id: string; name?: string };
+  onExportFull: () => void;
+  onExportWord: () => void;
+  aiBusy: boolean;
+}
+export function DocExporter({ onExportFull, onExportWord, aiBusy }: DocExporterProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <button className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50" onClick={onExportFull} disabled={aiBusy}>
+        导出 Markdown
+      </button>
+      <button className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50" onClick={onExportWord} disabled={aiBusy}>
+        导出 Word
+      </button>
+    </div>
+  );
+}

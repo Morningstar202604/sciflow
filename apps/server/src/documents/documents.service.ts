@@ -6,15 +6,20 @@ import '@citation-js/plugin-csl';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { documents, citations, references, polishRecords } from '../db/schema';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx';
+import { Document, Packer, Paragraph, HeadingLevel, AlignmentType } from 'docx';
 import { AiService } from '../ai/ai.service';
+import { ReferencesService } from '../references/references.service';
 import { parseAuthors as parseAuthorArr, surnameOf } from '../common/authors';
+import { parseStringList } from '../common/json-guard';
 
 const MAX_VERSIONS = 20;
 
 @Injectable()
 export class DocumentsService {
-  constructor(private readonly ai: AiService) {}
+  constructor(
+    private readonly ai: AiService,
+    private readonly refs: ReferencesService,
+  ) {}
 
   list(projectId: string) {
     return db.select().from(documents).where(eq(documents.projectId, projectId)).orderBy(documents.updatedAt).all();
@@ -266,23 +271,10 @@ export class DocumentsService {
   }
 
   // ---------- 引用管理（Citation -> Reference 可追溯） ----------
+  // 注：写入逻辑统一委托 ReferencesService.addCitation（单一事实源）；documents 仅保留查询与渲染。
 
   addCitation(documentId: string, input: { referenceId: string; location?: string; context?: string; format?: string }) {
-    const ref = db.select().from(references).where(eq(references.id, input.referenceId)).get();
-    if (!ref) throw new BadRequestException('引用的文献不存在，请先加入文献库');
-    this.get(documentId);
-    const row = {
-      id: randomUUID(),
-      documentId,
-      referenceId: input.referenceId,
-      location: input.location || '',
-      context: input.context || '',
-      format: input.format || 'apa',
-      verified: ref.doi ? 1 : 0, // 有 DOI 视为可核验
-      createdAt: Date.now(),
-    };
-    db.insert(citations).values(row).run();
-    return row;
+    return this.refs.addCitation({ documentId, ...input });
   }
 
   listCitations(documentId: string) {
@@ -395,9 +387,9 @@ export class DocumentsService {
 
     children.push(new Paragraph({ text: '正文', heading: HeadingLevel.HEADING_1 }));
     const content = doc.content || '（正文为空）';
-    const paragraphs = this.mdToPlain(content).split('\n');
-    // 正文按段落转 docx 段落；识别 ## 标题提升为 Heading2
-    for (const raw of paragraphs) {
+    const rawParagraphs = content.split('\n');
+    // 正文按段落转 docx 段落：先识别标题层级，再对非标题行剥离 markdown 语法
+    for (const raw of rawParagraphs) {
       const line = raw.trim();
       if (!line) continue;
       if (/^##\s/.test(line)) {
@@ -405,7 +397,7 @@ export class DocumentsService {
       } else if (/^###\s/.test(line)) {
         children.push(new Paragraph({ text: line.replace(/^###\s+/, ''), heading: HeadingLevel.HEADING_3, spacing: { before: 120 } }));
       } else {
-        children.push(new Paragraph({ text: line, spacing: { after: 100 } }));
+        children.push(new Paragraph({ text: this.mdToPlain(line), spacing: { after: 100 } }));
       }
     }
 
@@ -413,14 +405,7 @@ export class DocumentsService {
       children.push(new Paragraph({ text: '', spacing: { after: 120 } }));
       children.push(new Paragraph({ text: '参考文献', heading: HeadingLevel.HEADING_1 }));
       refList.forEach((r, i) => {
-        const authors = (() => {
-          try {
-            const arr = JSON.parse(r.authors || '[]') as string[];
-            return arr.length ? arr.join(', ') : '';
-          } catch {
-            return '';
-          }
-        })();
+        const authors = parseAuthorArr(r.authors).join(', ');
         const line = `${i + 1}. ${r.title}${authors ? ` — ${authors}` : ''}${r.year ? ` (${r.year})` : ''}${r.venue ? `, ${r.venue}` : ''}${r.doi ? `, DOI: ${r.doi}` : ''}`;
         children.push(new Paragraph({ text: line, spacing: { after: 80 } }));
       });
@@ -468,9 +453,9 @@ const CSL_TEMPLATE_MAP: Record<string, string> = {
 
 /** 解析 authors JSON 字符串为 citation-js CSL-JSON author 数组 */
 function toCslAuthors(authorsJson: string | null): { family: string; given: string }[] {
+  const arr = parseStringList(authorsJson);
+  if (arr.length === 0) return [];
   try {
-    const arr = JSON.parse(authorsJson || '[]');
-    if (!Array.isArray(arr)) return [];
     return arr.filter(Boolean).map((name) => {
       const parts = String(name).trim().split(/\s+/).filter(Boolean);
       const family = parts.pop() || '';

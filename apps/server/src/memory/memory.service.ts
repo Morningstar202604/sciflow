@@ -3,6 +3,7 @@ import { eq, desc, like, and, SQL } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { memoryLogs } from '../db/schema';
+import { parseStringList } from '../common/json-guard';
 
 /**
  * 记忆服务（Phase 2：Agentic Memory）
@@ -36,15 +37,7 @@ export class MemoryService {
     const rows = where
       ? db.select().from(memoryLogs).where(where).orderBy(desc(memoryLogs.createdAt)).all()
       : db.select().from(memoryLogs).orderBy(desc(memoryLogs.createdAt)).all();
-    return rows.map((r) => {
-      let keywords: string[] = [];
-      try {
-        keywords = JSON.parse(r.keywords || '[]');
-      } catch {
-        /* ignore */
-      }
-      return { ...r, keywords };
-    });
+    return rows.map((r) => ({ ...r, keywords: parseStringList(r.keywords) }));
   }
 
   remove(id: string) {

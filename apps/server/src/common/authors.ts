@@ -41,11 +41,6 @@ export function parseAuthors(input: string | unknown[] | null | undefined): stri
   return raw.map(authorToName).filter(Boolean);
 }
 
-/** 归一化后拼成展示用作者串（逗号分隔）；空数组返回空串 */
-function authorsToString(input: string | unknown[] | null | undefined): string {
-  return parseAuthors(input).join(', ');
-}
-
 /** "First Middle Last" -> "Last"（单一来源：documents/references 共用） */
 export function surnameOf(a: string): string {
   const parts = a.trim().split(/\s+/).filter(Boolean);

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { db } from '../db/database';
 import { experiments, projects } from '../db/schema';
+import { parseStringList } from '../common/json-guard';
 
 /** 沙箱威胁模型：单用户本机。边界 = 独立临时目录 + 超时杀进程组 + 输出截断 + env 白名单 + 数组参数（不走 shell） */
 const RUN_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS || 10_000);
@@ -343,13 +344,7 @@ export class ExperimentsService {
   }
 
   private toDto(row: typeof experiments.$inferSelect) {
-    let figures: string[] = [];
-    try {
-      const parsed = JSON.parse(row.figures || '[]');
-      if (Array.isArray(parsed)) figures = parsed.map(String);
-    } catch {
-      figures = [];
-    }
+    const figures = parseStringList(row.figures);
     return {
       id: row.id,
       projectId: row.projectId,

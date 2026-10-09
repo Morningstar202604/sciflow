@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { AgentRun, Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
-import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Spinner, jsonText } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Spinner, jsonText, errMsg } from '../components/ui';
 import { HBar, ProgressRing, Sparkline } from '../components/charts';
 
 const STEP_LABELS: Record<string, string> = {
@@ -105,16 +105,16 @@ const tplStorageKey = (pid: string) => `sciflow:templates:${pid}`;
 function parseTemplateArr(arr: unknown): ManagedTemplate[] {
   if (!Array.isArray(arr)) return [];
   return arr
-    .filter((t: any) => t && typeof t === 'object')
-    .map((t: any, i: number) => ({
+    .filter((t): t is Record<string, unknown> => typeof t === 'object' && t !== null)
+    .map((t, i) => ({
       id: typeof t.id === 'string' && t.id ? t.id : `c_${Date.now()}_${i}`,
       label: String(t.label || '未命名模板'),
       desc: String(t.desc || ''),
       builtin: false,
       sections: Array.isArray(t.sections)
         ? t.sections
-            .filter((s: any) => s && s.title)
-            .map((s: any) => ({ title: String(s.title), hint: String(s.hint || '') }))
+            .filter((s): s is { title: string; hint?: string } => typeof s === 'object' && s !== null && typeof s.title === 'string')
+            .map((s) => ({ title: String(s.title), hint: String(s.hint || '') }))
         : [],
     }));
 }
@@ -202,8 +202,8 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
   const persistCustomTemplates = async (list: ManagedTemplate[]) => {
     try {
       await api.projects.update(project.id, { templates: JSON.stringify(stripTemplates(list)) });
-    } catch (e: any) {
-      toast('error', '模板保存失败：' + (e?.message || '网络错误'));
+    } catch (e: unknown) {
+      toast('error', '模板保存失败：' + errMsg(e));
     }
   };
 
@@ -294,8 +294,8 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
       setTasks((s) => [t, ...s]);
       setActiveId(t.id);
       setTopic('');
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setCreating(false);
     }
@@ -361,9 +361,10 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
       await api.documents.update(doc.id, { content: skeleton });
       toast('success', `已按「${tpl.label}」创建草稿，跳转写作页`);
       onOpenDoc?.(doc.id);
-    } catch (e: any) {
-      setError(e?.message || '创建草稿失败');
-      toast('error', '创建草稿失败：' + (e?.message || '未知错误'));
+    } catch (e: unknown) {
+      const msg = errMsg(e);
+      setError(msg || '创建草稿失败');
+      toast('error', '创建草稿失败：' + msg);
     } finally {
       setApplying(false);
     }
@@ -383,8 +384,8 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
     try {
       await api.pipeline.confirmOutline(active.id, editableOutline);
       setEditableOutline(null);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setConfirming(false);
     }
@@ -401,8 +402,8 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
         return next;
       });
       toast('success', `已删除任务「${deletingTask.topic}」`);
-    } catch (e: any) {
-      toast('error', '删除失败：' + (e?.message || '未知错误'));
+    } catch (e: unknown) {
+      toast('error', '删除失败：' + errMsg(e));
     } finally {
       setDeletingTask(null);
     }
@@ -455,6 +456,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                 key={tpl.id}
                 onClick={() => setTemplateId((cur) => (cur === tpl.id ? '' : tpl.id))}
                 title={tpl.desc}
+                aria-pressed={templateId === tpl.id}
                 className={`rounded-lg border px-2.5 py-1.5 text-xs transition-all ${
                   templateId === tpl.id
                     ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/25 text-teal-700 dark:text-teal-200 border-l-[3px] border-l-teal-500'
@@ -554,9 +556,10 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                     <button
                       onClick={() => setDeletingTask(active)}
                       title="删除此任务记录（失败/中断任务同样可删）"
+                      aria-label="删除此流水线任务"
                       className="text-slate-300 hover:text-rose-500 transition-colors"
                     >
-                      <Trash2 size={15} />
+                      <Trash2 size={15} aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -606,12 +609,12 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                       <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
                         <Brain size={13} className="text-teal-500" /> Planner 研究计划
                       </span>
-                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowPlan((v) => !v)}>
-                        <Eye size={12} /> {showPlan ? '收起' : '查看'}
+                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowPlan((v) => !v)} aria-expanded={showPlan} aria-controls="plan-content">
+                        <Eye size={12} aria-hidden="true" /> {showPlan ? '收起' : '查看'}
                       </Button>
                     </div>
                     {showPlan && (
-                      <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
+                      <div id="plan-content" role="region" aria-label="研究计划详情" className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
                         <div><span className="text-slate-400 dark:text-slate-500">目标：</span>{activePlan.objective}</div>
                         <div>
                           <span className="text-slate-400 dark:text-slate-500">子问题：</span>
@@ -639,12 +642,12 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                       <span className="flex items-center gap-1.5 text-xs font-semibold text-blue-700">
                         <Zap size={13} className="text-blue-500" /> ReAct 自主检索轨迹（think → act → observe）
                       </span>
-                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowTrace((v) => !v)}>
-                        <Eye size={12} /> {showTrace ? '收起' : `${activeTrace.length} 步`}
+                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowTrace((v) => !v)} aria-expanded={showTrace} aria-controls="trace-content">
+                        <Eye size={12} aria-hidden="true" /> {showTrace ? '收起' : `${activeTrace.length} 步`}
                       </Button>
                     </div>
                     {showTrace && (
-                      <div className="space-y-1.5">
+                      <div id="trace-content" role="region" aria-label="检索轨迹详情" className="space-y-1.5">
                         {(() => {
                           const foundSeries = activeTrace.filter((t) => t.action === 'search').map((t) => t.found);
                           return foundSeries.length > 1 ? (
@@ -684,12 +687,12 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                       <span className="flex items-center gap-1.5 text-xs font-semibold text-teal-700 dark:text-teal-300">
                         <Bot size={13} className="text-teal-600" /> Supervisor 多 Agent 编排
                       </span>
-                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowAgents((v) => !v)}>
-                        <Eye size={12} /> {showAgents ? '收起' : `${agents.length} 个 Agent`}
+                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowAgents((v) => !v)} aria-expanded={showAgents} aria-controls="agents-content">
+                        <Eye size={12} aria-hidden="true" /> {showAgents ? '收起' : `${agents.length} 个 Agent`}
                       </Button>
                     </div>
                     {showAgents && (
-                      <div className="text-xs">
+                      <div id="agents-content" role="region" aria-label="多 Agent 编排详情" className="text-xs">
                         <div className="flex items-center gap-1.5 mb-2 text-teal-600 dark:text-teal-400">
                           <Activity size={12} /> 规划 → 并行检索 → 写作 → 评审 → 润色（每格一个子 Agent 执行单元）
                         </div>

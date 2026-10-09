@@ -9,5 +9,6 @@ import { ChatController } from './chat.controller';
   imports: [AiModule, MemoryModule, KnowledgeModule],
   controllers: [ChatController],
   providers: [ChatService],
+  exports: [ChatService], // RAG 注入逻辑（contextFor）可被 McpModule 等复用
 })
 export class ChatModule {}

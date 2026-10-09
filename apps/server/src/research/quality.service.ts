@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { qualityReports, reviewComments } from '../db/schema';
 import { AiService, ReviewResult } from '../ai/ai.service';
+import { parseJson } from '../common/json-guard';
 
 /** 7 维英文 key → 中文维度名（category 取最低分维度映射中文，差距 #7） */
 const DIM_CN: Record<string, string> = {
@@ -53,13 +54,13 @@ export class QualityService {
       .orderBy(desc(qualityReports.createdAt))
       .get();
     if (!row) return null;
-    return { ...row, scores: JSON.parse(row.scores || '{}') };
+    return { ...row, scores: parseJson<Record<string, number>>(row.scores, {}) };
   }
 
   get(id: string) {
     const row = db.select().from(qualityReports).where(eq(qualityReports.id, id)).get();
     if (!row) throw new NotFoundException('评分报告不存在');
-    return { ...row, scores: JSON.parse(row.scores) };
+    return { ...row, scores: parseJson<Record<string, number>>(row.scores, {}) };
   }
 
   // ---------- 差距 #7：质量 feedback 结构化进 review_comment ----------

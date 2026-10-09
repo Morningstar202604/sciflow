@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq, desc } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/database';
 import {
   pipelineTasks,
@@ -66,57 +66,59 @@ export class DashboardService {
     return db.select().from(reviewComments).where(eq(reviewComments.status, 'open')).all().length;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private countRows(table: any): number {
     return db.select().from(table).all().length;
   }
 
   /**
-   * 活跃投稿中超期的列表：超「一审周期」(submittedAt + journal.firstDecisionWeeks) 或超「修回截止日」(revisionDeadline)。
-   * 终态投稿不计。overdueDays 取两者较大者。
+   * 活跃投稿中超期的列表。单次 JOIN 查询消除 N+1（原来循环内逐条查 journals）。
    */
   private overdueSubmissions() {
     const now = Date.now();
-    const rows = db.select().from(submissions).all();
+    const rows = db
+      .select({
+        id: submissions.id,
+        journalName: submissions.journalName,
+        title: submissions.title,
+        status: submissions.currentStatus,
+        submittedAt: submissions.submittedAt,
+        revisionDeadline: submissions.revisionDeadline,
+        fdw: journals.firstDecisionWeeks,
+      })
+      .from(submissions)
+      .leftJoin(journals, eq(submissions.journalId, journals.id))
+      .all();
     const out: { id: string; journalName: string; title: string; status: string; overdueDays: number }[] = [];
     for (const s of rows) {
-      if (TERMINAL_STATUSES.has(s.currentStatus || '')) continue;
+      if (TERMINAL_STATUSES.has(s.status || '')) continue;
       let overdueDays = 0;
-      // 修回截止日超期
       if (typeof s.revisionDeadline === 'number' && s.revisionDeadline && now > s.revisionDeadline) {
         overdueDays = Math.max(overdueDays, Math.floor((now - s.revisionDeadline) / DAY_MS));
       }
-      // 一审周期超期（需关联期刊的 firstDecisionWeeks）
-      if (s.journalId && s.submittedAt) {
-        const journal = db.select().from(journals).where(eq(journals.id, s.journalId)).get();
-        const fdw = journal?.firstDecisionWeeks;
-        if (fdw) {
-          const dueAt = s.submittedAt + fdw * 7 * DAY_MS;
-          if (now > dueAt) overdueDays = Math.max(overdueDays, Math.floor((now - dueAt) / DAY_MS));
-        }
+      if (s.fdw && s.submittedAt) {
+        const dueAt = s.submittedAt + s.fdw * 7 * DAY_MS;
+        if (now > dueAt) overdueDays = Math.max(overdueDays, Math.floor((now - dueAt) / DAY_MS));
       }
       if (overdueDays > 0) {
-        out.push({ id: s.id, journalName: s.journalName, title: s.title || '', status: s.currentStatus || 'submitted', overdueDays });
+        out.push({ id: s.id, journalName: s.journalName, title: s.title || '', status: s.status || 'submitted', overdueDays });
       }
     }
     return out.sort((a, b) => b.overdueDays - a.overdueDays).slice(0, 20);
   }
 
-  /** 最近一次质量总分低于阈值的文档列表（id/title/score/date） */
+  /** 最近一次质量总分低于阈值的文档列表（子查询消除 N+1） */
   private lowQualityDocs() {
-    const docs = db.select().from(documents).all();
-    const out: { id: string; title: string; score: number; date: number }[] = [];
-    for (const d of docs) {
-      const latest = db
-        .select()
-        .from(qualityReports)
-        .where(eq(qualityReports.documentId, d.id))
-        .orderBy(desc(qualityReports.createdAt))
-        .get();
-      if (latest && latest.totalScore < LOW_SCORE_THRESHOLD) {
-        out.push({ id: d.id, title: d.title, score: latest.totalScore, date: latest.createdAt });
-      }
-    }
-    return out.sort((a, b) => b.date - a.date).slice(0, 20);
+    const rows = db
+      .select({
+        id: documents.id,
+        title: documents.title,
+        score: qualityReports.totalScore,
+        date: qualityReports.createdAt,
+      })
+      .from(documents)
+      .innerJoin(qualityReports, eq(qualityReports.documentId, documents.id))
+      .where(sql`quality_report.created_at = (SELECT MAX(qr.created_at) FROM quality_report qr WHERE qr.document_id = documents.id)`)
+      .all();
+    return rows.filter((r) => (r.score ?? 100) < 60).slice(0, 10);
   }
 }

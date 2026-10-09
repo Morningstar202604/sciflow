@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
 import { appSettings, customIntents, customPrompts, pipelineConfigs } from '../db/schema';
+import { parseJson } from '../common/json-guard';
 
 /** 高度自定义：意图库 + 提示词 用户可配置（系统默认仅作兜底） */
 
@@ -53,9 +54,9 @@ export class CustomizationService {
     return { ok: true };
   }
 
-  /** 恢复全部自定义意图（清空） */
+  /** 恢复全部自定义意图（仅清空用户自定义，保留系统默认意图） */
   resetIntents() {
-    db.delete(customIntents).run();
+    db.delete(customIntents).where(eq(customIntents.isCustom, 1)).run();
     return { ok: true };
   }
 
@@ -106,8 +107,7 @@ export class CustomizationService {
       { key: 'format', label: '格式' },
     ];
     const row = db.select().from(appSettings).where(eq(appSettings.key, 'quality_weights')).get();
-    let weights: Record<string, number> = {};
-    try { weights = JSON.parse(row?.value || '{}'); } catch { /* 忽略 */ }
+    const weights = parseJson<Record<string, number>>(row?.value, {});
     return DIMS.map((d) => ({ key: d.key, label: d.label, weight: weights[d.key] ?? 1 }));
   }
 
@@ -118,9 +118,12 @@ export class CustomizationService {
       const w = Number(weights[k]);
       if (!Number.isFinite(w) || w <= 0 || w > 5) throw new BadRequestException(`${k} 权重需在 (0,5]`);
     }
+    // 部分写入：与已有维度合并，避免静默覆盖其他维度
     const existing = db.select().from(appSettings).where(eq(appSettings.key, 'quality_weights')).get();
-    if (existing) db.update(appSettings).set({ value: JSON.stringify(weights) }).where(eq(appSettings.key, 'quality_weights')).run();
-    else db.insert(appSettings).values({ key: 'quality_weights', value: JSON.stringify(weights) }).run();
+    let merged = parseJson<Record<string, number>>(existing?.value, {});
+    merged = { ...merged, ...weights };
+    if (existing) db.update(appSettings).set({ value: JSON.stringify(merged) }).where(eq(appSettings.key, 'quality_weights')).run();
+    else db.insert(appSettings).values({ key: 'quality_weights', value: JSON.stringify(merged) }).run();
     return this.listQualityWeights();
   }
 
@@ -157,6 +160,11 @@ export class CustomizationService {
       { key: 'draftSection', label: '章节起草' },
       { key: 'polish', label: '润色降重' },
       { key: 'translate', label: '学术翻译' },
+      { key: 'generateFigures', label: '图表生成' },
+      { key: 'response_letter', label: '审稿回复信' },
+      { key: 'cover_letter', label: '投稿封面信' },
+      { key: 'journalsMatch', label: '期刊推荐' },
+      { key: 'parseSubmissionEmail', label: '投稿邮件解析' },
     ];
   }
 

@@ -120,6 +120,43 @@ body {
   box-shadow: 0 8px 24px rgba(15, 118, 110, 0.10);
 }
 
+/* ---- Micro-interactions ---- */
+
+/* Table row hover transition */
+.table-row-hover {
+  transition: background-color 0.15s ease;
+}
+
+/* Button press feedback */
+.btn-press {
+  transition: transform 0.1s ease;
+}
+.btn-press:active {
+  transform: scale(0.97);
+}
+
+/* Consistent focus ring on interactive elements */
+.input-focus-ring {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.input-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.30);
+  border-color: #0d9488;
+}
+
+/* Global focus-visible ring for all interactive elements */
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible,
+[role="row"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.40);
+}
+
 /* 骨架屏 shimmer */
 @keyframes shimmer {
   0% { background-position: -400px 0; }

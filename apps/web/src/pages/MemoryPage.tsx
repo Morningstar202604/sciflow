@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Brain, History, Lightbulb, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { MemoryItem } from '../types';
-import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Spinner, Textarea } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Spinner, Textarea, errMsg } from '../components/ui';
 import { ChartEmpty, Donut, LineChart } from '../components/charts';
 
 /** 记忆中心（Phase 2：Agentic Memory）
@@ -36,8 +36,8 @@ export function MemoryPage() {
     try {
       const list = await api.memory.list(type, q);
       setItems(list);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setLoading(false);
     }
@@ -63,8 +63,8 @@ export function MemoryPage() {
       setShowAdd(false);
       refresh();
       loadOverview();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setSaving(false);
     }
@@ -81,8 +81,8 @@ export function MemoryPage() {
       setDeleting(null);
       refresh();
       loadOverview();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
       setDeleting(null);
     }
   };
@@ -251,8 +251,8 @@ export function MemoryPage() {
                 </div>
                 <div className="text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap break-all">{m.content}</div>
               </div>
-              <button className="text-slate-300 hover:text-rose-500 shrink-0" title="删除" onClick={() => remove(m)}>
-                <Trash2 size={15} />
+              <button className="text-slate-300 hover:text-rose-500 shrink-0" title="删除" aria-label="删除记忆" onClick={() => remove(m)}>
+                <Trash2 size={15} aria-hidden="true" />
               </button>
             </Card>
           ))}

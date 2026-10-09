@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { Doc, KnowledgeDoc, KnowledgeDocDetail, KnowledgeQueryResult, KnowledgeSource, Project, Reference } from '../types';
-import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, SectionTitle, Badge, Spinner } from '../components/ui';
+import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, SectionTitle, Badge, Spinner, errMsg } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
 
 function fileToBase64(file: File): Promise<string> {
@@ -277,8 +277,8 @@ export function KnowledgePage({ project }: { project: Project }) {
   const load = async () => {
     try {
       setDocs(await api.knowledge.list(project.id));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     }
   };
 
@@ -303,8 +303,8 @@ export function KnowledgePage({ project }: { project: Project }) {
       toast('success', referenceId ? `已绑定「${refs.find((r) => r.id === referenceId)?.title || '文献'}」` : `已解除「${doc.name}」的文献绑定`);
       setBindingDocId(null);
       await load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     }
   };
 
@@ -336,8 +336,8 @@ export function KnowledgePage({ project }: { project: Project }) {
       setCitedKeys((m) => ({ ...m, [key]: true }));
       toast('success', `已引用「${citeSource.docName}」到论文`);
       setCiteSource(null);
-    } catch (e: any) {
-      setError(e?.message || '引用失败');
+    } catch (e: unknown) {
+      setError(errMsg(e) || '引用失败');
     } finally {
       setCiting(false);
     }
@@ -395,8 +395,8 @@ export function KnowledgePage({ project }: { project: Project }) {
       await api.knowledge.upload(project.id, file.name, type, content);
       toast('success', `「${file.name}」已入库`);
       await load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setBusy('');
     }
@@ -409,8 +409,8 @@ export function KnowledgePage({ project }: { project: Project }) {
     setError('');
     try {
       setAnswer(await api.knowledge.query(project.id, q));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setBusy('');
     }
@@ -428,8 +428,8 @@ export function KnowledgePage({ project }: { project: Project }) {
       setAnswer(null);
       load();
       toast('info', `「${deleting.name}」已删除`);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
       setDeleting(null);
     }
   };

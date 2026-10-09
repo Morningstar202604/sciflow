@@ -5,7 +5,7 @@ import {
 import { api } from '../api/client';
 import { ToastContext } from '../App';
 import type { Doc, Journal, JournalMatchResult, ParseEmailResult, Project, ReviewComment, SubmissionStatus, SubmissionTrack } from '../types';
-import { Badge, Button, Card, ErrorBox, Input, Select, Spinner, Textarea } from '../components/ui';
+import { Badge, Button, Card, ErrorBox, Input, Select, Spinner, Textarea, errMsg } from '../components/ui';
 import { HBar } from '../components/charts';
 
 type Tab = 'journals' | 'cover' | 'reply' | 'track';
@@ -141,8 +141,8 @@ export function SubmissionPage({ project }: { project: Project }) {
         }),
       );
       setOpenCounts(counts);
-    } catch (e: any) {
-      setError(e?.message || '投稿列表加载失败');
+    } catch (e: unknown) {
+      setError(errMsg(e) || '投稿列表加载失败');
     }
   }, [project.id]);
 
@@ -157,8 +157,8 @@ export function SubmissionPage({ project }: { project: Project }) {
     try {
       const result = await fn();
       setOutput(result);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -174,8 +174,8 @@ export function SubmissionPage({ project }: { project: Project }) {
     setMatch(null);
     try {
       setMatch(await api.submission.journalsMatch(title, abstract));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setMatching(false);
     }
@@ -193,8 +193,8 @@ export function SubmissionPage({ project }: { project: Project }) {
       });
       setLibForm({ name: '', issn: '', publisher: '', quartile: '', if2024: '' });
       await loadLib();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     }
   };
 
@@ -214,8 +214,8 @@ export function SubmissionPage({ project }: { project: Project }) {
     try {
       const text = await api.submission.replyReview(c.commentText, c.responseText || '');
       setDraftReplies((m) => ({ ...m, [c.id]: text }));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setWritingBack(null);
     }
@@ -229,8 +229,8 @@ export function SubmissionPage({ project }: { project: Project }) {
       await api.research.updateReviewComment(c.id, { responseText: text, status: 'resolved' });
       const updated = await api.research.reviewComments(selDoc);
       setComments(updated);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setWritingBack(null);
     }
@@ -256,8 +256,8 @@ export function SubmissionPage({ project }: { project: Project }) {
       });
       setRegForm({ docId: '', journalId: '', journalName: '', date: todayISO(), status: 'submitted', note: '', prevId: '', revDeadline: '' });
       await loadTracks();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     }
   };
 
@@ -325,8 +325,8 @@ export function SubmissionPage({ project }: { project: Project }) {
       });
       toast('success', `已按 ${open.length} 条 open 审稿意见记录「${STATUS_META[status].label}」事件`);
       await loadTracks();
-    } catch (e: any) {
-      setError(e?.message || '记录审稿事件失败');
+    } catch (e: unknown) {
+      setError(errMsg(e) || '记录审稿事件失败');
     } finally {
       setBusy(false);
     }
@@ -339,8 +339,8 @@ export function SubmissionPage({ project }: { project: Project }) {
       setDeadlineFor(null);
       setDeadlineVal('');
       await loadTracks();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     }
   };
 
@@ -354,8 +354,8 @@ export function SubmissionPage({ project }: { project: Project }) {
       setEvNote('');
       setEvDeadline('');
       await loadTracks();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     }
   };
 
@@ -366,8 +366,8 @@ export function SubmissionPage({ project }: { project: Project }) {
     setParseResult(null);
     try {
       setParseResult(await api.submission.parseEmail(emailText, t.currentStatus));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setParsing(false);
     }
@@ -386,8 +386,8 @@ export function SubmissionPage({ project }: { project: Project }) {
       setEmailText('');
       setParseResult(null);
       await loadTracks();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setConfirming(false);
     }
@@ -397,8 +397,8 @@ export function SubmissionPage({ project }: { project: Project }) {
     try {
       await api.submission.removeTrack(id);
       await loadTracks();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     }
   };
 

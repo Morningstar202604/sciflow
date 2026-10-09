@@ -7,6 +7,7 @@ import { eq, inArray, and, asc } from 'drizzle-orm';
 import { AiService } from '../ai/ai.service';
 import { EmbeddingService } from './embedding.service';
 import { fingerprint } from '../common/fingerprint';
+import { parseAuthors } from '../common/authors';
 
 const CHUNK_SIZE = 800; // 每块约 800 字（段落聚合，与文档切分逻辑保持一致）
 
@@ -115,15 +116,9 @@ export class KnowledgeService {
     return map;
   }
 
-  /** 渲染作者 JSON 为逗号分隔字符串（摘要用） */
+  /** 渲染作者 JSON 为逗号分隔字符串（摘要用）；复用 common/authors 的公共解析，避免对象元素渲染为 [object Object] */
   private formatAuthorsForSummary(authorsJson: string | null): string {
-    try {
-      const a = JSON.parse(authorsJson || '[]');
-      if (!Array.isArray(a) || a.length === 0) return '';
-      return a.filter(Boolean).join(', ');
-    } catch {
-      return '';
-    }
+    return parseAuthors(authorsJson).join(', ');
   }
 
   /** 上传文档（type: text | pdf | markdown；content 为文本或 PDF 的 base64）
@@ -157,8 +152,8 @@ export class KnowledgeService {
     // 向量嵌入：为每个 chunk 生成 embedding BLOB（异步批量）
     const embeddings = await this.embedChunks(chunks);
 
-    // 事务写入：doc + chunks + vec0 虚拟表
-    const insertDoc = () => {
+    // 事务写入：doc + chunks + vec0 虚拟表（崩溃时自动回滚，防止"有 doc 无 chunk"的脏数据）
+    const insertDoc = sqlite.transaction(() => {
       db.insert(knowledgeDocs).values({
         id: docId,
         projectId,
@@ -180,7 +175,7 @@ export class KnowledgeService {
         // vec0 仅在有向量时写入（无向量则走 LIKE/BM25 兜底检索）
         if (embeddings[i]) insertVec.run(chunkId, embeddings[i]);
       }
-    };
+    });
     insertDoc();
 
     return { id: docId, name, chunkCount: chunks.length, referenceId: referenceId || null };

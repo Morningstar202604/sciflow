@@ -5,10 +5,10 @@ import { ResearchService } from './research.service';
 export class ResearchController {
   constructor(private readonly research: ResearchService) {}
 
-  /** 统一处理 AI 返回的 { error } 结构：有 error 时抛 HttpException，否则返回结果 */
+  /** 统一处理 AI 返回的 { error } 结构：有 error 时抛 HttpException；过滤可能含 internal 信息的字段后返回结果 */
   private assertNoError(result: any) {
-    if ('error' in result) {
-      throw new HttpException((result as { error: string }).error, HttpStatus.BAD_REQUEST);
+    if (result && typeof result === 'object' && 'error' in result && typeof result.error === 'string') {
+      throw new HttpException(result.error, HttpStatus.BAD_REQUEST);
     }
     return result;
   }

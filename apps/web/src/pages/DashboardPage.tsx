@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BookOpen, Beaker, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
 import type { DashboardOverview, Doc, Project, Reference } from '../types';
-import { Button, Card, Empty, Skeleton, Badge, jsonText, SectionTitle, Textarea } from '../components/ui';
+import { Button, Card, Empty, Skeleton, Badge, jsonText, SectionTitle, Textarea, errMsg } from '../components/ui';
 import { Donut, HBar, MetricCard } from '../components/charts';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
@@ -32,8 +32,8 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
     Promise.all([
       api.documents.list(project.id),
       api.references.list(project.id),
-      api.knowledge.list(project.id).catch(() => [] as any[]),
-      api.pipeline.list(project.id).catch(() => [] as any[]),
+      api.knowledge.list(project.id).catch(() => []),
+      api.pipeline.list(project.id).catch(() => []),
     ])
       .then(([d, r, k, p]) => {
         setDocs(d);
@@ -62,8 +62,8 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
       await api.projects.update(project.id, { preface: prefaceDraft.trim() });
       setPrefaceEditing(false);
       toast('success', prefaceDraft.trim() ? '项目写作偏好已保存，后续写作将自动注入' : '已清空项目写作偏好');
-    } catch (e: any) {
-      toast('error', e.message || '保存失败');
+    } catch (e: unknown) {
+      toast('error', errMsg(e) || '保存失败');
     } finally {
       setPrefaceSaving(false);
     }
@@ -228,6 +228,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
             <input
               className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm w-full sm:w-52 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-50"
               placeholder="新建论文草稿标题"
+              aria-label="新建论文草稿标题"
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && createDoc()}
@@ -242,7 +243,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
       </SectionTitle>
 
       {loading ? (
-        <div className="grid md:grid-cols-2 gap-3">
+        <div role="status" aria-label="加载草稿列表" className="grid md:grid-cols-2 gap-3">
           <Card className="p-4"><Skeleton lines={3} /></Card>
           <Card className="p-4"><Skeleton lines={3} /></Card>
         </div>

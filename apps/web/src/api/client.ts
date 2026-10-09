@@ -6,6 +6,11 @@ import type {
   SubmissionTrack, SubmissionStatus, ParseEmailResult, ReferenceGraph, BibtexImportResult, DashboardOverview,
 } from '../types';
 
+/** Narrow unknown error to readable message */
+function extractErrMsg(e: unknown): string {
+  return typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string' ? e.message : String(e);
+}
+
 /** 友好错误转译：后端中文业务错误原样保留；英文/状态码/网络错误转为清晰中文提示 */
 const statusText: Record<number, string> = {
   400: '请求参数有误，请检查后重试',
@@ -46,9 +51,8 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
       throw new Error(friendlyError(raw, res.status));
     }
     return res.json() as Promise<T>;
-  } catch (e: any) {
-    if (e?.name === 'AbortError') throw new Error('请求超时（AI 响应较慢），请稍后重试');
-    // 已转译的友好错误直接透传；其余为 fetch 网络层错误（Failed to fetch / ECONNREFUSED 等英文技术信息）
+  } catch (e: unknown) {
+    if (typeof e === 'object' && e !== null && 'name' in e && e.name === 'AbortError') throw new Error('请求超时（AI 响应较慢），请稍后重试');
     if (e instanceof Error && /^[请求服务网络未授权没有操作]/.test(e.message)) throw e;
     throw new Error(friendlyError(undefined));
   } finally {
@@ -454,9 +458,10 @@ export function streamChat(opts: {
               reasoning += json.reasoning;
               opts.onReasoning?.(reasoning);
             }
-          } catch (e: any) {
-            if (e?.message) {
-              opts.onError?.(friendlyError(typeof e.message === 'string' && /[\u4e00-\u9fa5]/.test(e.message) ? e.message : undefined));
+          } catch (e: unknown) {
+            const msg = extractErrMsg(e);
+            if (msg) {
+              opts.onError?.(friendlyError(/[\u4e00-\u9fa5]/.test(msg) ? msg : undefined));
               opts.onDone?.(full);
               return;
             }
@@ -466,13 +471,13 @@ export function streamChat(opts: {
       }
       finish();
     })
-    .catch((e: any) => {
+    .catch((e: unknown) => {
       // 用户主动停止：保留已收文本，正常收尾（不报错）
-      if (e?.name === 'AbortError') {
+      if (typeof e === 'object' && e !== null && 'name' in e && e.name === 'AbortError') {
         finish();
         return;
       }
-      const msg = e?.message;
+      const msg = extractErrMsg(e);
       opts.onError?.(friendlyError(msg && /^[请求服务网络未授权没有操作]/.test(msg) ? msg : undefined));
     });
   return () => ctrl.abort();

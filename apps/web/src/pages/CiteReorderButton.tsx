@@ -2,7 +2,7 @@ import { useContext, useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import { ToastContext } from '../App';
-import { Button, Modal } from '../components/ui';
+import { Button, Modal, errMsg } from '../components/ui';
 import type { CiteStyle, RenderCitationsResult } from '../types';
 
 /** 序号样式集合（[n] 插入序，无需正文重排） */
@@ -45,8 +45,8 @@ export function CiteReorderButton({
       try {
         const res = await api.documents.renderCitations(docId, style as CiteStyle, true);
         setResult(res);
-      } catch (e: any) {
-        toast('error', '重排预览失败：' + (e?.message || e));
+      } catch (e: unknown) {
+        toast('error', '重排预览失败：' + errMsg(e));
       } finally {
         setLoading(false);
       }

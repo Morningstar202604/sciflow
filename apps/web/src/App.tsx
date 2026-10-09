@@ -1,10 +1,12 @@
 import { Component, Suspense, lazy, useCallback, useContext, useEffect, useMemo, useState, createContext, type ReactNode } from 'react';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { PageErrorBoundary } from './components/PageErrorBoundary';
 import {
   BookOpen, Brain, Beaker, FlaskConical, LayoutDashboard, Menu, MessageSquare, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { KnowledgeDoc, Project, Reference } from './types';
+import { errMsg } from './components/ui';
 import { Button, Input, Modal, Spinner, ErrorBox, ToastViewport, ConfirmDialog, type ToastItem, type ToastKind } from './components/ui';
 // 路由级代码分割：所有页面懒加载（首屏只加载当前视图，大厂 SPA 标准）
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
@@ -150,12 +152,12 @@ function AppInner() {
       setProjects(list);
       setCurrentProjectId((prev) => (list.some((p) => p.id === prev) ? prev : (list[0]?.id ?? null)));
       setError('');
-    } catch (e: any) {
+    } catch (e: unknown) {
       // 初始化失败自动重试（后端冷启动场景）：最多 4 次，2s 间隔
       if (attempt < 4) {
         setTimeout(() => loadProjects(attempt + 1), 2000);
       } else {
-        setError(e.message);
+        setError(errMsg(e));
       }
     } finally {
       setLoading(false);
@@ -433,21 +435,23 @@ function AppInner() {
               </div>
             ) : (
               <>
-                {view === 'settings' && <SuspensePage><SettingsPage /></SuspensePage>}
-                {view === 'dashboard' && currentProject && <SuspensePage><DashboardPage project={currentProject} onNavigate={setView} openDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage>}
-                {view === 'writing' && currentProject && <SuspensePage><WritingPage project={currentProject} initialDocId={selectedDocId} /></SuspensePage>}
-                {view === 'literature' && currentProject && <SuspensePage><LiteraturePage project={currentProject} /></SuspensePage>}
-                {view === 'experiments' && currentProject && <SuspensePage><ExperimentsPage project={currentProject} /></SuspensePage>}
-                {view === 'knowledge' && currentProject && <SuspensePage><KnowledgePage project={currentProject} /></SuspensePage>}
-                {view === 'memory' && currentProject && <SuspensePage><MemoryPage /></SuspensePage>}
-                {view === 'pipeline' && currentProject && <SuspensePage><PipelinePage project={currentProject} onOpenDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage>}
+                {view === 'settings' && <PageErrorBoundary pageName="设置"><SuspensePage><SettingsPage /></SuspensePage></PageErrorBoundary>}
+                {view === 'dashboard' && currentProject && <PageErrorBoundary pageName="工作台"><SuspensePage><DashboardPage project={currentProject} onNavigate={setView} openDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage></PageErrorBoundary>}
+                {view === 'writing' && currentProject && <PageErrorBoundary pageName="论文写作"><SuspensePage><WritingPage project={currentProject} initialDocId={selectedDocId} /></SuspensePage></PageErrorBoundary>}
+                {view === 'literature' && currentProject && <PageErrorBoundary pageName="文献调研"><SuspensePage><LiteraturePage project={currentProject} /></SuspensePage></PageErrorBoundary>}
+                {view === 'experiments' && currentProject && <PageErrorBoundary pageName="实验记录"><SuspensePage><ExperimentsPage project={currentProject} /></SuspensePage></PageErrorBoundary>}
+                {view === 'knowledge' && currentProject && <PageErrorBoundary pageName="知识库"><SuspensePage><KnowledgePage project={currentProject} /></SuspensePage></PageErrorBoundary>}
+                {view === 'memory' && currentProject && <PageErrorBoundary pageName="记忆中心"><SuspensePage><MemoryPage /></SuspensePage></PageErrorBoundary>}
+                {view === 'pipeline' && currentProject && <PageErrorBoundary pageName="全自动流水线"><SuspensePage><PipelinePage project={currentProject} onOpenDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage></PageErrorBoundary>}
                 {view === 'quality' && currentProject && (
-                  <Suspense fallback={<div className="p-8 text-sm text-slate-400">加载质量评分…</div>}>
-                    <QualityPage project={currentProject} />
-                  </Suspense>
+                  <PageErrorBoundary pageName="质量评分">
+                    <Suspense fallback={<div className="p-8 text-sm text-slate-400" role="status" aria-label="加载质量评分">加载质量评分…</div>}>
+                      <QualityPage project={currentProject} />
+                    </Suspense>
+                  </PageErrorBoundary>
                 )}
-                {view === 'chat' && currentProject && <SuspensePage><ChatPage project={currentProject} /></SuspensePage>}
-                {view === 'submission' && currentProject && <SuspensePage><SubmissionPage project={currentProject} /></SuspensePage>}
+                {view === 'chat' && currentProject && <PageErrorBoundary pageName="科研问答"><SuspensePage><ChatPage project={currentProject} /></SuspensePage></PageErrorBoundary>}
+                {view === 'submission' && currentProject && <PageErrorBoundary pageName="投稿辅助"><SuspensePage><SubmissionPage project={currentProject} /></SuspensePage></PageErrorBoundary>}
               </>
             )}
           </main>

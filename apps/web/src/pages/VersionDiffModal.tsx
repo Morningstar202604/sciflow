@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
-import { Button, Modal, Select } from '../components/ui';
+import { Button, Modal, Select, errMsg } from '../components/ui';
 
 /** 版本快照（doc.versions 为 {version,content,updatedAt,name?}[] JSON 字符串；current 为当前编辑态） */
 export type VersionSnapshot = { version: number; content: string; updatedAt: number; current?: boolean; name?: string };
@@ -160,8 +160,8 @@ export function VersionDiffModal({
     setNames((p) => ({ ...p, [v]: trimmed })); // 乐观更新，会话内即时生效
     try {
       await api.documents.setVersionName(docId, v, trimmed);
-    } catch (e: any) {
-      setMigNote(`版本命名保存到后端失败：${e?.message || e}（已保留本地显示，稍后重试）`);
+    } catch (e: unknown) {
+      setMigNote(`版本命名保存到后端失败：${errMsg(e)}（已保留本地显示，稍后重试）`);
     }
   };
 

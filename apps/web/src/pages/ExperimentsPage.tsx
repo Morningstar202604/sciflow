@@ -3,7 +3,7 @@ import { AlertTriangle, Beaker, Check, Copy, Loader2, Play, RotateCcw, Save, Tra
 import { api } from '../api/client';
 import { ToastContext } from '../App';
 import type { Doc, Experiment, Project } from '../types';
-import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Select, Textarea } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, SectionTitle, Select, Textarea, errMsg } from '../components/ui';
 
 const DEFAULT_CODE = `# 在本机沙箱中运行 Python（超时 10s，临时目录隔离）
 import math
@@ -76,8 +76,8 @@ export function ExperimentsPage({ project }: { project: Project }) {
       ]);
       setExps(list);
       setDocs(docList);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     }
   };
 
@@ -103,8 +103,8 @@ export function ExperimentsPage({ project }: { project: Project }) {
         setLastRunMem({ id: exp.id, value: exp.memoryMonitored });
       }
       toast(exp.status === 'ok' ? 'success' : 'info', `实验执行${exp.status === 'ok' ? '成功' : `：${exp.status}`}`);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setRunning(false);
     }
@@ -138,8 +138,8 @@ export function ExperimentsPage({ project }: { project: Project }) {
         setLastRunMem({ id: fresh.id, value: fresh.memoryMonitored });
       }
       toast('success', `已重新运行：实验${fresh.status === 'ok' ? '执行成功' : `状态 ${fresh.status}`}`);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setRerunningId(null);
     }
@@ -153,8 +153,8 @@ export function ExperimentsPage({ project }: { project: Project }) {
       setExps((s) => s.map((x) => (x.id === updated.id ? updated : x)));
       setSelected(updated);
       toast('success', '结论已保存');
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setSaving(false);
     }
@@ -167,8 +167,8 @@ export function ExperimentsPage({ project }: { project: Project }) {
       setExps((s) => s.filter((x) => x.id !== deleting.id));
       if (selected?.id === deleting.id) setSelected(null);
       toast('info', '实验记录已删除');
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setDeleting(null);
     }

@@ -46,16 +46,24 @@ export class SubmissionService {
     return this.ai.recommendJournal(title || '(未命名)', abstract || '(未提供摘要)', field || '通用');
   }
 
-  /** Cover Letter */
-  coverLetter(title: string, abstract: string, journal: string) {
+  /** Cover Letter（AI 生成失败时转可读异常，不暴露 stack） */
+  async coverLetter(title: string, abstract: string, journal: string) {
     if (!journal) throw new BadRequestException('请指定目标期刊');
-    return this.ai.coverLetter(title || '(未命名)', abstract || '', journal);
+    try {
+      return await this.ai.coverLetter(title || '(未命名)', abstract || '', journal);
+    } catch {
+      throw new BadRequestException('封面信生成失败：AI 服务暂不可用，请稍后重试或检查模型配置');
+    }
   }
 
-  /** 审稿意见回复 */
-  replyReview(reviewComments: string, response = '') {
+  /** 审稿意见回复（AI 生成失败时转可读异常，不暴露 stack） */
+  async replyReview(reviewComments: string, response = '') {
     if (!reviewComments) throw new BadRequestException('请粘贴审稿意见');
-    return this.ai.replyReview(reviewComments, response);
+    try {
+      return await this.ai.replyReview(reviewComments, response);
+    } catch {
+      throw new BadRequestException('回复信生成失败：AI 服务暂不可用，请稍后重试或检查模型配置');
+    }
   }
 
   // ---------- 自建期刊库 ----------
@@ -97,6 +105,8 @@ export class SubmissionService {
 
   /** 删除期刊 */
   deleteJournal(id: string) {
+    const row = db.select().from(journals).where(eq(journals.id, id)).get();
+    if (!row) throw new NotFoundException('期刊不存在');
     db.delete(journals).where(eq(journals.id, id)).run();
     return { ok: true };
   }
@@ -247,30 +257,32 @@ export class SubmissionService {
       .sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0));
   }
 
-  /** L1 追加状态事件：date 缺省为现在；自动维护 currentStatus 缓存 */
+  /** L1 追加状态事件：date 缺省为现在；自动维护 currentStatus 缓存（事件+状态更新为事务） */
   addTrackEvent(id: string, body: { status: string; date?: number; note?: string; source?: string; rawEmailText?: string; confidence?: number }) {
     const row = this.getTrackOrThrow(id);
     if (!statusEnum.safeParse(body.status).success) throw new BadRequestException('未知投稿状态');
     const now = Date.now();
     const eventAt = body.date || now;
-    db.insert(submissionStatusEvents)
-      .values({
-        id: randomUUID(),
-        submissionId: id,
-        fromStatus: row.currentStatus,
-        toStatus: body.status,
-        eventAt,
-        source: body.source || 'manual',
-        rawEmailText: body.rawEmailText || '',
-        confidence: body.confidence ?? 1,
-        note: body.note || '',
-        createdAt: now,
-      })
-      .run();
-    db.update(submissions)
-      .set({ currentStatus: body.status, statusUpdatedAt: now, updatedAt: now })
-      .where(eq(submissions.id, id))
-      .run();
+    db.transaction((tx) => {
+      tx.insert(submissionStatusEvents)
+        .values({
+          id: randomUUID(),
+          submissionId: id,
+          fromStatus: row.currentStatus,
+          toStatus: body.status,
+          eventAt,
+          source: body.source || 'manual',
+          rawEmailText: body.rawEmailText || '',
+          confidence: body.confidence ?? 1,
+          note: body.note || '',
+          createdAt: now,
+        })
+        .run();
+      tx.update(submissions)
+        .set({ currentStatus: body.status, statusUpdatedAt: now, updatedAt: now })
+        .where(eq(submissions.id, id))
+        .run();
+    });
     return this.decorate(this.getTrackOrThrow(id));
   }
 
@@ -323,21 +335,27 @@ export class SubmissionService {
       if (!statusEnum.safeParse(patch.currentStatus).success) throw new BadRequestException('未知投稿状态');
       set.currentStatus = patch.currentStatus;
       set.statusUpdatedAt = Date.now();
-      db.insert(submissionStatusEvents)
-        .values({
-          id: randomUUID(),
-          submissionId: id,
-          fromStatus: row.currentStatus,
-          toStatus: patch.currentStatus,
-          eventAt: Date.now(),
-          source: 'manual',
-          confidence: 1,
-          note: '',
-          createdAt: Date.now(),
-        })
-        .run();
+      const fromStatus = row.currentStatus;
+      const toStatus = patch.currentStatus;
+      db.transaction((tx) => {
+        tx.insert(submissionStatusEvents)
+          .values({
+            id: randomUUID(),
+            submissionId: id,
+            fromStatus,
+            toStatus,
+            eventAt: Date.now(),
+            source: 'manual',
+            confidence: 1,
+            note: '',
+            createdAt: Date.now(),
+          })
+          .run();
+        tx.update(submissions).set(set).where(eq(submissions.id, id)).run();
+      });
+    } else {
+      db.update(submissions).set(set).where(eq(submissions.id, id)).run();
     }
-    db.update(submissions).set(set).where(eq(submissions.id, id)).run();
     return this.decorate(this.getTrackOrThrow(id));
   }
 

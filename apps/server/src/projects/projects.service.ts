@@ -1,8 +1,26 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { db } from '../db/database';
 import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments, experiments, submissions, submissionStatusEvents, citations, qualityReports, polishRecords, knowledgeDocs, knowledgeChunks, memoryLogs } from '../db/schema';
+import { parseJson } from '../common/json-guard';
+
+/** Zod schemas for projects input validation */
+const createProjectSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(5000).optional().default(''),
+});
+
+const updateProjectSchema = z.object({
+  id: z.string().min(1),
+  patch: z.object({
+    name: z.string().min(1).max(200).optional(),
+    description: z.string().max(5000).optional(),
+    preface: z.string().max(10000).optional(),
+    templates: z.string().max(100000).optional(),
+  }),
+});
 
 @Injectable()
 export class ProjectsService {
@@ -17,11 +35,12 @@ export class ProjectsService {
   }
 
   create(input: { name: string; description?: string }) {
+    const validated = createProjectSchema.parse(input);
     const now = Date.now();
     const row = {
       id: randomUUID(),
-      name: input.name.trim(),
-      description: input.description || '',
+      name: validated.name.trim(),
+      description: validated.description || '',
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -31,25 +50,21 @@ export class ProjectsService {
   }
 
   update(id: string, patch: { name?: string; description?: string; preface?: string; templates?: string }) {
-    this.get(id);
+    const validated = updateProjectSchema.parse({ id, patch });
+    this.get(validated.id);
     // preface（项目级系统提示，差距 #22）只接受字符串，其余字段维持既有透传行为
-    if (patch.preface !== undefined && typeof patch.preface !== 'string') {
+    if (validated.patch.preface !== undefined && typeof validated.patch.preface !== 'string') {
       throw new BadRequestException('preface 必须为字符串');
     }
     // 差距 #1：templates 只接受合法 JSON 数组字符串（[{name,description,sections:[{title,points}]}]）
-    if (patch.templates !== undefined) {
-      if (typeof patch.templates !== 'string') throw new BadRequestException('templates 必须是 JSON 字符串');
-      try {
-        const parsed = JSON.parse(patch.templates);
-        if (!Array.isArray(parsed)) throw new BadRequestException('templates 必须是 JSON 数组');
-      } catch (e: any) {
-        if (e instanceof BadRequestException) throw e;
-        throw new BadRequestException('templates 必须是合法 JSON 数组字符串');
-      }
+    if (validated.patch.templates !== undefined) {
+      if (typeof validated.patch.templates !== 'string') throw new BadRequestException('templates 必须是 JSON 字符串');
+      const parsed = parseJson<unknown>(validated.patch.templates, null);
+      if (!parsed || !Array.isArray(parsed)) throw new BadRequestException('templates 必须是合法 JSON 数组');
     }
-    const clean: Record<string, unknown> = { ...patch, updatedAt: Date.now() };
-    db.update(projects).set(clean).where(eq(projects.id, id)).run();
-    return this.get(id);
+    const clean: Record<string, unknown> = { ...validated.patch, updatedAt: Date.now() };
+    db.update(projects).set(clean).where(eq(projects.id, validated.id)).run();
+    return this.get(validated.id);
   }
 
   remove(id: string) {

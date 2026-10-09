@@ -78,7 +78,7 @@ export class ResearchService {
     );
     const parsed = this.ai.safeParse(raw, designReviewSchema);
     if (!parsed) {
-      return { error: '诊断结果解析失败，请重试', raw };
+      return { error: '诊断结果解析失败，请重试' };
     }
     return { ...parsed, paperCount: papers.length };
   }
@@ -103,7 +103,7 @@ export class ResearchService {
     );
     const parsed = this.ai.safeParse(raw, comparisonSchema);
     if (!parsed) {
-      return { error: '对比结果解析失败，请重试', raw };
+      return { error: '对比结果解析失败，请重试' };
     }
     return parsed;
   }
@@ -120,7 +120,7 @@ export class ResearchService {
     );
     const parsed = this.ai.safeParse(raw, simulatedReviewSchema);
     if (!parsed) {
-      return { error: '审稿意见解析失败，请重试', raw };
+      return { error: '审稿意见解析失败，请重试' };
     }
     return parsed;
   }

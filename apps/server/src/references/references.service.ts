@@ -9,7 +9,45 @@ import { references, screeningQueue, extractionFields, extractionValues, documen
 import { AiService } from '../ai/ai.service';
 import { parseAuthors } from '../common/authors';
 import { fingerprint } from '../common/fingerprint';
-import { parseTagsJson } from '../common/json-guard';
+import { parseTagsJson, parseStringList } from '../common/json-guard';
+
+/** Zod schemas for references input validation */
+const createSchema = z.object({
+  projectId: z.string().min(1),
+  hit: z.object({
+    title: z.string().min(1).max(500),
+    authors: z.array(z.string()).optional().default([]),
+    year: z.number().int().min(1000).max(2100).nullable().optional(),
+    venue: z.string().max(500).optional().default(''),
+    doi: z.string().max(200).optional().default(''),
+    url: z.string().max(2000).optional().default(''),
+    abstract: z.string().max(50000).optional().default(''),
+    citationCount: z.number().int().min(0).optional().default(0),
+  }),
+});
+
+const updateSchema = z.object({
+  id: z.string().min(1),
+  patch: z.object({
+    readingStatus: z.enum(['unread', 'reading', 'read', 'cited']).optional(),
+    tags: z.string().max(10000).optional(),
+    notes: z.string().max(50000).nullable().optional(),
+  }),
+});
+
+const importPipelineHitsSchema = z.object({
+  projectId: z.string().min(1),
+  hits: z.array(z.object({
+    title: z.string().min(1).max(500),
+    authors: z.array(z.string()).optional(),
+    year: z.number().int().min(1000).max(2100).nullable().optional(),
+    venue: z.string().max(500).optional(),
+    doi: z.string().max(200).optional(),
+    url: z.string().max(2000).optional(),
+    abstract: z.string().max(50000).optional(),
+    citationCount: z.number().int().min(0).optional(),
+  })).max(100),
+});
 
 /** 文献命中条目（本地文献库检索/入库共用） */
 export interface PaperHit {
@@ -47,7 +85,7 @@ export class ReferencesService {
     return rows.slice(0, limit).map((r) => ({
       id: r.id,
       title: r.title,
-      authors: this.parseAuthors(r.authors),
+      authors: parseAuthors(r.authors),
       year: r.year,
       venue: r.venue ?? '',
       doi: r.doi ?? '',
@@ -56,11 +94,6 @@ export class ReferencesService {
       source: 'manual' as const,
       citationCount: r.citationCount ?? 0,
     }));
-  }
-
-  /** 解析 authors JSON 为字符串数组（三形态归一化：字符串/对象{name|family+given}/坏 JSON→[]，与前端同口径） */
-  private parseAuthors(json: string | null): string[] {
-    return parseAuthors(json);
   }
 
   list(projectId: string) {
@@ -75,7 +108,9 @@ export class ReferencesService {
 
   /** 手动/检索结果入库（自动计算去重指纹，同项目内重复则标记 isDuplicateOf） */
   create(projectId: string, hit: Partial<PaperHit> & { title: string }) {
-    if (!hit.title) throw new BadRequestException('文献标题必填');
+    const validated = createSchema.parse({ projectId, hit });
+    projectId = validated.projectId;
+    hit = validated.hit;
     // 空元数据守卫：无作者且无年份的条目（如 Agentic RAG 补检的纯标题）不进文献库，
     // 避免污染引用池导致 [Unknown n.d.] / 佚名
     const authorsOk = (hit.authors || []).length > 0;
@@ -122,32 +157,28 @@ export class ReferencesService {
     return { ok: true };
   }
 
-  /** PATCH /:id：阅读状态 / 标签 / 文献笔记（notes 为 string|null，zod 校验） */
+  /** PATCH /:id：阅读状态 / 标签 / 文献笔记（zod 校验） */
   update(id: string, patch: { readingStatus?: string; tags?: string; notes?: string | null }) {
-    const existing = this.get(id);
+    const validated = updateSchema.parse({ id, patch });
+    const existing = this.get(validated.id);
     const set: Record<string, unknown> = {};
-    if (patch.readingStatus !== undefined) {
-      const allowed = ['unread', 'reading', 'read', 'cited'];
-      if (!allowed.includes(patch.readingStatus)) throw new BadRequestException('readingStatus 取值不合法');
-      set.readingStatus = patch.readingStatus;
+    if (validated.patch.readingStatus !== undefined) {
+      set.readingStatus = validated.patch.readingStatus;
     }
-    if (patch.tags !== undefined) {
+    if (validated.patch.tags !== undefined) {
       // tags 以 JSON 字符串落库；校验可解析
-      try {
-        JSON.parse(patch.tags);
-      } catch {
-        throw new BadRequestException('tags 必须是合法 JSON 字符串');
+      const parsed = parseTagsJson(validated.patch.tags);
+      if (parsed.length === 0 && validated.patch.tags.trim().length > 2) {
+        // 非空输入但解析为空 → 非法 JSON（parseTagsJson 内部已容错）
+        throw new BadRequestException('tags 必须是合法 JSON 数组字符串');
       }
-      set.tags = patch.tags;
+      set.tags = validated.patch.tags;
     }
-    if (patch.notes !== undefined) {
-      // 路线图差距 #11：笔记只接受 string|null（null 等价清空），其余类型 400
-      const r = z.union([z.string(), z.null()]).safeParse(patch.notes);
-      if (!r.success) throw new BadRequestException('notes 必须为字符串或 null');
-      set.notes = patch.notes ?? '';
+    if (validated.patch.notes !== undefined) {
+      set.notes = validated.patch.notes ?? '';
     }
-    db.update(references).set(set).where(eq(references.id, id)).run();
-    return this.get(id);
+    db.update(references).set(set).where(eq(references.id, validated.id)).run();
+    return this.get(validated.id);
   }
 
   // ---------- 批量 DOI 本地核验（差距 #20，不调外部 API） ----------
@@ -193,19 +224,20 @@ export class ReferencesService {
    * 幂等：多轮重跑因指纹命中恒为 skipped。
    */
   importPipelineHits(projectId: string, hits: { title: string; authors?: string[]; year?: number | null; venue?: string; doi?: string; url?: string; abstract?: string; citationCount?: number }[]) {
+    const validated = importPipelineHitsSchema.parse({ projectId, hits });
     let imported = 0;
     let skipped = 0;
-    for (const hit of hits || []) {
+    for (const hit of validated.hits) {
       if (!hit.title) continue;
       const fp = fingerprint(hit.title);
       if (fp) {
-        const dup = db.select().from(references).where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp))).get();
+        const dup = db.select().from(references).where(and(eq(references.projectId, validated.projectId), eq(references.fingerprint, fp))).get();
         if (dup) { skipped++; continue; }
       }
-      db.insert(references).values({ id: randomUUID(), projectId, title: hit.title, authors: JSON.stringify(hit.authors || []), year: hit.year ?? null, venue: hit.venue || '', doi: hit.doi || '', url: hit.url || '', abstract: hit.abstract || '', source: 'pipeline-research', tags: '[]', citationCount: hit.citationCount || 0, readingStatus: 'unread', fingerprint: fp, isDuplicateOf: '', createdAt: Date.now() }).run();
+      db.insert(references).values({ id: randomUUID(), projectId: validated.projectId, title: hit.title, authors: JSON.stringify(hit.authors || []), year: hit.year ?? null, venue: hit.venue || '', doi: hit.doi || '', url: hit.url || '', abstract: hit.abstract || '', source: 'pipeline-research', tags: '[]', citationCount: hit.citationCount || 0, readingStatus: 'unread', fingerprint: fp, isDuplicateOf: '', createdAt: Date.now() }).run();
       imported++;
     }
-    return { imported, skipped, total: (hits || []).length };
+    return { imported, skipped, total: validated.hits.length };
   }
 
   // ---------- 引用写入（幂等：document+reference 已存在则返回既有记录） ----------
@@ -242,7 +274,7 @@ export class ReferencesService {
 
   // ---------- 系统综述·筛选队列 ----------
 
-  /** 单条筛选：同 (project, reference) 已存在则更新，否则新建 */
+  /** 单条筛选：同 (project, reference) 已存在则更新，否则新建。直接返回受影响的行（避免全表重查 O(n)） */
   screenUpsert(projectId: string, referenceId: string, status: string, reason = '') {
     const allowed = ['pending', 'included', 'excluded', 'uncertain'];
     if (!allowed.includes(status)) throw new BadRequestException('筛选 status 取值不合法');
@@ -262,19 +294,35 @@ export class ReferencesService {
         .values({ id, projectId, referenceId, status, reason, reviewer: 'me', createdAt: now, updatedAt: now })
         .run();
     }
-    return this.screenList(projectId).find((s) => s.id === id);
+    return db.select().from(screeningQueue).where(eq(screeningQueue.id, id)).get();
   }
 
-  /** 批量筛选 */
+  /** 批量筛选（事务包裹，全部成功或全部回滚） */
   screenBulk(projectId: string, referenceIds: string[], status: string, reason = '') {
     const allowed = ['pending', 'included', 'excluded', 'uncertain'];
     if (!allowed.includes(status)) throw new BadRequestException('筛选 status 取值不合法');
-    let updated = 0;
-    for (const refId of referenceIds || []) {
-      this.screenUpsert(projectId, refId, status, reason);
-      updated += 1;
-    }
-    return { ok: true, updated };
+    const refs = referenceIds || [];
+    db.transaction((tx) => {
+      const now = Date.now();
+      for (const refId of refs) {
+        const existing = tx
+          .select()
+          .from(screeningQueue)
+          .where(and(eq(screeningQueue.projectId, projectId), eq(screeningQueue.referenceId, refId)))
+          .get();
+        let id: string;
+        if (existing) {
+          id = existing.id;
+          tx.update(screeningQueue).set({ status, reason, updatedAt: now }).where(eq(screeningQueue.id, id)).run();
+        } else {
+          id = randomUUID();
+          tx.insert(screeningQueue)
+            .values({ id, projectId, referenceId: refId, status, reason, reviewer: 'me', createdAt: now, updatedAt: now })
+            .run();
+        }
+      }
+    });
+    return { ok: true, updated: refs.length };
   }
 
   /** 筛选队列列表（join reference 元数据） */
@@ -387,13 +435,7 @@ export class ReferencesService {
   }
 
   private toFieldDto(row: typeof extractionFields.$inferSelect) {
-    let options: string[] = [];
-    try {
-      const parsed = JSON.parse(row.options || '[]');
-      options = Array.isArray(parsed) ? parsed.map(String) : [];
-    } catch {
-      options = [];
-    }
+    const options = parseStringList(row.options);
     return {
       id: row.id,
       projectId: row.projectId,
@@ -505,29 +547,57 @@ export class ReferencesService {
     return new Cite(this.toCslJson(refs)).format('ris');
   }
 
-  /** 导入 BibTeX 文本：citation-js 解析（替代手搓 parseBibtex 75 行） */
+  /** 导入 BibTeX 文本：citation-js 解析（替代手搓 parseBibtex 75 行）；逐条容错 — 单条坏 entry 不废整批，事务包裹确保原子性 */
   importBibtex(projectId: string, text: string) {
     let imported = 0;
     let skipped = 0;
+    const errors: string[] = [];
+    let cite: any;
     try {
-      const cite = new Cite(text);
-      for (const entry of cite.data) {
-        const title = entry.title || '';
-        if (!title) { skipped++; continue; }
-        const fp = fingerprint(title);
-        if (fp) { const dup = db.select().from(references).where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp))).get(); if (dup) { skipped++; continue; } }
-        const yearRaw = entry.issued?.['date-parts']?.[0]?.[0];
-        const year = yearRaw ? Number(yearRaw) : null;
-        const venue = entry['container-title'] || entry['collection-title'] || '';
-        const doi = entry.DOI || '';
-        const authors = (entry.author || []).map((a) => `${a.given || ''} ${a.family || ''}`.trim()).filter(Boolean);
-        const created = this.create(projectId, { title, authors, year, venue, doi, abstract: entry.abstract || '' });
-        if (created) imported++; else skipped++;
-      }
-      return { imported, skipped, total: cite.data.length };
+      cite = new Cite(text);
     } catch (e: any) {
-      throw new BadRequestException(`BibTeX 解析失败: ${e.message}`);
+      throw new BadRequestException(`BibTeX 整体解析失败: ${e.message}`);
     }
+    if (!cite.data.length) throw new BadRequestException('BibTeX 解析结果为空');
+    db.transaction((tx) => {
+      for (let i = 0; i < cite.data.length; i++) {
+        const entry = cite.data[i];
+        try {
+          const title = entry.title || '';
+          if (!title) { skipped++; continue; }
+          const fp = fingerprint(title);
+          if (fp) { const dup = tx.select().from(references).where(and(eq(references.projectId, projectId), eq(references.fingerprint, fp))).get(); if (dup) { skipped++; continue; } }
+          const yearRaw = entry.issued?.['date-parts']?.[0]?.[0];
+          const year = yearRaw ? Number(yearRaw) : null;
+          const venue = entry['container-title'] || entry['collection-title'] || '';
+          const doi = entry.DOI || '';
+          const auths = (entry.author || []).map((a: any) => `${a.given || ''} ${a.family || ''}`.trim()).filter(Boolean);
+          tx.insert(references).values({
+            id: randomUUID(),
+            projectId,
+            title,
+            authors: JSON.stringify(auths),
+            year,
+            venue,
+            doi,
+            abstract: entry.abstract || '',
+            source: 'bibtex',
+            tags: '[]',
+            citationCount: 0,
+            readingStatus: 'unread',
+            fingerprint: fp,
+            isDuplicateOf: '',
+            notes: '',
+            createdAt: Date.now(),
+          }).run();
+          imported++;
+        } catch (e: any) {
+          errors.push(`第 ${i + 1} 条: ${e.message}`);
+          skipped++;
+        }
+      }
+    });
+    return { imported, skipped, total: cite.data.length, errors: errors.length ? errors : undefined };
   }
 
   /** AI 文献综述（只基于文献库内真实文献，禁止编造） */

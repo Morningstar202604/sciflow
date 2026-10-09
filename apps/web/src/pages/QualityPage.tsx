@@ -2,7 +2,7 @@ import { useEffect, useState, useContext } from 'react';
 import { Gauge, Loader2, Sparkles, ListChecks } from 'lucide-react';
 import { api } from '../api/client';
 import type { Doc, Project, QualityReport } from '../types';
-import { Badge, Button, Card, Empty, ErrorBox, Select, jsonText } from '../components/ui';
+import { Badge, Button, Card, Empty, ErrorBox, Select, jsonText, errMsg } from '../components/ui';
 import { ToastContext } from '../App';
 import { HBar, LineChart, ProgressRing } from '../components/charts';
 
@@ -103,8 +103,8 @@ export function QualityPage({ project }: { project: Project }) {
       setReport(full);
       setSelectedHist(full);
       setHistory(await api.quality.history(doc.id));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setScoring(false);
     }
@@ -119,8 +119,8 @@ export function QualityPage({ project }: { project: Project }) {
       const res = await api.quality.exportComments(docId);
       if (res.created > 0) toast('success', `已拆出 ${res.created} 条改进待办（写入审稿意见表，写作/投稿页可见）`);
       else toast('info', `无新增：已有 ${res.existing} 条待办，未重复创建`);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally {
       setExporting(false);
     }
@@ -142,8 +142,8 @@ export function QualityPage({ project }: { project: Project }) {
             value={docId}
             onChange={setDocId}
           />
-          <Button onClick={doReview} disabled={scoring || !docId}>
-            {scoring ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} 开始评分
+          <Button onClick={doReview} disabled={scoring || !docId} aria-busy={scoring}>
+            {scoring ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Sparkles size={15} aria-hidden="true" />} {scoring ? '评分中…' : '开始评分'}
           </Button>
         </div>
         <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">
@@ -187,8 +187,9 @@ export function QualityPage({ project }: { project: Project }) {
                 disabled={exporting || !current.feedback}
                 onClick={doExportComments}
                 title="把上方改进建议按句拆成可勾选待办，写入审稿意见表（写作页/投稿页复用）"
+                aria-busy={exporting}
               >
-                {exporting ? <Loader2 size={13} className="animate-spin" /> : <ListChecks size={13} />} 拆为待办清单
+                {exporting ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : <ListChecks size={13} aria-hidden="true" />} {exporting ? '导出中…' : '拆为待办清单'}
               </Button>
             </div>
             <div className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
@@ -225,7 +226,7 @@ export function QualityPage({ project }: { project: Project }) {
           </Card>
         </div>
       ) : (
-        <Empty text="评分结果将在这里展示（雷达图 + 总分 + 改进建议）" />
+          <Empty text="选择文档并点击「开始评分」后，雷达图、总分与改进建议将在这里展示" />
       )}
     </div>
   );

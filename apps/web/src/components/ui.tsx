@@ -1,5 +1,16 @@
-import { ReactNode, useEffect } from 'react';
+import { forwardRef, ReactNode, useEffect } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, Loader2, Sparkles, X, XCircle } from 'lucide-react';
+import { EmptyDocuments, EmptySearch, EmptyChat, EmptyKnowledge, EmptyPipeline } from './illustrations';
+
+const ILLUSTRATIONS = {
+  documents: EmptyDocuments,
+  search: EmptySearch,
+  chat: EmptyChat,
+  knowledge: EmptyKnowledge,
+  pipeline: EmptyPipeline,
+} as const;
+
+type IllustrationKey = keyof typeof ILLUSTRATIONS;
 
 const btnBase =
   'inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none whitespace-nowrap active:scale-[0.97] select-none';
@@ -50,14 +61,18 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   );
 }
 
-export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return (
-    <textarea
-      {...props}
-      className={`w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm outline-none transition-all duration-150 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/15 dark:focus:ring-teal-400/15 bg-white dark:bg-slate-900 hover:border-slate-400 dark:hover:border-slate-600 resize-none leading-relaxed ${props.className || ''}`}
-    />
-  );
-}
+export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
+  function Textarea(props, ref) {
+    const { className, ...rest } = props;
+    return (
+      <textarea
+        ref={ref}
+        {...rest}
+        className={`w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm outline-none transition-all duration-150 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/15 dark:focus:ring-teal-400/15 bg-white dark:bg-slate-900 hover:border-slate-400 dark:hover:border-slate-600 resize-none leading-relaxed ${className || ''}`}
+      />
+    );
+  },
+);
 
 export function Select({ options, value, onChange, className = '' }: {
   options: { value: string; label: string }[];
@@ -94,9 +109,9 @@ export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm py-2">
-      <Loader2 size={16} className="animate-spin" />
-      {label || '处理中…'}
+    <div role="status" className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm py-2">
+      <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+      <span>{label || '处理中…'}</span>
     </div>
   );
 }
@@ -111,12 +126,17 @@ export function Skeleton({ className = '', lines = 3 }: { className?: string; li
   );
 }
 
-export function Empty({ text, hint }: { text: string; hint?: string }) {
+export function Empty({ text, hint, illustration }: { text: string; hint?: string; illustration?: IllustrationKey }) {
+  const IllustrationComp = illustration ? ILLUSTRATIONS[illustration] : null;
   return (
     <div className="flex flex-col items-center justify-center gap-1.5 text-center py-12">
-      <div className="w-11 h-11 rounded-xl brand-logo flex items-center justify-center mb-1">
-        <Sparkles size={19} className="text-white" />
-      </div>
+      {IllustrationComp ? (
+        <IllustrationComp className="w-24 h-20 mb-2" />
+      ) : (
+        <div className="w-11 h-11 rounded-xl brand-logo flex items-center justify-center mb-1">
+          <Sparkles size={19} className="text-white" />
+        </div>
+      )}
       <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{text}</div>
       {hint && <div className="text-xs text-slate-400 dark:text-slate-500">{hint}</div>}
     </div>
@@ -155,9 +175,15 @@ export function Modal({ open, title, children, onClose, width = 'max-w-2xl' }: {
   );
 }
 
+/** Type guard: narrow unknown to { message: string } */
+function isErrorWithMessage(e: unknown): e is { message: string } {
+  return typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string';
+}
+
 /** 统一错误提取：后端 Nest 错误（message）与前端 Error 统一取可读信息 */
-export function errMsg(e: any): string {
-  return e?.message ? String(e.message) : String(e);
+export function errMsg(e: unknown): string {
+  if (isErrorWithMessage(e)) return e.message;
+  return String(e);
 }
 
 /** 可折叠卡片（渐进披露）：默认折叠只显示标题+摘要，点击展开内容 */
@@ -208,7 +234,7 @@ export function SectionTitle({ children, extra }: { children: ReactNode; extra?:
 
 export function ErrorBox({ message }: { message: string }) {
   if (!message) return null;
-  return <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-3 flex items-center gap-2"><XCircle size={14} className="shrink-0" />{message}</div>;
+  return <div role="alert" aria-live="assertive" className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mb-3 flex items-center gap-2"><XCircle size={14} className="shrink-0" aria-hidden="true" /><span>{message}</span></div>;
 }
 
 /** 危险/普通确认弹窗：替代原生 window.confirm，与设计系统一致的二次确认（含 loading 态） */

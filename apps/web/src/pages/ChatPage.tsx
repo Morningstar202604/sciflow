@@ -5,7 +5,7 @@ import {
 import { api, streamChat } from '../api/client';
 import { ToastContext } from '../App';
 import type { ChatSource, IntentResult, KnowledgeDoc, Project } from '../types';
-import { Card, ErrorBox, Modal } from '../components/ui';
+import { Card, ErrorBox, Modal, errMsg } from '../components/ui';
 
 /** 消息结构（含主流智能体范式的附加字段：思考流/来源/用量/follow-up/状态） */
 interface Msg {
@@ -113,7 +113,7 @@ export function ChatPage({ project }: { project: Project }) {
     const outline = (() => {
       try {
         const o = JSON.parse(doc.outline || '[]');
-        return Array.isArray(o.sections) ? o.sections.map((s: any) => s.title).join(' / ') : '';
+        return Array.isArray(o.sections) ? o.sections.map((s: { title: string }) => s.title).join(' / ') : '';
       } catch {
         return '';
       }
@@ -256,8 +256,8 @@ export function ChatPage({ project }: { project: Project }) {
       setCitedKeys((m) => ({ ...m, [citeSource.docName]: true }));
       toast('success', `已引用「${citeSource.docName}」到论文`);
       setCiteSource(null);
-    } catch (e: any) {
-      setError(e?.message || '引用失败');
+    } catch (e: unknown) {
+      setError(errMsg(e) || '引用失败');
     } finally {
       setCiting(false);
     }
@@ -347,6 +347,7 @@ export function ChatPage({ project }: { project: Project }) {
             {/* 深度思考开关（映射 enableThinking，厂商不支持时后端静默忽略） */}
             <button
               onClick={() => setThinking((v) => !v)}
+              aria-pressed={thinking}
               className={`flex items-center gap-1 text-xs rounded-md px-1.5 py-1 border transition-colors ${
                 thinking
                   ? 'bg-teal-50 dark:bg-teal-500/10 border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300'
@@ -354,7 +355,7 @@ export function ChatPage({ project }: { project: Project }) {
               }`}
               title="深度思考：开启后模型先输出推理过程（支持的模型）"
             >
-              <Brain size={12} /> 深度思考
+              <Brain size={12} aria-hidden="true" /> 深度思考
             </button>
             <FileText size={13} className="text-slate-400 shrink-0 hidden sm:block" />
             <select
@@ -378,8 +379,8 @@ export function ChatPage({ project }: { project: Project }) {
             <div className="flex items-center gap-2 text-xs bg-teal-50/60 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-xl px-3 py-2 page-in">
               {intentBusy ? (
                 <>
-                  <Loader2 size={13} className="animate-spin text-teal-600" />
-                  <span className="text-slate-500 dark:text-slate-400">正在识别意图…</span>
+                  <Loader2 size={13} className="animate-spin text-teal-600" aria-hidden="true" />
+                  <span role="status" aria-live="polite" className="text-slate-500 dark:text-slate-400">正在识别意图…</span>
                 </>
               ) : intent ? (
                 <>
@@ -412,10 +413,11 @@ export function ChatPage({ project }: { project: Project }) {
                 {/* 编辑上一条用户消息（主流范式：编辑分叉重发） */}
                 <button
                   onClick={() => editMsg(i)}
+                  aria-label="编辑并重新发送"
                   className="self-center ml-1.5 p-1 rounded-md text-slate-300 dark:text-slate-600 opacity-0 group-hover:opacity-100 hover:text-teal-600 transition-opacity"
                   title="编辑并重新发送"
                 >
-                  <Pencil size={13} />
+                  <Pencil size={13} aria-hidden="true" />
                 </button>
               </div>
             ) : (
@@ -527,22 +529,22 @@ export function ChatPage({ project }: { project: Project }) {
                   )}
                   {/* 消息操作条：重试 / 继续 / 复制 / 发送到写作页 */}
                   {!m.streaming && (
-                    <div className="mt-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="mt-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" role="toolbar" aria-label="消息操作">
                       {m.stopped && (
-                        <button onClick={() => cont(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600 dark:hover:text-teal-300" title="继续生成">
-                          <PlayCircle size={13} />
+                        <button onClick={() => cont(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600 dark:hover:text-teal-300" title="继续生成" aria-label="继续生成">
+                          <PlayCircle size={13} aria-hidden="true" />
                         </button>
                       )}
-                      <button onClick={() => retry(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600 dark:hover:text-teal-300" title="重新生成">
-                        <RotateCcw size={13} />
+                      <button onClick={() => retry(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600 dark:hover:text-teal-300" title="重新生成" aria-label="重新生成">
+                        <RotateCcw size={13} aria-hidden="true" />
                       </button>
-                      <button onClick={() => copyMsg(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600 dark:hover:text-teal-300" title="复制回答">
-                        <Copy size={13} />
+                      <button onClick={() => copyMsg(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600 dark:hover:text-teal-300" title="复制回答" aria-label="复制回答">
+                        <Copy size={13} aria-hidden="true" />
                       </button>
-                      <button onClick={() => sendToWriting(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600 dark:hover:text-teal-300" title="发送到写作页（新建草稿并打开）">
-                        <FileText size={13} />
+                      <button onClick={() => sendToWriting(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600 dark:hover:text-teal-300" title="发送到写作页（新建草稿并打开）" aria-label="发送到写作页">
+                        <FileText size={13} aria-hidden="true" />
                       </button>
-                      {m.error && <span className="text-[10px] text-rose-500 ml-1">{m.error}</span>}
+                      {m.error && <span role="alert" className="text-[10px] text-rose-500 ml-1">{m.error}</span>}
                     </div>
                   )}
                 </div>

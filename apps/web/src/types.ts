@@ -114,7 +114,7 @@ export interface QualityReport {
 export interface PipelineStep {
   key: string;
   label: string;
-  status: 'pending' | 'running' | 'awaiting_confirmation' | 'done' | 'retry' | 'failed';
+  status: 'pending' | 'running' | 'awaiting_confirmation' | 'done' | 'scored' | 'retry' | 'failed' | 'skipped';
   output?: string;
   retryCount: number;
 }

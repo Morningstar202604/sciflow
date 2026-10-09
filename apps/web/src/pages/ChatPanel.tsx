@@ -62,7 +62,7 @@ export function ChatPanel({
     let outline = '';
     try {
       const o = JSON.parse(doc.outline || '[]');
-      outline = Array.isArray(o.sections) ? o.sections.map((s: any) => s.title).join(' / ') : '';
+      outline = Array.isArray(o.sections) ? o.sections.map((s: { title: string }) => s.title).join(' / ') : '';
     } catch {
       outline = '';
     }
