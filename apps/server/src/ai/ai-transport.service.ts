@@ -295,8 +295,8 @@ export class AiTransportService {
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) return [];
-      const data = (await res.json()) as { data?: Array<{ id?: string }> };
-      const ids: string[] = (data.data || []).map((m) => m.id).filter((id): id is string => !!id && !id.includes('image') && !id.includes('video'));
+      const data = (await res.json()) as { data?: Array<{ id?: string } | null> };
+      const ids: string[] = (data.data || []).filter((m): m is { id?: string } => !!m).map((m) => m.id).filter((id): id is string => !!id && !id.includes('image') && !id.includes('video'));
       return ids.slice(0, 20);
     } catch {
       return [];

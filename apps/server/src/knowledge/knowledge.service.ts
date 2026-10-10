@@ -264,10 +264,10 @@ export class KnowledgeService {
   // ---------- 检索升级：sqlite-vec ANN 向量检索（替代手搓 BM25 + TF 余弦混合） ----------
 
   /** 向量 ANN 检索（sqlite-vec vec0）：语义召回 TopK */
-  private async annSearch(projectId: string, questionEmbedding: Buffer | null, topK: number): Promise<any[]> {
+  private async annSearch(projectId: string, questionEmbedding: Buffer | null, question: string, topK: number): Promise<any[]> {
     if (!questionEmbedding) {
       // 模型不可用，回退 FTS5 全文检索
-      return this.ftsSearch(projectId, topK);
+      return this.ftsSearch(projectId, question, topK);
     }
     try {
       const rows = sqlite
@@ -286,15 +286,23 @@ export class KnowledgeService {
       return rows;
     } catch {
       // vec0 不可用时回退到 FTS5 全文检索
-      return this.ftsSearch(projectId, topK);
+      return this.ftsSearch(projectId, question, topK);
     }
   }
 
-  /** FTS5 全文检索（对假 BM25/LIKE 兜底的真正替代） */
-  private ftsSearch(projectId: string, topK: number): any[] {
+  /** FTS5 全文检索（BM25 评分，真正替代假 LIKE 兜底） */
+  private ftsSearch(projectId: string, question: string, topK: number): any[] {
     const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
     if (docs.length === 0) return [];
     const docIds = docs.map((d) => d.id);
+    // FTS5 查询语法净化：去除会导致语法错误的运算符（AND/OR/NOT/括号/@#:），按空格拆 token 空格连接即为隐式 AND
+    const tokens = question
+      .replace(/[(){}\-@#:^~]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 0 && w.length <= 32)
+      .map((w) => `"${w.replace(/"/g, '""')}"`)
+      .join(' ');
+    if (!tokens) return [];
     try {
       const placeholders = docIds.map(() => '?').join(',');
       const rows = sqlite
@@ -306,15 +314,15 @@ export class KnowledgeService {
            FROM knowledge_chunk_fts f
            JOIN knowledge_chunk c ON c.id = f.chunk_id
            JOIN knowledge_doc d ON d.id = c.doc_id
-           WHERE f.chunk_id IN (SELECT id FROM knowledge_chunk WHERE doc_id IN (${placeholders}))
+           WHERE d.project_id = ?
              AND knowledge_chunk_fts MATCH ?
-           ORDER BY score ASC
+           ORDER BY bm25(knowledge_chunk_fts) ASC
            LIMIT ?`,
         )
-        .all(...docIds, topK * 2) as any[]; // bm25() 返回值越小越相关；多召回 rerank
+        .all(projectId, tokens, topK * 2) as any[]; // bm25() 值越小越相关；多召回留给 rerank
       return rows;
     } catch {
-      // FTS5 匹配语法错误时降级返回空
+      // FTS5 不可用或查询语法错误时返回空，上游由 annSearch 的 catch 处理
       return [];
     }
   }
@@ -343,7 +351,7 @@ export class KnowledgeService {
 
     // 向量语义召回
     const qVec = await this.embedding.embed(question);
-    const hitRows = await this.annSearch(projectId, qVec, topK);
+    const hitRows = await this.annSearch(projectId, qVec, question, topK);
 
     return hitRows
       .slice(0, topK)
