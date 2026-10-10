@@ -20,12 +20,44 @@
 - **单测与实现脱节**：`documents.service.spec.ts` 仍断言已删除的手写渲染器行为（5/5 失败）；更新为断言 CSL 标准行为并新增 8 样式全注册防回归测试（7/7 通过）。
 - **Web 幽灵依赖**：`DocExporter.tsx` 引用未声明依赖（unified / remark-parse / @types/mdast），依赖重排后构建失败；显式声明修复。
 
+## [0.2.1] - 2026-10
+
+生产级治理——消除重复造轮子 + 跨平台兼容 + 类型安全加固。
+
+### Fixed
+- **实验沙箱 Windows 兼容**：`process.kill(-pid, 'SIGKILL')` 在 Windows 上语义不同 → `taskkill /pid /T /F` 替代；内存监控(`仅 Linux /proc`)；兜底 `child.kill('SIGKILL')`。
+- **Dashboard 类型安全**：`countRows(table: any)` → `SQLiteTable` 泛型约束；硬编码 `60` → `LOW_SCORE_THRESHOLD` 常量。
+- **知识库评分归一化**：魔术数字 `999` → `NO_SCORE` 常量；FTS5 全文检索 bug 修复（缺失 MATCH 参数 + SQL 路径错误）。
+- **MCP 工具校验**：`z.object(shape).passthrough()` → `.strip()`（拒绝未声明字段，避免工具契约泄露）。
+- **前端 JSON 兜底**：`jsonText('')` 返回 `null` → 返回 fallback（消除 P0 崩溃链，影响 Dashboard/Settings 等多处）。
+- **SVG 渐变 ID 冲突**：多插图共用 `id="brandDoc"` 导致渐变引用错乱 → `useId()` + `BrandGradient` 共享子组件。
+- **CSL 作者构造去重**：`formatRefEntry8` 重复的作者解析逻辑 → 统一使用共享 `toCslAuthors`。
+- **质量维度去重**：`QualityPage` / `WritingPage` 各自一份 `DIMS` 常量 → 共享 `qualityDims.ts` 模块（同时消除标签不一致）。
+- **类型检查加固**：`WritingPage` 无效的 `'error' in reviewResult` 类型检查（interface 无 error 字段）→ `reviewers?.length` 判断。
+- **Auth 异步一致性**：移除误加的 `await` 在同步 Drizzle 查询上；`login` 保留 async（bcrypt.compare 需要）。
+
+### Added
+- **`apps/server/src/common/sse.helper.ts`**：SSE 流解析统一封装 `forwardOpenAiSse`，替代 `chat.controller.ts` 中手写 SSE 拼接逻辑。
+- **`apps/server/src/common/citation-csl.ts`**：CSL-JSON 构造工具（`toCslAuthors` / `buildCslEntry` / `buildCslEntries`），references 与 documents 共用。
+- **`@nestjs/throttler` 全局频率限制**：60 RPM，防 DoS / Token 成本爆炸。
+- **`@types/node` 前端依赖**：修复 `Buffer` 全局类型缺失。
+
+### Removed
+- **`@ts-nocheck` / `@ts-ignore`**：从 `DocExporter.tsx` 和 `SettingsPage.tsx` 全部消除。
+- **4 个 LangChain 孤儿依赖**：git log 确认已剥离但未从 `package.json` 清理的 `@langchain/core`、`@langchain/langgraph`、`@langchain/langgraph-checkpoint-sqlite`、`@langchain/openai`。
+- **`msw` 未使用 devDependency**。
+
+### Changed
+- **`database.ts` (~100 行手写 schema reconciliation 系统 → 删除)**：启动时反射遍历 SQLite 表/列对比 drizzle schema 的逻辑已冗余（DDL + ensureColumn 双通道覆盖迁移），依赖 drizzle-kit push 管理 schema。
+- **`database.ts` DATA_DIR 路径**：`__dirname` 解析（dist 打包后错误）→ `process.cwd()/apps/server/data`。
+- **`embedding.service.ts`**：`this.model` / `this.ctx` 旧属性 → `this.llamaContext`（unknown + 精确类型断言）。
+- **`ai-transport.service.ts`**：手写并发限制器 ~38 行 → `p-limit` 库替代。
+- **`version-diff`**：手写 LCS DP ~55 行 → `diff` 库替代。
+- **`as any` 数量**：14 → 10（全部在合理的第三方库边界）。
+
 ## [0.1.9] - 2026-10
 
 ### Changed
-- 全仓收口审计三线修复：安全基线、技术债清理、已知缺口补齐（以 HEAD `d1eeda0` 为准）。
-
-## [0.1.8] - 2026-09
 
 ### Added
 - 跨库检索增强、自包含导出、大纲模板管理、级联清理。
