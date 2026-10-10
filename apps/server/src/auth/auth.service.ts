@@ -34,10 +34,10 @@ export class AuthService {
     if (typeof password !== 'string' || password.length < 8) {
       throw new BadRequestException('密码至少 8 位');
     }
-    const existing = (await db.select().from(users).where(eq(users.email, mail)).limit(1))[0];
+    const existing = db.select().from(users).where(eq(users.email, mail)).limit(1).all()[0];
     if (existing) throw new BadRequestException('该邮箱已注册，请直接登录');
 
-    const count = (await db.select({ id: users.id }).from(users)).length;
+    const count = db.select({ id: users.id }).from(users).all().length;
     const role = count === 0 ? 'admin' : 'member'; // 首位用户自动成为管理员
     const row: typeof users.$inferInsert = {
       id: randomUUID(),
@@ -47,21 +47,21 @@ export class AuthService {
       role,
       createdAt: Date.now(),
     };
-    const [created] = await db.insert(users).values(row).returning();
+    const [created] = db.insert(users).values(row).returning().all();
     return { token: this.sign(created), user: publicUser(created) };
   }
 
   async login(email: string, password: string) {
     const mail = String(email || '').trim().toLowerCase();
-    const u = (await db.select().from(users).where(eq(users.email, mail)).limit(1))[0];
+    const u = db.select().from(users).where(eq(users.email, mail)).limit(1).all()[0];
     if (!u) throw new UnauthorizedException('邮箱或密码不正确');
     const ok = await bcrypt.compare(String(password || ''), u.passwordHash);
     if (!ok) throw new UnauthorizedException('邮箱或密码不正确');
     return { token: this.sign(u), user: publicUser(u) };
   }
 
-  async me(payload: AuthPayload) {
-    const u = (await db.select().from(users).where(eq(users.id, payload.sub)).limit(1))[0];
+  me(payload: AuthPayload) {
+    const u = db.select().from(users).where(eq(users.id, payload.sub)).limit(1).all()[0];
     if (!u) throw new UnauthorizedException('用户不存在或已被移除');
     return publicUser(u);
   }
