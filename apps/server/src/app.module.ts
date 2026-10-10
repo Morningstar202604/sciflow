@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { AiModule } from './ai/ai.module';
+import { AuthModule } from './auth/auth.module';
 import { ProjectsModule } from './projects/projects.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ReferencesModule } from './references/references.module';
@@ -21,6 +22,7 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 @Module({
   imports: [
     AiModule,
+    AuthModule,
     ProjectsModule,
     DocumentsModule,
     ReferencesModule,

@@ -73,6 +73,7 @@ SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一�
 | --- | --- |
 | 后端 `apps/server` | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· zod · 原生 fetch（OpenAI 兼容协议）· 内置零依赖 mock AI 网关（仅 `node:http`） |
 | 前端 `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · react-markdown + KaTeX · lucide-react · **手写 SVG 图表（无 ECharts 等重型图库）** |
+| 桌面端 `apps/desktop` | Electron 33 · 内嵌后端（`ELECTRON_RUN_AS_NODE`）· 本地 SQLite（userData 隔离）· electron-builder 三平台打包 · electron-updater 自动更新（opt-in） |
 | 工程 | pnpm workspace · vitest 5 · GitHub Actions（Node 22）· Python 3 回归脚本 |
 
 **架构概览**
@@ -126,6 +127,17 @@ pnpm --filter @sciflow/web dev
 
 > SQLite 首次启动自动建表（默认 `apps/server/data/sciflow.db`），零配置开箱即跑。
 > 后端默认仅监听 `127.0.0.1`；确需局域网暴露时显式设置 `HOST=0.0.0.0`。
+
+### 🖥 桌面应用端（可选）
+
+```bash
+pnpm install && pnpm build          # 先构建后端与前端
+pnpm icons                          # 从矢量母版生成应用图标（首次）
+pnpm desktop:dev                    # 开发调试（前端 dev server + 桌面壳）
+pnpm desktop:dist                   # 打包当前平台安装包 → apps/desktop/release/
+```
+
+数据落平台规范目录（Windows `%APPDATA%\SciFlow`），离线可用；详见 [`apps/desktop/README.md`](apps/desktop/README.md) 与 [`docs/BRAND.md`](docs/BRAND.md)。
 
 ## 🔑 AI 配置说明
 

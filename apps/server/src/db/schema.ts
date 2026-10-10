@@ -392,3 +392,15 @@ export const experiments = sqliteTable('experiment', {
 });
 
 export type Experiment = typeof experiments.$inferSelect;
+
+/** 用户（企业认证 · AUTH_MODE=jwt 时启用；本地/桌面模式 AUTH_MODE=none 不强制登录） */
+export const users = sqliteTable('user', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  name: text('name').default(''),
+  role: text('role').default('member'), // admin | member | viewer（首位注册用户自动 admin）
+  createdAt: integer('created_at').notNull(),
+});
+
+export type User = typeof users.$inferSelect;

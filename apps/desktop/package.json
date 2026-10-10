@@ -1,0 +1,27 @@
+{
+  "name": "@sciflow/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SciFlow 桌面端（Electron 封装：内嵌 NestJS 后端 + 本地 SQLite，离线可用）",
+  "main": "dist-electron/main.js",
+  "author": "SciFlow Contributors",
+  "license": "MIT",
+  "scripts": {
+    "build:main": "tsc -p tsconfig.json",
+    "prepare:resources": "node scripts/prepare-server.mjs",
+    "dev": "pnpm build:main && electron .",
+    "dist": "pnpm build:main && pnpm prepare:resources && electron-builder --publish never",
+    "dist:win": "pnpm build:main && pnpm prepare:resources && electron-builder --win --publish never",
+    "dist:mac": "pnpm build:main && pnpm prepare:resources && electron-builder --mac --publish never",
+    "dist:linux": "pnpm build:main && pnpm prepare:resources && electron-builder --linux --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.9.3"
+  }
+}

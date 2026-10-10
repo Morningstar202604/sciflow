@@ -1,0 +1,58 @@
+# ============ SciFlow 桌面端打包配置（electron-builder） ============
+appId: io.sciflow.desktop
+productName: SciFlow
+copyright: Copyright © 2026 SciFlow Contributors
+
+directories:
+  output: release
+  buildResources: build
+
+# asar 只装主进程/preload 编译产物（小），重资源走 extraResources（asar 外，原生模块必须）
+asar: true
+files:
+  - dist-electron/**/*
+  - package.json
+
+extraResources:
+  - from: resources/server
+    to: server
+  - from: resources/web
+    to: web
+
+# ---------- Windows ----------
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SciFlow
+  artifactName: SciFlow-Setup-${version}-${arch}.${ext}
+
+# ---------- macOS ----------
+mac:
+  icon: build/icon.png
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  artifactName: SciFlow-${version}-${arch}.${ext}
+
+# ---------- Linux ----------
+linux:
+  icon: build/icon.png
+  category: Science
+  target:
+    - AppImage
+    - deb
+  maintainer: SciFlow Contributors
+  artifactName: SciFlow-${version}-${arch}.${ext}
+
+# 压缩级别：normal（安装包体积与安装速度平衡）
+compression: normal
+npmRebuild: false

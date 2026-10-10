@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="SciFlow app icon">
+  <!--
+    SciFlow 主图标（App Icon Master · 1024×1024）
+    概念：流动的 S —— Science + Flow，科研流程如水流动。
+    规范：品牌渐变 teal → cyan → sky（135°），白色流线 S，圆角方形底（iOS squircle 风格 r≈22%）。
+    导出：本文件是唯一图标源；PNG/ICO/ICNS 由 scripts/generate-icons.mjs 从此渲染，禁止手改位图。
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d9488"/>
+      <stop offset="0.55" stop-color="#0891b2"/>
+      <stop offset="1" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.26"/>
+      <stop offset="0.38" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 渐变底 + 顶部光泽 -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="224" fill="url(#sheen)"/>
+
+  <!-- 流动 S：一笔流体曲线，起笔收笔均为圆头，象征全流程贯通 -->
+  <path d="M 720 210
+           C 544 128, 320 224, 336 384
+           C 352 544, 688 480, 704 656
+           C 720 832, 464 912, 288 816"
+        fill="none" stroke="#ffffff" stroke-width="96" stroke-linecap="round"/>
+</svg>

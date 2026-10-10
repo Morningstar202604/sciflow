@@ -11,6 +11,22 @@ function extractErrMsg(e: unknown): string {
   return typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string' ? e.message : String(e);
 }
 
+/**
+ * API base（桌面端适配）：
+ *  - Web 部署：未注入 → ''，全部走相对路径 /api（Vite 代理 / nginx 反代），行为与历史完全一致；
+ *  - 桌面端（Electron）：preload 经 contextBridge 注入 window.sciflowDesktop.apiBase = http://127.0.0.1:<port>，
+ *    页面从 file:// 加载时 fetch 需要绝对地址。
+ */
+declare global {
+  interface Window {
+    sciflowDesktop?: { apiBase?: string; openExternal?: (url: string) => void; version?: string };
+  }
+}
+const API_BASE: string =
+  typeof window !== 'undefined' && window.sciflowDesktop?.apiBase ? window.sciflowDesktop.apiBase : '';
+/** 统一拼 API 地址：p 必须以 / 开头 */
+const u = (p: string) => `${API_BASE}${p}`;
+
 /** 友好错误转译：后端中文业务错误原样保留；英文/状态码/网络错误转为清晰中文提示 */
 const statusText: Record<number, string> = {
   400: '请求参数有误，请检查后重试',
@@ -29,18 +45,50 @@ function friendlyError(raw: unknown, status?: number): string {
   return status ? `请求失败（${status}），请稍后重试` : '无法连接服务器，请确认服务已启动';
 }
 
+/** 当前登录令牌（AUTH_MODE=jwt 企业模式用；本地模式恒为空） */
+export function getToken(): string | null {
+  try {
+    return localStorage.getItem('sciflow.token');
+  } catch {
+    return null;
+  }
+}
+export function setToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem('sciflow.token', token);
+    else localStorage.removeItem('sciflow.token');
+  } catch {
+    /* ignore */
+  }
+}
+/** 401 统一处理：清 token + 通知全局登录门（AuthGate 监听） */
+function onUnauthorized(): void {
+  setToken(null);
+  try {
+    window.dispatchEvent(new Event('sciflow:unauthorized'));
+  } catch {
+    /* ignore */
+  }
+}
+
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   // 默认 60s 超时兜底：AI 网关限流/卡死时前端不无限等待（可被 opts.signal 覆盖）
   const timeoutMs = opts?.signal ? 0 : 60000;
   const ctrl = new AbortController();
   const timer = timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  const token = getToken();
   try {
-    const res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json' },
+    const res = await fetch(u(url), {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(opts?.headers || {}),
+      },
       signal: opts?.signal ?? ctrl.signal,
       ...opts,
     });
     if (!res.ok) {
+      if (res.status === 401 && !url.startsWith('/api/auth/')) onUnauthorized();
       let raw: unknown;
       try {
         const data = await res.json();
@@ -61,7 +109,22 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ status: string; ai: { configured: boolean; model: string } }>('/api/health'),
+  health: () => request<{ status: string; time: number; uptime: number; authMode: string; db: boolean; desktop: boolean; ai: { configured: boolean; model: string } }>('/api/health'),
+
+  auth: {
+    register: (email: string, password: string, name?: string) =>
+      request<{ token: string; user: { id: string; email: string; name: string; role: string } }>('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      }),
+    login: (email: string, password: string) =>
+      request<{ token: string; user: { id: string; email: string; name: string; role: string } }>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }),
+    me: () => request<{ id: string; email: string; name: string; role: string; createdAt: number }>('/api/auth/me'),
+    logout: () => setToken(null),
+  },
 
   projects: {
     list: () => request<Project[]>('/api/projects'),
@@ -204,7 +267,7 @@ export const api = {
     graph: (projectId: string) => request<ReferenceGraph>(`/api/references/graph?projectId=${projectId}`),
     /* —— BibTeX/RIS 导出（纯文本，前端 Blob 下载） —— */
     exportReferences: async (projectId: string, format: 'bibtex' | 'ris'): Promise<string> => {
-      const res = await fetch(`/api/references/export?projectId=${encodeURIComponent(projectId)}&format=${format}`);
+      const res = await fetch(u(`/api/references/export?projectId=${encodeURIComponent(projectId)}&format=${format}`));
       if (!res.ok) throw new Error(friendlyError(undefined, res.status));
       return res.text();
     },
@@ -397,9 +460,12 @@ export function streamChat(opts: {
   const signal = opts.signal ? AbortSignal.any([ctrl.signal, opts.signal]) : ctrl.signal;
   let full = '';
   const finish = () => opts.onDone?.(full);
-  fetch('/api/chat/stream', {
+  fetch(u('/api/chat/stream'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+    },
     body: JSON.stringify({
       message: opts.message,
       history: opts.history || [],

@@ -1,0 +1,85 @@
+# ============================================================
+# SciFlow 生产部署编排（docker-compose.prod.yml）
+#
+# 与开发版 docker-compose.yml 的差异：
+#   1. 数据/日志落独立命名卷（非 bind mount），备份迁移更稳；
+#   2. 服务自带 healthcheck，编排级依赖就绪才启动；
+#   3. 认证开关 AUTH_MODE / JWT_SECRET 显式暴露（企业模式）；
+#   4. 数据库每日自动备份（轻量内置 sidecar，可按需替换 Litestream 实时复制）。
+#
+# 使用：
+#   cp apps/server/.env.example .env    # 填 AI_* 与 JWT_SECRET
+#   AUTH_MODE=none docker compose -f docker-compose.prod.yml up -d --build
+#   # 企业多用户：.env 里设 AUTH_MODE=jwt + 强随机 JWT_SECRET
+#
+# 访问：前端 http://<host>:8080（HTTPS 终止建议由宿主 Nginx/Caddy/云 LB 承担）
+# ============================================================
+
+services:
+  server:
+    build:
+      context: .
+      target: server
+    restart: unless-stopped
+    volumes:
+      - server-data:/app/apps/server/data # SQLite 数据持久化（命名卷）
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0 # 容器内需监听全部网卡，对外暴露由 Docker 网络边界控制
+      # ⚠️ 必填：AI 网关（火山方舟/DeepSeek/通义/智谱/Kimi 任选，见 .env.example）
+      - AI_BASE_URL=${AI_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      - AI_API_KEY=${AI_API_KEY:?请在 .env 中设置 AI_API_KEY}
+      - AI_MODEL=${AI_MODEL:-agnes-3.0-flash}
+      - AI_MODEL_FAST=${AI_MODEL_FAST:-}
+      - AI_MODEL_STRONG=${AI_MODEL_STRONG:-}
+      - AI_RPM_CAP=${AI_RPM_CAP:-8}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:8080}
+      # 企业认证：none（默认，单用户） | jwt（多用户，需同时设 JWT_SECRET）
+      - AUTH_MODE=${AUTH_MODE:-none}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - JWT_EXPIRES=${JWT_EXPIRES:-7d}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "8080:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------- 每日 03:00 自动备份（在线备份，不锁库；保留 14 份） ----------
+  backup:
+    image: node:22-alpine
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - server-data:/data:ro            # 只读挂载数据卷
+      - backup-data:/backups
+    environment:
+      - DATABASE_PATH=/data/sciflow.db
+      - BACKUP_DIR=/backups
+    entrypoint: >
+      sh -c "apk add --no-cache sqlite >/dev/null 2>&1;
+      while true; do
+        if [ -f /data/sciflow.db ]; then
+          ts=$$(date +%Y%m%d-%H%M%S);
+          sqlite3 /data/sciflow.db \".backup '/backups/sciflow-$$ts.db'\" && echo \"[backup] sciflow-$$ts.db 完成\";
+          ls -1t /backups/sciflow-*.db 2>/dev/null | tail -n +15 | xargs -r rm -f;
+        fi;
+        sleep 86400;
+      done"
+
+volumes:
+  server-data:
+  backup-data:

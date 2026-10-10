@@ -7,6 +7,7 @@ import {
 import { api } from './api/client';
 import type { KnowledgeDoc, Project, Reference } from './types';
 import { errMsg } from './components/ui';
+import { AuthGate } from './components/AuthGate';
 import { Button, Input, Modal, Spinner, ErrorBox, ToastViewport, ConfirmDialog, type ToastItem, type ToastKind } from './components/ui';
 // 路由级代码分割：所有页面懒加载（首屏只加载当前视图，大厂 SPA 标准）
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
@@ -238,6 +239,8 @@ function AppInner() {
   return (
     <ThemeContext.Provider value={{ theme, toggle: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')) }}>
       <ToastContext.Provider value={toast}>
+        {/* 全局登录门：仅 AUTH_MODE=jwt 企业模式可见，本地/桌面模式零干扰 */}
+        <AuthGate />
         <div className="flex h-full overflow-hidden bg-slate-50 dark:bg-slate-950 dark:text-slate-100">
         {/* 移动端抽屉遮罩（md+ 隐藏） */}
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm md:hidden" onClick={() => setSidebarOpen(false)} />}
@@ -245,10 +248,15 @@ function AppInner() {
         <aside className={`fixed inset-y-0 left-0 z-40 w-56 shrink-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-r border-slate-200 dark:border-slate-800 flex flex-col transition-transform duration-200 ease-out md:static md:translate-x-0 md:shadow-none ${
           sidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
         }`}>
-          {/* Logo（品牌渐变徽标 + 内发光） */}
+          {/* Logo（品牌流线标志 + 内发光，图形与 docs/brand/icon-master.svg 同源） */}
           <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg brand-logo text-white flex items-center justify-center text-[13px] font-bold tracking-tight">
-              S
+            <div className="w-7 h-7 rounded-lg brand-logo text-white flex items-center justify-center">
+              <svg viewBox="0 0 64 64" className="w-5 h-5" aria-hidden="true">
+                <path
+                  d="M 45 13 C 34 8, 20 14, 21 24 C 22 34, 43 30, 44 41 C 45 51, 29 57, 18 51"
+                  fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round"
+                />
+              </svg>
             </div>
             <div className="leading-tight">
               <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100 tracking-tight">

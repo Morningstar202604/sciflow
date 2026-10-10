@@ -360,6 +360,17 @@ CREATE TABLE IF NOT EXISTS submission_status_event (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_submission_event_submission ON submission_status_event(submission_id);
+
+-- 企业认证：用户表（AUTH_MODE=jwt 时启用；本地/桌面模式不强制登录）
+CREATE TABLE IF NOT EXISTS user (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  name TEXT DEFAULT '',
+  role TEXT DEFAULT 'member',
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email ON user(email);
 `);
 
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */

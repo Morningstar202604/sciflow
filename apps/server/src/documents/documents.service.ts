@@ -3,6 +3,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { Cite } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
 import '@citation-js/plugin-csl';
+import './csl-register'; // 注册官方补缺样式（IEEE/GB-T 7714/Nature/Chicago/Springer/ACS），必须在 Cite 使用前导入
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { documents, citations, references, polishRecords } from '../db/schema';
@@ -123,7 +124,8 @@ export class DocumentsService {
     const doc = this.get(docId);
     const valid: CiteStyleKind[] = ['apa', 'ieee', 'vancouver', 'gbt', 'nature', 'chicago', 'springer', 'acs'];
     if (!valid.includes(style as CiteStyleKind)) throw new BadRequestException(`不支持的引用样式: ${style}`);
-    const isAuthorYear = style === 'apa' || style === 'chicago';
+    // 著者-年制（正文 [n] 改写为 (姓, 年)）；其余为顺序编码制（官方 CSL 样式自带连续编号）
+    const isAuthorYear = style === 'apa' || style === 'chicago' || style === 'springer';
 
     // citations 按存储顺序（rowid=插入序 = 前端 n=index+1）
     const rows = this.listCitations(docId);
@@ -136,9 +138,13 @@ export class DocumentsService {
     }));
     const content = doc.content || '';
 
-    // 序号样式：正文锚点与参考文献顺序均不变
+    // 顺序编码制：整表一次渲染，官方样式按输入序自动编号 1..N（与正文 [n] 锚点一一对应），
+    // 不再手动补编号（官方 IEEE/Vancouver/GB-T/Nature/ACS 均自带 [n]/n. 前缀，手动补会双编号）
     if (!isAuthorYear) {
-      const references = refs.map((ref, i) => formatRefEntry8(ref, style, i + 1));
+      const references = renderCitationsAsBibliography(
+        refs.map((r) => ({ reference: { id: 'entry', ...r } })),
+        style,
+      );
       return { content, references, style, changed: false };
     }
 
@@ -439,15 +445,15 @@ export class DocumentsService {
 
 // ---------- citation-js 引文格式化（替代手写 8 样式渲染器） ----------
 
-/** CSL 模板名映射（产品内 format 值 → citation-js CSL 模板） */
+/** CSL 模板名映射（产品内 format 值 → citation-js CSL 模板；除内置 apa/vancouver 外均由 csl-register 注册） */
 const CSL_TEMPLATE_MAP: Record<string, string> = {
   apa: 'apa',
   ieee: 'ieee',
   vancouver: 'vancouver',
   gbt: 'chinese-gb7714-2005-numeric',
-  chicago: 'chicago-note-bibliography',
+  chicago: 'chicago-author-date-16th-edition',
   nature: 'nature',
-  springer: 'springer-basic',
+  springer: 'springer-basic-author-date',
   acs: 'american-chemical-society',
 };
 
@@ -501,21 +507,23 @@ export function renderCitationsAsBibliography(
   return formatted.split('\n').filter((l) => l.trim());
 }
 
-/** 兼容 export 名（老接口 exportCitations） */
+/** 兼容 export 名（老接口 exportCitations）：单条渲染 + 序号样式补全局编号 */
 export function formatCitation(
   ref: { title: string; authors: string; year: number | null; venue: string; doi: string },
   format: string,
   index: number,
 ): string {
   const result = renderCitationsAsBibliography([{ reference: { ...ref, id: 'entry', authors: ref.authors || null, venue: ref.venue || null, doi: ref.doi || null } }], format);
-  // 序号样式需要补编号（citation-js 不自动加 [n]）
-  if (format === 'ieee' || format === 'vancouver' || format === 'nature' || format === 'springer' || format === 'acs') {
-    return result[0] ? `[${index}] ${result[0]}` : '';
+  let line = result[0] || '';
+  // 顺序编码制官方样式（IEEE/GB-T/Nature/Vancouver/ACS）单条渲染会自带从 1 起的编号，
+  // 这里剥离后重写为调用方指定的全局序号；著者-年样式（apa/chicago/springer）不编号。
+  const NUMERIC_STYLES = ['ieee', 'vancouver', 'gbt', 'nature', 'acs'];
+  if (NUMERIC_STYLES.includes(format)) {
+    // 官方样式自带编号形态各异：IEEE/GB-T "[1]"、Vancouver/Nature "1."、ACS "(1)"
+    line = line.replace(/^\[\d+\]\s*/, '').replace(/^\d+\.\s*/, '').replace(/^\(\d+\)\s*/, '');
+    return line ? `[${index}] ${line}` : '';
   }
-  if (format === 'gbt') {
-    return result[0] ? `[${index}] ${result[0]}` : '';
-  }
-  return result[0] || '';
+  return line;
 }
 
 /* =====================================================================
@@ -553,12 +561,8 @@ function formatRefEntry8(ref: RefLite, format: string, index: number, yearOverri
   const cite = new Cite([entry]);
   const formatted = cite.format('bibliography', { format: 'text', template, lang: 'zh-CN' }).trim();
   // 著者-年样式需注入 a/b 后缀
-  if (yearOverride && /[a-z]$/.test(yearOverride) && (format === 'apa' || format === 'chicago')) {
+  if (yearOverride && /[a-z]$/.test(yearOverride) && (format === 'apa' || format === 'chicago' || format === 'springer')) {
     return formatted.replace(/\)\./, `${yearOverride.replace(/\d/g, '')}).`);
-  }
-  // 序号样式补编号
-  if ((format === 'ieee' || format === 'vancouver' || format === 'nature' || format === 'springer' || format === 'acs' || format === 'gbt') && index > 0) {
-    return `[${index}] ${formatted}`;
   }
   return formatted;
 }

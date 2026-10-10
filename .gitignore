@@ -7,6 +7,15 @@ dist/
 build/
 *.tsbuildinfo
 
+# 桌面端：图标是打包必需资源，必须入库（覆盖上面的 build/ 规则）
+!apps/desktop/build/
+!apps/desktop/build/**
+
+# 桌面端：编译产物 / pnpm deploy 产物 / 安装包 —— 全部本地生成，不入库
+apps/desktop/dist-electron/
+apps/desktop/resources/
+apps/desktop/release/
+
 # env（全部忽略，但保留各 .env.example 模板可被跟踪）
 .env
 .env.*

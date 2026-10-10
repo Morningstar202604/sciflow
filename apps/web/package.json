@@ -21,11 +21,14 @@
     "rehype-stringify": "^10.0.1",
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
-    "remark-rehype": "^11.1.2"
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.1.0",
+    "@types/mdast": "^4.0.4",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.5.0",
