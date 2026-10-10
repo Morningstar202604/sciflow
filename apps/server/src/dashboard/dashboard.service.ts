@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
+import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { db } from '../db/database';
 import {
   pipelineTasks,
@@ -66,7 +67,7 @@ export class DashboardService {
     return db.select().from(reviewComments).where(eq(reviewComments.status, 'open')).all().length;
   }
 
-  private countRows(table: any): number {
+  private countRows(table: SQLiteTable): number {
     return db.select().from(table).all().length;
   }
 
@@ -119,6 +120,6 @@ export class DashboardService {
       .innerJoin(qualityReports, eq(qualityReports.documentId, documents.id))
       .where(sql`quality_report.created_at = (SELECT MAX(qr.created_at) FROM quality_report qr WHERE qr.document_id = documents.id)`)
       .all();
-    return rows.filter((r) => (r.score ?? 100) < 60).slice(0, 10);
+    return rows.filter((r) => (r.score ?? 100) < LOW_SCORE_THRESHOLD).slice(0, 10);
   }
 }

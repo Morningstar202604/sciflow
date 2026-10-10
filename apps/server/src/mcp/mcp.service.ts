@@ -240,7 +240,7 @@ export class McpService {
       }
       shape[key] = s;
     }
-    return z.object(shape).passthrough();
+    return z.object(shape).strip();
   }
 
   /** 调用工具（MCP tools/call 语义）：先过参数 schema 校验（guardrail），再执行 */

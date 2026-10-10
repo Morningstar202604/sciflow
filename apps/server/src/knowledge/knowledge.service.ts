@@ -329,6 +329,7 @@ export class KnowledgeService {
 
   /** LIKE 兜底检索（FTS5 不可用或查询语法错误时的终极兜底） */
   private likeSearch(projectId: string, topK: number): any[] {
+    const NO_SCORE = 999;
     const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
     if (docs.length === 0) return [];
     const chunks = db.select().from(knowledgeChunks).where(inArray(knowledgeChunks.docId, docs.map((d) => d.id))).all();
@@ -340,7 +341,7 @@ export class KnowledgeService {
       seq: c.seq,
       doc_name: docs.find((d) => d.id === c.docId)?.name || '未知',
       reference_id: docs.find((d) => d.id === c.docId)?.referenceId || null,
-      distance: 999,
+      distance: NO_SCORE,
     }));
   }
 

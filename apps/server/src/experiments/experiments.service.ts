@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { z } from 'zod';
 import { eq, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, execSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -241,11 +241,19 @@ export class ExperimentsService {
       });
 
       const killGroup = () => {
+        // 试用进程组强杀（POSIX：负 PID = 整组；Windows 不支持负 PID，回退杀单进程）
         try {
-          process.kill(-child.pid!, 'SIGKILL');
+          if (process.platform === 'win32') {
+            // Windows：taskkill /T 杀进程树
+            execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' });
+          } else {
+            process.kill(-child.pid!, 'SIGKILL');
+          }
         } catch {
           /* 进程可能已退出 */
         }
+        // 兜底：直接杀子进程
+        try { child.kill('SIGKILL'); } catch { /* noop */ }
       };
 
       // 超时杀进程组
@@ -254,26 +262,28 @@ export class ExperimentsService {
         killGroup();
       }, RUN_TIMEOUT_MS);
 
-      // RSS 内存监控（Linux /proc）：先探测一次是否可用，不可用则跳过（不报错，超时仍兜底）
-      try {
-        readFileSync(`/proc/${child.pid}/status`, 'utf-8');
-        memoryMonitored = true;
-      } catch {
-        memoryMonitored = false;
-      }
-      if (memoryMonitored) {
-        memTimer = setInterval(() => {
-          try {
-            const s = readFileSync(`/proc/${child.pid}/status`, 'utf-8');
-            const m = s.match(/VmRSS:\s+(\d+)\s+kB/);
-            if (m && Number(m[1]) > MAX_MEMORY_MB * 1024) {
-              memoryKilled = true;
-              killGroup();
+      // RSS 内存监控（仅 Linux /proc；其他平台跳过）
+      if (process.platform === 'linux') {
+        try {
+          readFileSync(`/proc/${child.pid}/status`, 'utf-8');
+          memoryMonitored = true;
+        } catch {
+          memoryMonitored = false;
+        }
+        if (memoryMonitored) {
+          memTimer = setInterval(() => {
+            try {
+              const s = readFileSync(`/proc/${child.pid}/status`, 'utf-8');
+              const m = s.match(/VmRSS:\s+(\d+)\s+kB/);
+              if (m && Number(m[1]) > MAX_MEMORY_MB * 1024) {
+                memoryKilled = true;
+                killGroup();
+              }
+            } catch {
+              /* 进程已退出 */
             }
-          } catch {
-            /* 进程已退出 */
-          }
-        }, 400);
+          }, 400);
+        }
       }
 
       const exitCode = await new Promise<number | null>((resolve) => {

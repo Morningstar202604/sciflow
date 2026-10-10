@@ -280,9 +280,10 @@ export function ConfirmDialog({
   );
 }
 
-export function jsonText<T>(raw: string, fallback: T): T {
+export function jsonText<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw || !raw.trim()) return fallback;
   try {
-    return JSON.parse(raw || 'null') as T;
+    return JSON.parse(raw) as T;
   } catch {
     return fallback;
   }
