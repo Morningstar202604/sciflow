@@ -5,7 +5,7 @@ declare module 'p-retry' {
     minTimeout?: number;
     maxTimeout?: number;
     randomize?: boolean;
-    onFailedAttempt?: (error: any) => void;
+    onFailedAttempt?: (error: { attemptNumber: number; retriesLeft: number; message: string; status?: number }) => void;
   }
   const pRetry: <T>(fn: () => Promise<T>, options?: Options) => Promise<T>;
   export default pRetry;

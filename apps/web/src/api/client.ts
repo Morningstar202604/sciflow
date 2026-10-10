@@ -506,21 +506,21 @@ export function streamChat(opts: {
             return;
           }
           try {
-            const json = JSON.parse(payload) as any;
-            if (json.error) throw new Error(json.error);
+            const json = JSON.parse(payload) as Record<string, unknown>;
+            if (json.error) throw new Error(String(json.error));
             if (json.sources) {
-              opts.onSources?.(json.sources);
+              opts.onSources?.(json.sources as unknown as ChatSource[]);
               continue;
             }
             if (json.usage) {
-              opts.onUsage?.(json.usage);
+              opts.onUsage?.(json.usage as unknown as { prompt_tokens: number; completion_tokens: number; total_tokens: number });
               continue;
             }
-            if (json.delta) {
+            if (typeof json.delta === 'string') {
               full += json.delta;
               opts.onDelta?.(full);
             }
-            if (json.reasoning) {
+            if (typeof json.reasoning === 'string') {
               reasoning += json.reasoning;
               opts.onReasoning?.(reasoning);
             }

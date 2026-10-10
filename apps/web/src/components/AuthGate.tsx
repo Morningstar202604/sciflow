@@ -18,7 +18,6 @@ export function AuthGate() {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [serverMode, setServerMode] = useState<string>('none');
 
   useEffect(() => {
     let alive = true;
@@ -26,7 +25,6 @@ export function AuthGate() {
       try {
         const h = await api.health();
         if (!alive) return;
-        setServerMode(h.authMode || 'none');
         if (h.authMode !== 'jwt') {
           setMode('ok');
           return;
@@ -38,8 +36,12 @@ export function AuthGate() {
         await api.auth.me();
         if (alive) setMode('ok');
       } catch {
-        // 健康检查失败/令牌失效：仅在 jwt 模式下拦登录，其余放行交给既有错误处理
-        if (alive) setMode(serverMode === 'jwt' || getToken() ? 'login' : 'ok');
+        // 健康检查失败/令牌失效：有残留 token 时拦登录，其余放行
+        if (getToken()) {
+          if (alive) setMode('login');
+        } else if (alive) {
+          setMode('ok');
+        }
       }
     })();
     const onExpired = () => {

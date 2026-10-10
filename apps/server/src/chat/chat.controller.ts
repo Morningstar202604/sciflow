@@ -90,18 +90,18 @@ export class ChatController {
           const payload = t.slice(5).trim();
           if (payload === '[DONE]') continue;
           try {
-            const json = JSON.parse(payload) as any;
-            const choice = json?.choices?.[0]?.delta || {};
+            const json = JSON.parse(payload) as Record<string, unknown>;
+            const choice = (json?.choices as Array<{ delta?: Record<string, unknown> }>)?.[0]?.delta || {};
             // 正文增量（行为与旧版完全一致）
-            const delta: string | undefined = choice.content;
+            const delta = choice.content;
             // 推理过程透传：DeepSeek/通义系 reasoning_content，豆包系 thinking；仅深度思考开启时转发
-            const reasoning: string | undefined = forwardReasoning ? choice.reasoning_content || choice.thinking : undefined;
+            const reasoning = forwardReasoning ? choice.reasoning_content || choice.thinking : undefined;
             const chunk: Record<string, string> = {};
-            if (delta) chunk.delta = delta;
-            if (reasoning) chunk.reasoning = reasoning;
+            if (typeof delta === 'string') chunk.delta = delta;
+            if (typeof reasoning === 'string') chunk.reasoning = reasoning;
             if (Object.keys(chunk).length && !closed) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
             // 用量收尾块（include_usage）：此块 choices 为空、usage 独立下发
-            const usage = json?.usage;
+            const usage = json?.usage as Record<string, number> | undefined;
             if (usage && !closed && (usage.prompt_tokens != null || usage.total_tokens != null)) {
               const prompt_tokens = Number(usage.prompt_tokens) || 0;
               const completion_tokens = Number(usage.completion_tokens) || 0;

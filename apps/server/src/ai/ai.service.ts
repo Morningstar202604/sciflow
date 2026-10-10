@@ -169,7 +169,8 @@ export class AiService extends AiTransportService {
       /* 保留空对象兜底 */
     }
     const dims = ['literature', 'logic', 'citation', 'language', 'novelty', 'figures', 'format'] as const;
-    const scores = {} as Record<string, number>;
+    type ScoreDims = (typeof dims)[number];
+    const scores: Record<ScoreDims, number> = {} as Record<ScoreDims, number>;
     for (const d of dims) scores[d] = Math.max(0, Math.min(100, Number(parsed.scores?.[d]) || 0));
     // 权重可自定义（用户可在设置页调整，默认等权）
     let weights: Record<string, number> = {};
@@ -183,7 +184,7 @@ export class AiService extends AiTransportService {
       dims.reduce((sum, d) => sum + scores[d] * (weights[d] ?? 1), 0) /
         dims.reduce((sum, d) => sum + (weights[d] ?? 1), 0),
     );
-    return { scores: scores as any, feedback: String(parsed.feedback || '').trim(), totalScore: total };
+    return { scores, feedback: String(parsed.feedback || '').trim(), totalScore: total };
   }
 
   /** 文献综述 */

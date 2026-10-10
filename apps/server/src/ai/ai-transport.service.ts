@@ -1,6 +1,7 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import pRetry from 'p-retry';
+import pLimit from 'p-limit';
 import { sqlite } from '../db/database';
 import { db } from '../db/database';
 import { llmCallLogs, customPrompts } from '../db/schema';
@@ -64,9 +65,9 @@ export class AiTransportService {
    */
   protected readonly mockMode = process.env.AI_MOCK === '1';
 
-  // ---------- 并发限流：手写 class 版 p-limit（避免外部包运行时缺失） ----------
+  // ---------- 并发限流：p-limit（成熟库替代手写实现） ----------
   // RPM 换算为并发上限：假设单请求 ~10s，RPM 60 → 最多 6 并发；取保守值避免 429
-  protected readonly limit = this.createLimiter(Math.max(1, Math.floor(Number(process.env.AI_RPM_CAP || 60) / 6)));
+  protected readonly limit = pLimit(Math.max(1, Math.floor(Number(process.env.AI_RPM_CAP || 60) / 6)));
 
   constructor() {
     this.applyActiveProvider();
@@ -156,36 +157,6 @@ export class AiTransportService {
     }
   }
 
-  /** 极简并发队列：等同 p-limit(concurrency) —— activeCount 超限时挂起，队头释放后唤醒 */
-  private createLimiter(concurrency: number) {
-    let active = 0;
-    const queue: (() => void)[] = [];
-    const next = () => {
-      if (active >= concurrency || !queue.length) return;
-      active++;
-      const fn = queue.shift()!;
-      fn();
-    };
-    return <T>(task: () => T | Promise<T>): Promise<T> =>
-      new Promise<T>((resolve, reject) => {
-        const run = () => {
-          Promise.resolve()
-            .then(task)
-            .then(resolve, reject)
-            .finally(() => {
-              active--;
-              next();
-            });
-        };
-        if (active < concurrency) {
-          active++;
-          run();
-        } else {
-          queue.push(run);
-        }
-      });
-  }
-
   /** 统一构造 OpenAI 兼容补全请求 */
   protected buildChatRequest(
     model: string,
@@ -240,8 +211,8 @@ export class AiTransportService {
             }
             throw new HttpException(`AI 服务调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
           }
-          const data = (await res.json()) as any;
-          const content = String(data.choices?.[0]?.message?.content ?? '').trim();
+          const data = (await res.json()) as Record<string, unknown>;
+          const content = String((data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content ?? '').trim();
           // 空响应按失败重试
           if (!content) throw new HttpException('AI 返回空响应', 429);
           return { content, data };
@@ -259,7 +230,7 @@ export class AiTransportService {
         },
       ),
     ).then(({ content, data }) => {
-      const usage = (data?.usage || {}) as any;
+      const usage = (data?.usage as Record<string, number> | undefined) || {};
       this.logLlmCall({
         caller,
         model,
@@ -324,8 +295,8 @@ export class AiTransportService {
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) return [];
-      const data = (await res.json()) as any;
-      const ids: string[] = (data.data || []).map((m: any) => m.id).filter((id: string) => !id.includes('image') && !id.includes('video'));
+      const data = (await res.json()) as { data?: Array<{ id?: string }> };
+      const ids: string[] = (data.data || []).map((m) => m.id).filter((id): id is string => !!id && !id.includes('image') && !id.includes('video'));
       return ids.slice(0, 20);
     } catch {
       return [];
@@ -350,11 +321,11 @@ export class AiTransportService {
         const err = await res.text().catch(() => '');
         return { ok: false, reply: `HTTP ${res.status}: ${err.slice(0, 200)}`, model: target, latencyMs: Date.now() - t0 };
       }
-      const data = (await res.json()) as any;
-      const msg = data.choices?.[0]?.message ?? {};
-      const content: string = msg.content ?? '';
+      const data = (await res.json()) as Record<string, unknown>;
+      const msg = (data.choices as Array<{ message?: Record<string, unknown> }>)?.[0]?.message ?? {};
+      const content = String(msg.content ?? '').trim();
       // 正文非空直接回显；正文空但推理通道有内容，说明网关连通、只是预算被推理吃掉
-      const reply = content.trim()
+      const reply = content
         ? content
         : msg.reasoning_content || msg.thinking
           ? '（连通正常：推理通道有输出，正文为空——可忽略）'

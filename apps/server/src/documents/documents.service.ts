@@ -11,9 +11,10 @@ import { Document, Packer, Paragraph, HeadingLevel, AlignmentType } from 'docx';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService } from '../references/references.service';
 import { parseAuthors as parseAuthorArr, surnameOf } from '../common/authors';
-import { parseStringList } from '../common/json-guard';
+import { parseStringList, parseJson } from '../common/json-guard';
 
 const MAX_VERSIONS = 20;
+const EMPTY_OUTLINE: { title: string; sections: { title: string; subsections: string[] }[] } = { title: '', sections: [] };
 
 @Injectable()
 export class DocumentsService {
@@ -54,7 +55,7 @@ export class DocumentsService {
   update(id: string, patch: { title?: string; content?: string; outline?: string; status?: string }) {
     const existing = this.get(id);
     const baseVersion = existing.version ?? 1;
-    let versions = this.parseJson<{ version: number; content: string; updatedAt: number }[]>(existing.versions ?? '[]');
+    let versions = parseJson<{ version: number; content: string; updatedAt: number }[]>(existing.versions, []);
     if (patch.content !== undefined && patch.content !== existing.content && existing.content) {
       versions = [
         ...versions,
@@ -82,7 +83,7 @@ export class DocumentsService {
 
   /** versions JSON 历史元素：本轮起可选携带 name（纯 JSON 内嵌，无需 ensureColumn/列迁移） */
   private parseVersions(existing: { versions: string | null }): { version: number; content: string; updatedAt: number; name?: string }[] {
-    return this.parseJson<{ version: number; content: string; updatedAt: number; name?: string }[]>(existing.versions ?? '[]');
+    return parseJson<{ version: number; content: string; updatedAt: number; name?: string }[]>(existing.versions, []);
   }
 
   /**
@@ -222,7 +223,7 @@ export class DocumentsService {
   /** 章节起草 */
   async draftSection(id: string, sectionTitle: string) {
     const doc = this.get(id);
-    const outline = this.parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline ?? '[]');
+    const outline = parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline, EMPTY_OUTLINE);
     const refs = this.getRefsForPrompt(id);
     const text = await this.ai.draftSection(sectionTitle, JSON.stringify(outline), refs);
     return { text };
@@ -320,7 +321,7 @@ export class DocumentsService {
   /** 导出 Markdown 全文（标题 + 大纲 + 正文 + 引用列表） */
   exportMarkdown(id: string) {
     const doc = this.get(id);
-    const outline = this.parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline || '[]');
+    const outline = parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline, EMPTY_OUTLINE);
     const citeRows = db.select().from(citations).where(eq(citations.documentId, id)).all();
     const refIds = citeRows.map((c) => c.referenceId).filter(Boolean);
     const refList = refIds.length ? db.select().from(references).where(inArray(references.id, refIds)).all() : [];
@@ -371,7 +372,7 @@ export class DocumentsService {
   /** 导出 Word(.docx) 全文——交稿/投稿刚需（标题 + 大纲 + 正文 + 参考文献） */
   async exportDocx(id: string) {
     const doc = this.get(id);
-    const outline = this.parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline || '[]');
+    const outline = parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline, EMPTY_OUTLINE);
     const citeRows = db.select().from(citations).where(eq(citations.documentId, id)).all();
     const refIds = citeRows.map((c) => c.referenceId).filter(Boolean);
     const refList = refIds.length ? db.select().from(references).where(inArray(references.id, refIds)).all() : [];
@@ -432,14 +433,6 @@ export class DocumentsService {
           `[Ref:${i + 1}] ${r.reference.title}（${r.reference.authors}，${r.reference.year || 'n.d.'}，${r.reference.venue}${r.reference.doi ? `，DOI:${r.reference.doi}` : ''}）`,
       )
       .join('\n');
-  }
-
-  private parseJson<T>(raw: string): T {
-    try {
-      return JSON.parse(raw || '[]') as T;
-    } catch {
-      return [] as unknown as T;
-    }
   }
 }
 

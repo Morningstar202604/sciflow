@@ -153,7 +153,7 @@ export function LineChart({ data, points, series, height = 260, grid = true, sho
   if (!chartData.length) return <ChartEmpty message="No data points" />;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <ReLineChart data={chartData} margin={{ top: 8, right: 16, bottom: 4, left: 4 }} onClick={(e) => {
+      <ReLineChart data={chartData} margin={{ top: 8, right: 16, bottom: 4, left: 4 }} onClick={(e: { activeTooltipIndex?: number }) => {
         if (onPointClick && e?.activeTooltipIndex != null) onPointClick(e.activeTooltipIndex);
       }}>
         {grid && <CartesianGrid stroke={GC} vertical={false} />}
