@@ -266,8 +266,8 @@ export class KnowledgeService {
   /** 向量 ANN 检索（sqlite-vec vec0）：语义召回 TopK */
   private async annSearch(projectId: string, questionEmbedding: Buffer | null, topK: number): Promise<any[]> {
     if (!questionEmbedding) {
-      // 模型不可用，回退 LIKE 兜底
-      return this.likeSearch(projectId, topK);
+      // 模型不可用，回退 FTS5 全文检索
+      return this.ftsSearch(projectId, topK);
     }
     try {
       const rows = sqlite
@@ -285,12 +285,41 @@ export class KnowledgeService {
         .all(projectId, questionEmbedding, topK + 5) as any[]; // 多召回 5 条留给 rerank/去重
       return rows;
     } catch {
-      // vec0 不可用时回退到 LIKE 全文兜底
-      return this.likeSearch(projectId, topK);
+      // vec0 不可用时回退到 FTS5 全文检索
+      return this.ftsSearch(projectId, topK);
     }
   }
 
-  /** LIKE 兜底检索（当 sqlite-vec 不可用或 chunk 无 embedding 时回退） */
+  /** FTS5 全文检索（对假 BM25/LIKE 兜底的真正替代） */
+  private ftsSearch(projectId: string, topK: number): any[] {
+    const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
+    if (docs.length === 0) return [];
+    const docIds = docs.map((d) => d.id);
+    try {
+      const placeholders = docIds.map(() => '?').join(',');
+      const rows = sqlite
+        .prepare(
+          `SELECT f.chunk_id AS chunk_id, c.doc_id AS doc_id, c.content AS content,
+                  c.context AS context, c.seq AS seq,
+                  d.name AS doc_name, d.reference_id AS reference_id,
+                  bm25(knowledge_chunk_fts) AS score
+           FROM knowledge_chunk_fts f
+           JOIN knowledge_chunk c ON c.id = f.chunk_id
+           JOIN knowledge_doc d ON d.id = c.doc_id
+           WHERE f.chunk_id IN (SELECT id FROM knowledge_chunk WHERE doc_id IN (${placeholders}))
+             AND knowledge_chunk_fts MATCH ?
+           ORDER BY score ASC
+           LIMIT ?`,
+        )
+        .all(...docIds, topK * 2) as any[]; // bm25() 返回值越小越相关；多召回 rerank
+      return rows;
+    } catch {
+      // FTS5 匹配语法错误时降级返回空
+      return [];
+    }
+  }
+
+  /** LIKE 兜底检索（FTS5 不可用或查询语法错误时的终极兜底） */
   private likeSearch(projectId: string, topK: number): any[] {
     const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
     if (docs.length === 0) return [];
@@ -325,8 +354,12 @@ export class KnowledgeService {
         content: row.content,
         context: row.context || null,
         seq: row.seq,
-        // ANN 距离有效时用 (1-distance)*100 换算百分制；兜底 LIKE 命中给固定中间分，保证排序稳定
-        score: row.distance < 999 ? Math.max(0, Math.round((1 - row.distance) * 100)) : 15,
+        // ANN 距离有效时用 (1-distance)*100 换算百分制；FTS5 bm25() 值越小越相关，取反归一化
+        score: row.distance < 999
+          ? Math.max(0, Math.round((1 - row.distance) * 100))
+          : row.score != null
+            ? Math.max(0, Math.min(100, Math.round(100 / (1 + Math.abs(row.score)))))
+            : 15,
         referenceId: row.reference_id || null,
         referenceTitle: row.reference_id ? (refMap.get(row.reference_id)?.title || null) : null,
         referenceAuthors: row.reference_id ? (refMap.get(row.reference_id)?.authors || null) : null,

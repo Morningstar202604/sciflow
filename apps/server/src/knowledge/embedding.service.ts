@@ -34,8 +34,7 @@ const CACHE_DIR = path.resolve(process.env.SCIFLOW_MODEL_CACHE || path.join(proc
 @Injectable()
 export class EmbeddingService implements OnModuleInit {
   private readonly logger = new Logger(EmbeddingService.name);
-  private model: any = null;
-  private ctx: any = null;
+  private llamaContext: unknown = null;
   private loading: Promise<void> | null = null;
 
   /** 模块初始化：预热模型（不阻塞启动，首次调用时才加载） */
@@ -60,18 +59,19 @@ export class EmbeddingService implements OnModuleInit {
       const total = Number(res.headers.get('content-length') || 0);
       const dest = fs.createWriteStream(this.modelPath + '.tmp');
       let downloaded = 0;
-      for await (const chunk of res.body as any) {
+      for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
         downloaded += chunk.length;
         dest.write(chunk);
         if (total > 0 && downloaded % (256 * 1024) < chunk.length) {
-          process.stdout.write(`\r  下载进度: ${((downloaded / total) * 100).toFixed(1)}%`);
+          this.logger.log(`  下载进度: ${((downloaded / total) * 100).toFixed(1)}%`);
         }
       }
       dest.end();
       fs.renameSync(this.modelPath + '.tmp', this.modelPath);
       this.logger.log(`模型下载完成: ${this.modelPath} (${downloaded} bytes)`);
-    } catch (e: any) {
-      this.logger.error(`模型下载失败: ${e?.message || e}`);
+      } catch (e: any) {
+        try { fs.unlinkSync(this.modelPath + '.tmp'); } catch { /* ignore */ }
+        this.logger.error(`模型下载失败: ${e?.message || e}`);
       throw new Error(
         `Embedding 模型下载失败。请手动下载 ${MODEL_URL} 到 ${this.modelPath}，或设置 EMBEDDING_DIM=0 禁用向量检索`,
       );
@@ -80,7 +80,7 @@ export class EmbeddingService implements OnModuleInit {
 
   /** 加载模型（幂等，并发安全） */
   private async loadModel(): Promise<void> {
-    if (this.model) return;
+    if (this.llamaContext) return;
     if (this.loading) return this.loading;
     this.loading = (async () => {
       await this.ensureModel();
@@ -89,16 +89,12 @@ export class EmbeddingService implements OnModuleInit {
         const llama = await getLlama();
         const model = await llama.loadModel({ modelPath: this.modelPath });
         const ctx = model.createContext({ contextSize: 512 });
-        (this as any).llamaModel = model;
-        (this as any).llamaContext = ctx;
-        this.model = true as any;
-        this.ctx = true as any;
+        this.llamaContext = ctx;
         this.logger.log('模型已加载到内存，后续 embed 调用无冷启动开销');
       } catch (e: any) {
         // node-llama-cpp 可能在纯 CPU 容器中失败；降级为 TF 向量回退
         this.logger.warn(`node-llama-cpp 加载失败（将回退到 sqlite-vec 不可用时的 LIKE 兜底）: ${e?.message || e}`);
-        this.model = null;
-        this.ctx = null;
+        this.llamaContext = null;
       }
     })();
     return this.loading;
@@ -111,20 +107,14 @@ export class EmbeddingService implements OnModuleInit {
   async embed(text: string): Promise<Buffer | null> {
     try {
       await this.loadModel();
-      if (!this.ctx) return null; // 模型不可用
-      const llamaContext = (this as any).llamaContext;
-      if (!llamaContext) return null;
-      // node-llama-cpp v3 API: context.getEmbeddingFor → model.embed / context.evaluate + token-level
-      // 兼容路径：先尝试新 API，再回退旧 API
-      let vector: number[];
-      if (typeof llamaContext.getEmbeddingFor === 'function') {
-        const embedding = await llamaContext.getEmbeddingFor(text);
-        vector = Array.isArray(embedding) ? embedding : (embedding as any).vector;
-      } else {
-        // v3 回退：直接返回 null（降级 TF 向量）
+      if (!this.llamaContext) return null; // 模型不可用
+      const ctx = this.llamaContext as { getEmbeddingFor?: (text: string) => Promise<{ vector: number[] } | number[]> };
+      if (typeof ctx.getEmbeddingFor !== 'function') {
         this.logger.warn('当前 node-llama-cpp 版本不支持快捷 embedding 方法，降级到 TF 回退');
         return null;
       }
+      const embedding = await ctx.getEmbeddingFor(text);
+      const vector = Array.isArray(embedding) ? embedding : embedding.vector;
       const vec = new Float32Array(vector);
       return Buffer.from(vec.buffer);
     } catch (e: any) {

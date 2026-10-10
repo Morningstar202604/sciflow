@@ -12,6 +12,7 @@ import { AiService } from '../ai/ai.service';
 import { ReferencesService } from '../references/references.service';
 import { parseAuthors as parseAuthorArr, surnameOf } from '../common/authors';
 import { parseStringList, parseJson } from '../common/json-guard';
+import { toCslAuthors } from '../common/citation-csl';
 
 const MAX_VERSIONS = 20;
 const EMPTY_OUTLINE: { title: string; sections: { title: string; subsections: string[] }[] } = { title: '', sections: [] };
@@ -449,22 +450,6 @@ const CSL_TEMPLATE_MAP: Record<string, string> = {
   springer: 'springer-basic-author-date',
   acs: 'american-chemical-society',
 };
-
-/** 解析 authors JSON 字符串为 citation-js CSL-JSON author 数组 */
-function toCslAuthors(authorsJson: string | null): { family: string; given: string }[] {
-  const arr = parseStringList(authorsJson);
-  if (arr.length === 0) return [];
-  try {
-    return arr.filter(Boolean).map((name) => {
-      const parts = String(name).trim().split(/\s+/).filter(Boolean);
-      const family = parts.pop() || '';
-      const given = parts.join(' ');
-      return { family, given };
-    });
-  } catch {
-    return [];
-  }
-}
 
 /** citation-js Cite 对象构建（从 citation row 构建 CSL-JSON 条目） */
 function buildCiteEntry(row: { reference: { id: string; title: string; authors: string | null; year: number | null; venue: string | null; doi: string | null } }) {

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { db } from '../db/database';
 import { references, screeningQueue, extractionFields, extractionValues, documents, citations } from '../db/schema';
 import { AiService } from '../ai/ai.service';
+import { buildCslEntries } from '../common/citation-csl';
 import { parseAuthors } from '../common/authors';
 import { fingerprint } from '../common/fingerprint';
 import { parseTagsJson, parseStringList } from '../common/json-guard';
@@ -528,15 +529,14 @@ export class ReferencesService {
 
   /** citation-js 共享 CSL-JSON 构造 */
   private toCslJson(refs: (typeof references.$inferSelect)[]) {
-    return refs.map((r) => ({
+    return buildCslEntries(refs.map((r) => ({
       id: r.id,
-      type: 'article-journal' as const,
       title: r.title,
-      author: parseAuthors(r.authors).map((a) => { const p = a.trim().split(/\s+/); const family = p.pop() || ''; return { family, given: p.join(' ') }; }),
-      issued: r.year ? { 'date-parts': [[r.year]] } : undefined,
-      'container-title': r.venue || undefined,
-      DOI: r.doi || undefined,
-    }));
+      authors: r.authors,
+      year: r.year,
+      venue: r.venue,
+      doi: r.doi,
+    })));
   }
 
   private toBibtex(refs: (typeof references.$inferSelect)[]): string {

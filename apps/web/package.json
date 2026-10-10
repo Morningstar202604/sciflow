@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "diff": "^7.0.0",
     "katex": "^0.18.9",
     "lucide-react": "^0.525.0",
     "react": "^19.1.0",
@@ -26,6 +27,7 @@
     "unified": "^11.0.5"
   },
   "devDependencies": {
+    "@types/diff": "^6.0.0",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.1.0",
     "@types/mdast": "^4.0.4",

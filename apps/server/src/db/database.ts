@@ -3,10 +3,11 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { isTable, getTableName } from 'drizzle-orm';
 import * as schema from './schema';
 
-const DATA_DIR = path.resolve(__dirname, '..', '..', 'data');
+const DATA_DIR = process.env.DATABASE_PATH
+  ? path.dirname(path.resolve(process.env.DATABASE_PATH))
+  : path.resolve(process.cwd(), 'apps', 'server', 'data');
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'sciflow.db');
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -361,6 +362,23 @@ CREATE TABLE IF NOT EXISTS submission_status_event (
 );
 CREATE INDEX IF NOT EXISTS idx_submission_event_submission ON submission_status_event(submission_id);
 
+-- 全文检索：FTS5 虚拟表（独立表，关联 chunk_id）
+CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunk_fts USING fts5(
+  chunk_id UNINDEXED,
+  content,
+  tokenize='unicode61'
+);
+-- FTS5 同步触发器（INSERT/DELETE/UPDATE）
+CREATE TRIGGER IF NOT EXISTS knowledge_chunk_fts_ai AFTER INSERT ON knowledge_chunk BEGIN
+  INSERT INTO knowledge_chunk_fts(chunk_id, content) VALUES (new.id, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS knowledge_chunk_fts_ad AFTER DELETE ON knowledge_chunk BEGIN
+  DELETE FROM knowledge_chunk_fts WHERE chunk_id = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS knowledge_chunk_fts_au AFTER UPDATE ON knowledge_chunk BEGIN
+  UPDATE knowledge_chunk_fts SET content = new.content WHERE chunk_id = old.id;
+END;
+
 -- 企业认证：用户表（AUTH_MODE=jwt 时启用；本地/桌面模式不强制登录）
 CREATE TABLE IF NOT EXISTS user (
   id TEXT PRIMARY KEY,
@@ -436,100 +454,13 @@ if (journalCount === 0) {
 }
 
 /**
- * schema 双写一致性自检（技术债收口）：
- * 过去 schema.ts（drizzle 定义）与下方手写 DDL + ensureColumn 需三处手工同步。
- * 这里在启动时以 schema.ts 为唯一事实来源，运行时反射遍历其表/列，与 SQLite 实际建出的库对比：
- *  - 缺表：按 drizzle 列元数据自动 CREATE TABLE；
- *  - 缺列：自动 ALTER TABLE ADD COLUMN（带默认值）；
- *  - 多列/类型漂移：不删不改（非破坏性），仅日志。
- * 全程 try/catch 包裹，任何失败只告警、不中断启动。全新空库与旧库均幂等。
+ * 数据库 schema 初始化（保留 ensureColumn 用于旧库 backward-compat 迁移）。
+ * 新能力上线需要的列，在 DDL 里加 CREATE TABLE IF NOT EXISTS 自然兼容新库；
+ * 已有的旧库走 ensureColumn 补齐。
+ *
+ * ⚠️ 未来大版本 schema 变化请用 `pnpm --filter @sciflow/server db:push`
+ *    （drizzle-kit migration）替代手写 ensureColumn。
  */
-interface DrizzleColLike {
-  name: string;
-  dataType: string;
-  notNull: boolean;
-  hasDefault: boolean;
-  primary: boolean;
-  default: unknown;
-  defaultFn?: (() => unknown) | undefined;
-  getSQLType(): string;
-}
-function isDrizzleCol(v: unknown): v is DrizzleColLike {
-  return (
-    !!v &&
-    typeof v === 'object' &&
-    typeof (v as DrizzleColLike).name === 'string' &&
-    typeof (v as DrizzleColLike).dataType === 'string' &&
-    typeof (v as DrizzleColLike).getSQLType === 'function'
-  );
-}
-
-/** 把 drizzle 默认值渲染成 DDL 字面量；无法静态表达（SQL 对象/运行时函数）返回 null */
-function defaultLiteral(d: unknown): string | null {
-  if (d === undefined || d === null) return null;
-  if (typeof d === 'number') return String(d);
-  if (typeof d === 'boolean') return d ? '1' : '0';
-  if (typeof d === 'string') return `'${d.replace(/'/g, "''")}'`;
-  return null;
-}
-
-/** CREATE TABLE 用的列定义 */
-function columnDef(c: DrizzleColLike): string {
-  let s = `  ${c.name} ${c.getSQLType()}`;
-  if (c.primary) s += ' PRIMARY KEY';
-  if (c.notNull) s += ' NOT NULL';
-  const lit = defaultLiteral(c.default);
-  if (c.hasDefault && lit !== null) s += ` DEFAULT ${lit}`;
-  return s;
-}
-
-/** ALTER TABLE ADD COLUMN 用的列定义（SQLite 不允许给无默认值的列加 NOT NULL，故缺列一律不加 NOT NULL） */
-function alterColumnDef(c: DrizzleColLike): string {
-  let s = `${c.name} ${c.getSQLType()}`;
-  const lit = defaultLiteral(c.default);
-  if (c.hasDefault && lit !== null) s += ` DEFAULT ${lit}`;
-  return s;
-}
-
-function reconcileSchema() {
-  let createdTables = 0;
-  let addedCols = 0;
-  let checkedTables = 0;
-  const tableExists = (name: string) =>
-    sqlite.prepare("SELECT 1 AS x FROM sqlite_master WHERE type='table' AND name=?").get(name) !== undefined;
-
-  for (const exported of Object.values(schema)) {
-    if (!isTable(exported)) continue;
-    const tname = getTableName(exported as Parameters<typeof getTableName>[0]);
-    const cols = (Object.values(exported as unknown as Record<string, unknown>) as unknown[]).filter(isDrizzleCol);
-    try {
-      checkedTables += 1;
-      if (!tableExists(tname)) {
-        sqlite.exec(`CREATE TABLE IF NOT EXISTS ${tname} (\n${cols.map(columnDef).join(',\n')}\n)`);
-        createdTables += 1;
-        console.log(`[DB] 自检：自动建表 ${tname}（${cols.length} 列）`);
-        continue;
-      }
-      const existing = (sqlite.prepare(`PRAGMA table_info(${tname})`).all() as { name: string }[]).map((c) => c.name);
-      for (const c of cols) {
-        if (existing.includes(c.name)) continue;
-        if (c.primary) {
-          // 主键列缺失属于异常旧表结构，不自动改动（避免破坏既有数据），仅记日志
-          console.warn(`[DB] 自检：${tname}.${c.name} 为主键列且缺失，跳过自动修复`);
-          continue;
-        }
-        sqlite.exec(`ALTER TABLE ${tname} ADD COLUMN ${alterColumnDef(c)}`);
-        addedCols += 1;
-        console.log(`[DB] 自检：${tname} 自动补列 ${c.name}`);
-      }
-    } catch (e: any) {
-      console.warn(`[DB] 自检：表 ${tname} 一致性修复失败（不阻断启动）: ${e?.message || e}`);
-    }
-  }
-  console.log(`[DB] schema 自检完成：核对 ${checkedTables} 表 / 新建 ${createdTables} 表 / 补全 ${addedCols} 列`);
-}
-
-reconcileSchema();
 
 export const db: BetterSQLite3Database<typeof schema> = drizzle(sqlite, { schema });
 export { sqlite, DB_PATH };

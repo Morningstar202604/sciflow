@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { diffLines as diffLibLines } from 'diff';
 import { api } from '../api/client';
 import { Button, Modal, Select, errMsg } from '../components/ui';
 
@@ -6,70 +7,44 @@ import { Button, Modal, Select, errMsg } from '../components/ui';
 export type VersionSnapshot = { version: number; content: string; updatedAt: number; current?: boolean; name?: string };
 
 /* =====================================================================
- * 轻量行级 diff（LCS DP，零依赖）——独立 chunk，仅打开对比时加载
- *
- * 性能策略（缺口#3）：
- *  - 常见长论文（数百 ~ 2000 行正文）**不截断**完整对比；
- *  - DP 表用扁平化 Int32Array（4 字节/格），2000×2000 ≈ 16MB、约 4M 格，JS 可承受；
- *  - 极端超长（> 阈值 或 DP 格子数超上限）才降级截断，并在底部提示。
+ * 行级 diff：基于 `diff` 库（成熟 LCS 实现，支持行/字/字符级别对比）
+ * 独立 chunk，仅打开对比时加载。
  * ===================================================================== */
+
 type DiffRow = { kind: 'same' | 'del' | 'add'; left: string | null; right: string | null };
 type DiffResult = { rows: DiffRow[]; truncated: boolean };
 
-/** 行数不截断上限：常见长论文正文 ≤ 此值 */
+/** 行数兜底：超过此行数才截断（极端场景） */
 const MAX_DIFF_LINES = 2000;
-/** DP 格子总数上限（≈2236×2236），保护内存；超限按比例裁切并提示 */
-const MAX_DIFF_CELLS = 5_000_000;
 
 function diffLines(oldText: string, newText: string): DiffResult {
-  let L = oldText.split('\n');
-  let R = newText.split('\n');
+  let oldLines = oldText.split('\n');
+  let newLines = newText.split('\n');
   let truncated = false;
 
-  // 行数兜底：超过 2000 行才截断（极端场景）
-  if (L.length > MAX_DIFF_LINES || R.length > MAX_DIFF_LINES) {
+  if (oldLines.length > MAX_DIFF_LINES || newLines.length > MAX_DIFF_LINES) {
     truncated = true;
-    L = L.slice(0, MAX_DIFF_LINES);
-    R = R.slice(0, MAX_DIFF_LINES);
-  }
-  // 内存兜底：DP 格子数超上限时按比例裁，避免整表过大卡死/白屏
-  if (L.length * R.length > MAX_DIFF_CELLS) {
-    truncated = true;
-    const scale = Math.sqrt(MAX_DIFF_CELLS / (L.length * R.length));
-    L = L.slice(0, Math.max(1, Math.floor(L.length * scale)));
-    R = R.slice(0, Math.max(1, Math.floor(R.length * scale)));
+    oldLines = oldLines.slice(0, MAX_DIFF_LINES);
+    newLines = newLines.slice(0, MAX_DIFF_LINES);
   }
 
-  const n = L.length;
-  const m = R.length;
-  // 扁平化 DP：dp[i][j] = dp[i*(m+1)+j]；Int32Array 零初始化、4 字节/格
-  const rowLen = m + 1;
-  const dp = new Int32Array((n + 1) * rowLen);
-  for (let i = n - 1; i >= 0; i--) {
-    const cur = i * rowLen;
-    const nxt = (i + 1) * rowLen;
-    for (let j = m - 1; j >= 0; j--) {
-      dp[cur + j] = L[i] === R[j] ? dp[nxt + j + 1] + 1 : Math.max(dp[nxt + j], dp[cur + j + 1]);
-    }
-  }
+  const changes = diffLibLines(oldLines.join('\n'), newLines.join('\n'));
   const rows: DiffRow[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (L[i] === R[j]) {
-      rows.push({ kind: 'same', left: L[i], right: R[j] });
-      i++;
-      j++;
-    } else if (dp[(i + 1) * rowLen + j] >= dp[i * rowLen + j + 1]) {
-      rows.push({ kind: 'del', left: L[i], right: null });
-      i++;
-    } else {
-      rows.push({ kind: 'add', left: null, right: R[j] });
-      j++;
+
+  for (const change of changes) {
+    const lines = change.value.split('\n');
+    // diff 库会在末尾多一个空行（当文本以换行结尾）
+    const effective = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
+    for (const line of effective) {
+      if (change.added) {
+        rows.push({ kind: 'add', left: null, right: line });
+      } else if (change.removed) {
+        rows.push({ kind: 'del', left: line, right: null });
+      } else {
+        rows.push({ kind: 'same', left: line, right: line });
+      }
     }
   }
-  while (i < n) rows.push({ kind: 'del', left: L[i++], right: null });
-  while (j < m) rows.push({ kind: 'add', left: null, right: R[j++] });
   return { rows, truncated };
 }
 

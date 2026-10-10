@@ -2,6 +2,7 @@ import { Controller, Post, Body, Res, Req } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import { ChatService } from './chat.service';
 import { ChatMessage } from '../ai/ai.service';
+import { forwardOpenAiSse } from '../common/sse.helper';
 
 interface ChatRequestBody {
   message: string;
@@ -50,82 +51,26 @@ export class ChatController {
     let closed = false;
     req.on('close', () => {
       closed = true;
-      try {
-        ac.abort();
-      } catch {
-        /* noop */
-      }
+      try { ac.abort(); } catch { /* noop */ }
     });
 
     // 深度思考开关：仅显式开启时才把上游推理增量（delta.reasoning_content / delta.thinking）透传给前端。
-    // 部分推理型网关（如 u2-flash / DeepSeek-R1 兼容）无视 thinking 参数、每帧都带 reasoning_content；
-    // 若不在此门控，关闭「深度思考」时折叠思维链 UI 仍会收到推理流，开关语义形同虚设。
     const forwardReasoning = body.enableThinking === true;
     try {
       const { stream, sources } = await this.chat.stream(
-        body.message,
-        body.history || [],
-        body.projectId,
-        body.docContext,
+        body.message, body.history || [], body.projectId, body.docContext,
         { model: body.model, enableThinking: body.enableThinking, signal: ac.signal },
       );
-
       // 正文流开始前先推送 RAG 来源（无命中则不发送）
       if (sources.length && !closed) {
         res.write(`data: ${JSON.stringify({ sources })}\n\n`);
       }
-
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          const t = line.trim();
-          if (!t.startsWith('data:')) continue;
-          const payload = t.slice(5).trim();
-          if (payload === '[DONE]') continue;
-          try {
-            const json = JSON.parse(payload) as Record<string, unknown>;
-            const choice = (json?.choices as Array<{ delta?: Record<string, unknown> }>)?.[0]?.delta || {};
-            // 正文增量（行为与旧版完全一致）
-            const delta = choice.content;
-            // 推理过程透传：DeepSeek/通义系 reasoning_content，豆包系 thinking；仅深度思考开启时转发
-            const reasoning = forwardReasoning ? choice.reasoning_content || choice.thinking : undefined;
-            const chunk: Record<string, string> = {};
-            if (typeof delta === 'string') chunk.delta = delta;
-            if (typeof reasoning === 'string') chunk.reasoning = reasoning;
-            if (Object.keys(chunk).length && !closed) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-            // 用量收尾块（include_usage）：此块 choices 为空、usage 独立下发
-            const usage = json?.usage as Record<string, number> | undefined;
-            if (usage && !closed && (usage.prompt_tokens != null || usage.total_tokens != null)) {
-              const prompt_tokens = Number(usage.prompt_tokens) || 0;
-              const completion_tokens = Number(usage.completion_tokens) || 0;
-              res.write(
-                `data: ${JSON.stringify({
-                  usage: {
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens: Number(usage.total_tokens) || prompt_tokens + completion_tokens,
-                  },
-                })}\n\n`,
-              );
-            }
-          } catch {
-            /* 未知字段/坏行忽略，绝不中断流式 */
-          }
-        }
+      const result = await forwardOpenAiSse(res, { stream, forwardReasoning, signal: ac.signal });
+      if (result.error && !closed) {
+        res.write(`data: ${JSON.stringify({ error: result.error })}\n\n`);
       }
-      if (!closed) res.write('data: [DONE]\n\n');
     } catch (e: any) {
-      // 客户端主动断连属于正常停止，不回写 error 事件
-      if (!closed) {
-        res.write(`data: ${JSON.stringify({ error: e?.message || String(e) })}\n\n`);
-      }
+      if (!closed) res.write(`data: ${JSON.stringify({ error: e?.message || String(e) })}\n\n`);
     }
     res.end();
   }

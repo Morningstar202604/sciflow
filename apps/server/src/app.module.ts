@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -21,6 +22,8 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 
 @Module({
   imports: [
+    // 全局频率限制：每分钟 60 次（AI 调用 + API），防止 token 成本爆炸 / DoS
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     AiModule,
     AuthModule,
     ProjectsModule,
@@ -39,6 +42,9 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
     DashboardModule,
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_FILTER, useClass: HttpExceptionFilter }],
+  providers: [
+    { provide: APP_FILTER, useClass: HttpExceptionFilter },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule {}
