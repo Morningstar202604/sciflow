@@ -518,19 +518,12 @@ type RefLite = { title: string; authors: string; year: number | null; venue: str
  * index=0 时不注入序号（用于著者-年样式文末列表，序号无意义）。
  */
 function formatRefEntry8(ref: RefLite, format: string, index: number, yearOverride?: string): string {
-  const arr = parseAuthorArr(ref.authors);
-  const cslAuthors = arr.map((name) => {
-    const parts = name.trim().split(/\s+/).filter(Boolean);
-    const family = parts.pop() || '';
-    const given = parts.join(' ');
-    return { family, given };
-  });
   // 用 citation-js 单条目格式化（注入年份覆写）
   const entry = {
     id: 'entry',
     type: 'article-journal' as const,
     title: ref.title,
-    author: cslAuthors,
+    author: toCslAuthors(ref.authors),
     issued: { 'date-parts': [[Number(yearOverride?.replace(/[a-z]/g, '')) || ref.year || 0]] } as any,
     'container-title': ref.venue || undefined,
     DOI: ref.doi || undefined,
