@@ -404,3 +404,74 @@ export const users = sqliteTable('user', {
 });
 
 export type User = typeof users.$inferSelect;
+
+/** Agent 执行轨迹（对标 Cursor/Cline 调用链追踪 + OpenHands 面板）。主表名为 agent_execution 避让已有 agent_run（流水线步骤日志）。 */
+export const agentExecutions = sqliteTable('agent_execution', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  /** 触发来源：chat | pipeline | tool | cron */
+  source: text('source').notNull(),
+  /** 用户原始输入 */
+  input: text('input').default(''),
+  /** 最终输出摘要 */
+  outputSummary: text('output_summary').default(''),
+  /** 总耗时 ms */
+  durationMs: integer('duration_ms').default(0),
+  /** 总 token 用量（prompt + completion） */
+  totalTokens: integer('total_tokens').default(0),
+  /** 状态：running | done | error | cancelled */
+  status: text('status').default('running'),
+  /** 错误信息（若有） */
+  error: text('error').default(''),
+  /** 使用的模型 */
+  model: text('model').default(''),
+  createdAt: integer('created_at').notNull(),
+});
+
+export type AgentExecution = typeof agentExecutions.$inferSelect;
+
+/** Agent 执行步骤（单次 AgentRun 内的每一步 tool/LLM 调用） */
+export const agentSteps = sqliteTable('agent_step', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull(),
+  /** 步骤序号（运行时顺序） */
+  seq: integer('seq').notNull(),
+  /** 步骤类型：llm | tool | search | retrieve | thinking */
+  kind: text('kind').notNull(),
+  /** 步骤名称/摘要 */
+  title: text('title').default(''),
+  /** 输入内容（截断 ≤16KB） */
+  input: text('input').default(''),
+  /** 输出内容（截断 ≤16KB） */
+  output: text('output').default(''),
+  /** 耗时 ms */
+  durationMs: integer('duration_ms').default(0),
+  /** token 用量 */
+  tokens: integer('tokens').default(0),
+  /** 工具名称（kind=tool 时） */
+  toolName: text('tool_name').default(''),
+  /** 状态：ok | error */
+  status: text('status').default('ok'),
+  /** 错误信息 */
+  error: text('error').default(''),
+  createdAt: integer('created_at').notNull(),
+});
+
+export type AgentStep = typeof agentSteps.$inferSelect;
+
+/** Web 搜索缓存（对标 Cursor @Web / Mistral 联网搜索） */
+export const webSearchCache = sqliteTable('web_search_cache', {
+  id: text('id').primaryKey(),
+  /** 查询语句（规范化后作缓存 key） */
+  query: text('query').notNull(),
+  /** 来源引擎 */
+  engine: text('engine').default('duckduckgo'),
+  /** 结果 JSON */
+  results: text('results').default('[]'),
+  /** 命中次数 */
+  hitCount: integer('hit_count').default(1),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type WebSearchCache = typeof webSearchCache.$inferSelect;

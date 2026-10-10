@@ -391,6 +391,53 @@ CREATE TABLE IF NOT EXISTS user (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_email ON user(email);
 `);
 
+// =====================================================================
+// v0.2.1 新增：Agent 执行轨迹追踪 + Web 搜索缓存（对标 Cursor/Cline/OpenHands）
+// =====================================================================
+sqlite.exec(`CREATE TABLE IF NOT EXISTS agent_execution (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  input TEXT DEFAULT '',
+  output_summary TEXT DEFAULT '',
+  duration_ms INTEGER DEFAULT 0,
+  total_tokens INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'running',
+  error TEXT DEFAULT '',
+  model TEXT DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_exec_project ON agent_execution(project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_step (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT DEFAULT '',
+  input TEXT DEFAULT '',
+  output TEXT DEFAULT '',
+  duration_ms INTEGER DEFAULT 0,
+  tokens INTEGER DEFAULT 0,
+  tool_name TEXT DEFAULT '',
+  status TEXT DEFAULT 'ok',
+  error TEXT DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_step_run ON agent_step(run_id, seq);
+
+CREATE TABLE IF NOT EXISTS web_search_cache (
+  id TEXT PRIMARY KEY,
+  query TEXT NOT NULL,
+  engine TEXT DEFAULT 'duckduckgo',
+  results TEXT DEFAULT '[]',
+  hit_count INTEGER DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_web_search_query ON web_search_cache(query);
+`);
+
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */
 function ensureColumn(table: string, column: string, ddl: string) {
   const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
