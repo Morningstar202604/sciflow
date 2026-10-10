@@ -11,6 +11,7 @@ import type {
   Reference, ResearchDesignResult, ReviewComment, SimulatedReviewResult,
 } from '../types';
 import type { VersionSnapshot } from './VersionDiffModal';
+import { QUALITY_DIMS } from './qualityDims';
 import {
   Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Select, Spinner, Textarea, errMsg,
   downloadBase64, downloadText, jsonText,
@@ -37,16 +38,6 @@ const SEC = 'text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5';
 
 /** 质量分配色：≥good 默认色，good~mid 琥珀，<mid 红 */
 const scoreColor = (v: number, good = 70, mid = 50) => (v >= good ? undefined : v >= mid ? '#f59e0b' : '#f87171');
-
-const QUALITY_DIMS = [
-  { key: 'literature', label: '文献充分性' },
-  { key: 'logic', label: '逻辑一致性' },
-  { key: 'citation', label: '引用规范' },
-  { key: 'language', label: '语言质量' },
-  { key: 'novelty', label: '创新性' },
-  { key: 'figures', label: '图表' },
-  { key: 'format', label: '格式' },
-];
 
 export function WritingPage({ project, initialDocId }: { project: Project; initialDocId: string | null }) {
   /* ============ 文档与内容状态 ============ */
@@ -546,7 +537,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   };
 
   const importFromSimulatedReview = async () => {
-    if (!reviewResult || 'error' in reviewResult) return;
+    if (!reviewResult || !reviewResult.reviewers?.length) return;
     setImportingComments(true);
     setError('');
     try {

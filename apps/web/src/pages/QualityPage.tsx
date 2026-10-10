@@ -5,28 +5,19 @@ import type { Doc, Project, QualityReport } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Select, jsonText, errMsg } from '../components/ui';
 import { ToastContext } from '../App';
 import { HBar, LineChart, ProgressRing } from '../components/charts';
-
-const DIMS = [
-  { key: 'literature', label: '文献充分性' },
-  { key: 'logic', label: '逻辑一致性' },
-  { key: 'citation', label: '引用规范' },
-  { key: 'language', label: '语言质量' },
-  { key: 'novelty', label: '创新性' },
-  { key: 'figures', label: '图表' },
-  { key: 'format', label: '格式' },
-];
+import { QUALITY_DIMS } from './qualityDims';
 
 /** 自绘 SVG 雷达图（替代 ECharts，去掉 ~200KB 打包体积） */
 function Radar({ scores }: { scores: Record<string, number> }) {
   const W = 300, H = 250, CX = W / 2, CY = 112, R = 82;
-  const n = DIMS.length;
+  const n = QUALITY_DIMS.length;
   const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
   const pt = (i: number, v: number) => {
     const r = (v / 100) * R;
     return [CX + r * Math.cos(angle(i)), CY + r * Math.sin(angle(i))] as const;
   };
   const poly = (v: number) => Array.from({ length: n }, (_, i) => pt(i, v).join(',')).join(' ');
-  const value = (i: number) => Math.round(scores[DIMS[i].key] ?? 0);
+  const value = (i: number) => Math.round(scores[QUALITY_DIMS[i].key] ?? 0);
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="7 维质量评分雷达图">
@@ -35,13 +26,13 @@ function Radar({ scores }: { scores: Record<string, number> }) {
         <polygon key={lv} points={poly(lv)} fill="none" stroke="#e2e8f0" strokeWidth="1" className="dark:stroke-slate-700" />
       ))}
       {/* 轴线 */}
-      {DIMS.map((_, i) => (
+      {QUALITY_DIMS.map((_, i) => (
         <line key={i} x1={CX} y1={CY} x2={pt(i, 100)[0]} y2={pt(i, 100)[1]} stroke="#e2e8f0" strokeWidth="1" className="dark:stroke-slate-700" />
       ))}
       {/* 数据多边形 */}
       <polygon points={poly(100)} fill="rgba(13,148,136,0.22)" stroke="var(--brand-500)" strokeWidth="2" />
       {/* 顶点 + 数值标签 */}
-      {DIMS.map((d, i) => {
+      {QUALITY_DIMS.map((d, i) => {
         const [x, y] = pt(i, value(i));
         const [lx, ly] = pt(i, 118);
         return (
@@ -170,7 +161,7 @@ export function QualityPage({ project }: { project: Project }) {
             <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
               <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">最需改进的维度</div>
               <HBar
-                items={[...DIMS]
+                items={[...QUALITY_DIMS]
                   .map((d) => ({ label: d.label, value: Math.round(current.scoresObj[d.key] ?? 0) }))
                   .sort((a, b) => a.value - b.value)
                   .slice(0, 3)
