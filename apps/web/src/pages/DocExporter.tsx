@@ -1,4 +1,3 @@
-// @ts-nocheck — missing type declarations for rehype-stringify / Buffer
 import { unified, type Plugin } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
@@ -27,7 +26,7 @@ import type { Content, Root, Text, PhrasingContent } from "mdast";
 
 /** Escape special LaTeX characters in plain-text runs. */
 function esc(text: string): string {
-  return text.replace(/([%_#{}&^~\\])/g, (m, c) => {
+  return text.replace(/([%_#{}&^~\\])/g, (_, c: string) => {
     if (c === "^") return "\\^{}";
     if (c === "~") return "\\textasciitilde{}";
     if (c === "\\") return "\\textbackslash{}";
@@ -44,8 +43,7 @@ function esc(text: string): string {
 /**
  * Configure a Remark → HTML pipeline. We lift math nodes as raw HTML so the
  * client can render them with KaTeX or MathJax.
- */
-function buildHtmlPipeline(): ReturnType<typeof unified> {
+ */function buildHtmlPipeline() {
   const mathToHtml: Plugin<[], Root> = () => (tree) => {
     const walk = (node: Content | Root) => {
       if (node.type === "math") {

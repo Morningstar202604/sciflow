@@ -13,9 +13,6 @@ import { McpToolList } from './settings/McpToolList';
 const ModelIcon = ({ ok }: { ok?: boolean }) =>
   ok === undefined ? null : ok ? <CheckCircle2 size={16} className="text-emerald-500" /> : <XCircle size={16} className="text-rose-500" />;
 
-// @ts-ignore — reserved for future usage
-function _fmtInt(v: number) { return Math.round(v).toLocaleString('en-US'); }
-
 /* ------------------------------------------------------------------ */
 /*  Intent Editor (collapsible)                                        */
 /* ------------------------------------------------------------------ */
