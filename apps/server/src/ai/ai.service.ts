@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { db } from '../db/database';
 import { appSettings } from '../db/schema';
@@ -162,11 +162,15 @@ export class AiService extends AiTransportService {
       [{ role: 'user', content: prompts.REVIEW_PAPER(title, content) }],
       { temperature: 0.3, model: 'fast', context: 'reviewPaper', jsonSchema: reviewSchema },
     );
-    let parsed: { scores?: Record<string, number>; feedback?: string } = {};
+    let parsed: { scores?: Record<string, number>; feedback?: string };
     try {
       parsed = this.jsonOf<{ scores: Record<string, number>; feedback: string }>(raw);
-    } catch {
-      /* 保留空对象兜底 */
+    } catch (e: any) {
+      // 解析失败 ≠ 论文 0 分：显式失败，避免把格式漂移当成质量不达标而白烧一轮回炉
+      throw new HttpException(
+        `评审输出无法解析为 JSON（模型返回被截断或格式漂移）：${String(e?.message || e).slice(0, 160)}`,
+        HttpStatus.BAD_GATEWAY,
+      );
     }
     const dims = ['literature', 'logic', 'citation', 'language', 'novelty', 'figures', 'format'] as const;
     type ScoreDims = (typeof dims)[number];

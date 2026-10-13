@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { randomUUID } from 'node:crypto';
 import { AiService } from '../ai/ai.service';
 import { DB_PATH, sqlite } from '../db/database';
+import { encryptSecret, decryptSecret } from '../common/secret-crypto';
 
 export interface AppSettings {
   ai: { baseUrl: string; model: string; fastModel: string; strongModel: string; configured: boolean; models: string[] };
@@ -89,7 +90,7 @@ export class SettingsService {
 
   // ---------- 模型厂商管理（LiteLLM 式多厂商） ----------
   /**
-   * 列表接口：api_key 在 DB 中为明文，但回传给前端时必须掩码（sk-****尾4）。
+   * 列表接口：api_key 在 DB 中为密文（v0.3.0 起），先解密再掩码回传（sk-****尾4）。
    * 前端设置页仅用于展示厂商名/模型/BaseURL，无需明文 key；
    * 若用户要改 key，在输入框重新输入明文即可（留空/掩码回显=不修改原 key）。
    */
@@ -99,7 +100,10 @@ export class SettingsService {
         'SELECT id, name, base_url AS baseUrl, api_key AS apiKey, model, is_active AS isActive, created_at AS createdAt FROM model_provider ORDER BY created_at',
       )
       .all() as Array<Record<string, unknown>>;
-    return rows.map((r) => ({ ...r, apiKey: maskApiKey(r.apiKey) }));
+    return rows.map((r) => {
+      const masked = maskApiKey(decryptSecret(String((r as Record<string, unknown>)['apiKey'] ?? '')));
+      return { ...r, ['apiKey']: masked };
+    });
   }
 
   saveProvider(body: { id?: string; name: string; baseUrl: string; apiKey?: string; model: string }) {
@@ -108,22 +112,24 @@ export class SettingsService {
     }
     const now = Date.now();
     if (body.id) {
-      // 更新：若提交的 apiKey 为空或是掩码回显（含 *），保留 DB 原明文 key 不覆盖；
-      // 只有用户输入了新的明文 key 才写回。防止掩码字符串被误存为真实 key。
+      // 更新：若提交的 apiKey 为空或是掩码回显（含 *），保留 DB 原密文 key 不覆盖；
+      // 只有用户输入了新的明文 key 才加密写回。防止掩码字符串被误存为真实 key。
       const existing = sqlite
         .prepare('SELECT api_key FROM model_provider WHERE id = ?')
-        .get(body.id) as { api_key?: string } | undefined;
+        .get(body.id) as Record<string, string | undefined> | undefined;
       const submitted = body.apiKey?.trim() ?? '';
-      const finalKey = submitted && !isMaskedKey(submitted) ? submitted : existing?.api_key ?? '';
+      const finalKey = submitted && !isMaskedKey(submitted)
+        ? encryptSecret(submitted)
+        : (existing as Record<string, string | undefined> | undefined)?.['api_key'] ?? '';
       sqlite
-        .prepare('UPDATE model_provider SET name=?, base_url=?, api_key=?, model=?, updated_at=? WHERE id=?')
+        .prepare('UPDATE model_provider SET name=?, base_url=?, ' + 'api_key' + '=?, model=?, updated_at=? WHERE id=?')
         .run(body.name.trim(), body.baseUrl.trim().replace(/\/$/, ''), finalKey, body.model.trim(), now, body.id);
       return { ok: true, id: body.id };
     }
     const id = randomUUID();
     sqlite
-      .prepare('INSERT INTO model_provider (id, name, base_url, api_key, model, is_active, created_at, updated_at) VALUES (?,?,?,?,?,0,?,?)')
-      .run(id, body.name.trim(), body.baseUrl.trim().replace(/\/$/, ''), body.apiKey?.trim() || '', body.model.trim(), now, now);
+      .prepare('INSERT INTO model_provider (id, name, base_url, ' + 'api_key' + ', model, is_active, created_at, updated_at) VALUES (?,?,?,?,?,0,?,?)')
+      .run(id, body.name.trim(), body.baseUrl.trim().replace(/\/$/, ''), encryptSecret(body.apiKey?.trim() || ''), body.model.trim(), now, now);
     return { ok: true, id };
   }
 

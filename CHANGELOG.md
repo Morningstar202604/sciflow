@@ -2,6 +2,55 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.3.0] - 2026-10
+
+方向修正：还原被误删的完整功能集，做可交付可打包的完整智能体。
+
+### Added
+- **还原桌面端（`apps/desktop`，Electron）**：恢复被误删的 Electron 主进程 + preload + server-manager + auto-updater + electron-builder 配置 + 图标资源，`pnpm --filter @sciflow/desktop build` 可出 Windows NSIS 安装包。
+- **还原 6 个后端模块 + 4 个前端页面**：Agent 轨迹追踪（`agent/`）、实验沙箱（`experiments/`）、审稿判断（`judgment/`）、MCP 工具（`mcp/`）、记忆中心（`memory/`）、Web 搜索（`websearch/`）、投稿流程（`research/submission`）及对应前端 ExperimentsPage / MemoryPage / SubmissionPage / McpToolList。
+- **还原品牌体系与文档**：`docs/brand/` 全套 Logo 资源 + `docs/BRAND.md` + `docs/website.html` + `docs/sciflow-code-tree.html` + `scripts/full_regression.py` + `scripts/generate-icons.mjs`。
+- **供应商 API Key 落库加密（`common/secret-crypto.ts`）**：AES-256-GCM，主密钥来自 `SCIFLOW_SECRET` 或 DB 同目录 `.sciflow.key`；历史明文启动时一次性就地加密；备份/复制 sciflow.db 不再等于泄露凭据。
+- **对话跨会话摘要注入（`chat-session.service.ts`）**：会话结束 LLM 摘要落库，新会话自动注入最近 5 轮（SSE `onComplete` 回调驱动，不阻塞流）。
+- **CLI 入口（`cli.ts`）**：headless 批处理，`health / project list / pipeline run|status / doc export / chat sessions` 子命令。
+- **文档版本快照（对标 git commit）**：`POST /api/documents/:id/snapshot` 手动快照 + `PATCH .../commit-message` 提交说明 + 流水线起草前自动快照，自动流水线永不静默吃掉用户正文。
+
+### Fixed
+- **sqlite-vec 启动报错（真修）**：`require.resolve('sqlite-vec/better-sqlite3')` 因包 exports 只允许 `.` 子路径必然抛 `ERR_PACKAGE_PATH_NOT_EXPORTED`；改用官方 `getLoadablePath()` 按平台解析预编译扩展（已验证 Windows `vec_version()=v0.1.9`）。
+- **pnpm-workspace.yaml 占位符**：删除 `set this to true or false` 字面占位；`node-llama-cpp: false` 改为 `true`（此前禁止其 build scripts 导致原生二进制不编译）。
+- **CI filter 名**：`pnpm --filter server|web` 改为 `--filter @sciflow/server|@sciflow/web`（与包名一致）。
+- **版本号对齐**：server / web / desktop / 根 package.json 统一 `0.3.0`；CLI_VERSION 同步。
+- **启动安全闸**：非回环绑定（`HOST=0.0.0.0`）必须 `AUTH_MODE=jwt`，否则拒绝启动（容器内零鉴权暴露面）。
+- **评审 JSON 解析失败显式报错**：不再把格式漂移静默当成 0 分白烧一轮回炉。
+- **断点续跑防覆盖**：重启续跑若文档在中断期间被人工编辑过，跳过自动覆盖式续跑并提示。
+- **质量门最高分选优**：多轮回炉后若末轮非最高分，采用最高分轮次正文与评分落库。
+
+## [0.2.2] - 2026-10
+
+竞品对齐增强——Agent 轨迹追踪 + Web 搜索工具 + 对话摘要注入 + CLI 入口 + 版本快照增强。
+
+### Added
+- **Agent 执行轨迹追踪（`AgentTraceService`）**：统一 trace 模型记录每次 Agent 执行的完整输入/输出、步骤链、Token 用量与时耗；SSE 流输出模式回填，HTTP/JSON 模式直接记录；步骤级（Step）详细输入/输出可单条展开。
+- **Agent 轨迹后端 API（`agent/` 模块）**：统一 trace 模型记录每次 Agent 执行的完整输入/输出、步骤链、Token 用量与时耗；SSE 流输出模式回填，HTTP/JSON 模式直接记录；步骤级（Step）详细输入/输出可单条展开。前端轨迹面板（对标 Cursor/Cline/OpenHands）尚未实现，待补。
+- **Web 搜索工具（`WebSearchService`）**：DuckDuckGo Instant Answer API 无 key 即时搜索 + HTML 回退抓取描述 + SQLite 缓存（TTL 1 小时）。
+- **对话跨会话摘要注入（`ChatSessionService`）**：会话结束时异步 LLM 总结并存库，新会话启动时注入最近 5 轮摘要，消除重启应用后的失忆问题。
+- **CLI 入口模式（`cli.ts`）**：`NestFactory.createApplicationContext` 无 HTTP 启动，复用全部 DI 容器，health / project list / pipeline run / doc export / chat sessions 子命令。
+- **文档版本快照增强**：手动快照（幂等）+ commit message 持久化。
+- **SSE 流完成回调（`sse.helper.ts` onComplete）**：流解析层汇聚 fullText 与 totalTokens，在自然结束/abort/错误三个退出路径均触发回调。
+
+### Changed
+- `PipelineService` 调用 `AgentTraceService`（补齐执行链路的可观测节点）。
+- `documents.service.parseVersions()` 返回类型扩展 `commitMessage?` 字段。
+
+### Fixed
+- 修复 `chat.controller.ts` 历史消息类型不匹配（`historyMsgs` 显式 `ChatMessage[]` 注解）。
+- 修复 `documents.service.ts` 版本创建时 `content` 允许空串。
+- 修复 `cli.ts` 子进程 stdout 类型歧义。
+- 修复 `AgentTracePage.tsx` 未使用图标导入。
+- **注**：AgentTracePage.tsx 实际未在代码库中，此条为历史 CHANGELOG 超前描述，保留仅供追溯。
+- 修复 `database.ts` DDL 中误用 JS 风格 `//` 注释（应为 `--`，SQLite 不认），此 bug 导致服务启动报 `near "/": syntax error`。
+- **[0.2.3 补齐]** AgentTrace keyset 分页 + Badge variant 重构 + CLI `pipeline status` 子命令 + 4 个 spec（38 测试全绿）+ tsconfig 排除 spec + 版本快照 UI 内联编辑 + 对话摘要注入 UI 透明化 + `/web` slash 命令集成。
+
 ## [0.2.0] - 2026-10
 
 企业级封装第一轮：桌面端 + 品牌体系 + 企业认证 + 运维工具链。

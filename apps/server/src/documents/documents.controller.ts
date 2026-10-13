@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { DocumentsService } from './documents.service';
 
 @Controller('documents')
@@ -29,6 +29,19 @@ export class DocumentsController {
   @Patch(':id/version-name')
   setVersionName(@Param('id') id: string, @Body() body: { version: number; name: string }) {
     return this.documents.setVersionName(id, Number(body.version), body.name);
+  }
+
+  /** 为某个历史版本写入/覆盖 commit message（对标 git commit message；version 不存在返回 400） */
+  @Patch(':id/versions/:version/commit-message')
+  setVersionCommitMessage(@Param('id') id: string, @Param('version') version: number, @Body() body: { message: string }) {
+    return this.documents.setVersionCommitMessage(id, Number(version), body.message || '');
+  }
+
+  /** 创建手动版本快照（对标 git commit）：显式点保存当前内容快照 + commit message（幂等） */
+  @Post(':id/snapshot')
+  @HttpCode(HttpStatus.OK)
+  createSnapshot(@Param('id') id: string, @Body() body: { commitMessage?: string }) {
+    return { versions: this.documents.createSnapshot(id, body.commitMessage) };
   }
 
   @Delete(':id')

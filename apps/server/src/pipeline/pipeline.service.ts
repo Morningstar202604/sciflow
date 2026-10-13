@@ -106,6 +106,13 @@ export class PipelineService {
           if (s.key === 'quality-gate') { s.status = 'running'; s.output = '服务重启后续跑（checkpoint 恢复）'; resumed = true; }
           else if (resumed) s.status = 'pending';
         }
+        // 续跑会整篇重起草并覆盖正文：若文档在任务之后被人工编辑过，绝不自动覆盖，改为等待用户确认
+        const doc = db.select().from(documents).where(eq(documents.id, t.documentId)).get();
+        if (doc?.updatedAt && t.updatedAt && doc.updatedAt > t.updatedAt) {
+          this.setStatus(t.id, 'interrupted', '', '服务重启中断：文档在中断期间被编辑过，为避免覆盖你的修改未自动续跑，请重新发起流水线或在页面确认续跑');
+          this.logger.warn(`[checkpoint] 任务 ${t.id} 文档已被人工更新（doc ${new Date(doc.updatedAt).toISOString()} > task ${new Date(t.updatedAt).toISOString()}），跳过自动覆盖式续跑`);
+          continue;
+        }
         db.update(pipelineTasks).set({ steps: JSON.stringify(steps), status: 'running', currentStep: 'quality-gate', lastError: '', updatedAt: Date.now() }).where(eq(pipelineTasks.id, t.id)).run();
         this.logger.log(`[checkpoint] 任务 ${t.id} 断点续跑（从 drafting 恢复）`);
         void this.runPostConfirmation(t.id, t.documentId);
@@ -222,7 +229,7 @@ export class PipelineService {
           let retry = 0;
           const maxRetry = MAX_RETRY;
           let report: QualityReport | undefined;
-          let best: { score: number; content: string } = { score: -1, content: '' };
+          let best: { score: number; content: string; feedback: string } = { score: -1, content: '', feedback: '' };
 
           while (true) {
             await self.advance(taskId, 'quality-gate', 'running', retry > 0 ? `第 ${retry} 次回炉起草` : undefined);
@@ -230,6 +237,7 @@ export class PipelineService {
             const procedural = self.proceduralMemory(task.projectId);
             const styleHint = procedural ? `\n写作风格参考（来自记忆库）：${procedural}` : '';
             const refPool = self.refsForDraft(task.projectId);
+            if (retry === 0) self.snapshotBeforeOverwrite(ctx.documentId!, '流水线起草前自动快照');
             const draftContent = await self.runDrafting(doc.title, outline, self.referencesForPrompt(task.projectId, refPool), styleHint, reflexion);
             let prevFigures = '';
             if (retry > 0) { const prev = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get(); const m = (prev?.content || '').match(/## 图表[\s\S]*?$/); if (m) prevFigures = `\n\n---\n\n${m[0]}`; }
@@ -248,7 +256,7 @@ export class PipelineService {
             const reviewResult = await self.ai.reviewPaper(doc.title, latestDoc.content ?? '');
             report = { totalScore: reviewResult.totalScore, feedback: reviewResult.feedback };
             const scored = Number(report.totalScore);
-            if (scored > best.score) best = { score: scored, content: latestDoc.content ?? '' };
+            if (scored > best.score) best = { score: scored, content: latestDoc.content ?? '', feedback: report.feedback };
             await self.advance(taskId, 'quality-gate', 'scored', `总分 ${report.totalScore}/100`);
             if (report.totalScore < QUALITY_THRESHOLD && retry < maxRetry) {
               retry += 1;
@@ -260,6 +268,12 @@ export class PipelineService {
               continue;
             }
             break;
+          }
+          // 末轮 ≠ 最好轮：把最高分轮次的正文与评分落库，后续润色与交付基于它
+          if (best.score >= 0 && best.content && (report?.totalScore ?? 0) < best.score) {
+            db.update(documents).set({ content: best.content, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
+            self.logger.log(`[质量门] 采用最高分轮次 ${best.score} 分（末轮 ${report?.totalScore ?? '-'} 分）`);
+            report = { totalScore: best.score, feedback: best.feedback };
           }
           return { report, researchNotice };
         },
@@ -477,6 +491,18 @@ export class PipelineService {
   private proceduralMemory(projectId: string): string {
     const rows = db.select().from(memoryLogs).where(and(eq(memoryLogs.type, 'procedural'), eq(memoryLogs.projectId, projectId))).orderBy(memoryLogs.createdAt).all();
     return rows.slice(-1).map((r) => r.content).join('');
+  }
+
+  /** 覆盖式写入前保存快照：自动流水线永不静默吃掉用户正文（版本历史上限 20） */
+  private snapshotBeforeOverwrite(docId: string, reason: string): void {
+    const doc = db.select().from(documents).where(eq(documents.id, docId)).get();
+    const body = doc?.content ?? '';
+    if (!body.trim()) return;
+    const versions = parseJson<{ version: number; content: string; updatedAt: number; commitMessage?: string }[]>(doc?.versions ?? '[]', []);
+    const latest = versions[versions.length - 1];
+    if (latest && latest.content === body) return;
+    versions.push({ version: doc?.version ?? 1, content: body, updatedAt: Date.now(), commitMessage: `${reason} · ${new Date().toLocaleString('zh-CN')}` });
+    db.update(documents).set({ versions: JSON.stringify(versions.slice(-20)), updatedAt: doc?.updatedAt ?? Date.now() }).where(eq(documents.id, docId)).run();
   }
 
   /** 分章起草：遍历大纲各节，逐节调用 ai.draftSection 生成内容 */

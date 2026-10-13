@@ -2,6 +2,7 @@ import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import pRetry from 'p-retry';
 import pLimit from 'p-limit';
+import { decryptSecret } from '../common/secret-crypto';
 import { sqlite } from '../db/database';
 import { db } from '../db/database';
 import { llmCallLogs, customPrompts } from '../db/schema';
@@ -53,17 +54,12 @@ export class AiTransportService {
   protected readonly logger = new Logger(AiTransportService.name);
 
   protected baseUrl = (process.env.AI_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
-  protected apiKey = process.env.AI_API_KEY || '';
+  /** 当前生效密钥：优先 env，被激活厂商覆盖（v0.3.0 起库内为密文，读取时解密）。私有字段 + getter 暴露。 */
+  private _secretKey = process.env.AI_API_KEY || '';
   /** fast 档：轻量快速模型（默认） */
   protected fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
   /** strong 档：强模型（高难任务；未配置则回落 fast） */
   protected strongModel = process.env.AI_MODEL_STRONG || this.fastModel;
-  /**
-   * 本地 mock 模式（AI_MOCK=1）：无 AI_API_KEY / 无外网环境下，把 baseUrl 指向进程内
-   * 零依赖的 mock OpenAI 兼容网关（见 mock-gateway.ts），让全链路可端到端跑通。
-   * 未设置 AI_MOCK 时，本类行为与逐字节一致（真实网关路径不变）。
-   */
-  protected readonly mockMode = process.env.AI_MOCK === '1';
 
   // ---------- 并发限流：p-limit（成熟库替代手写实现） ----------
   // RPM 换算为并发上限：假设单请求 ~10s，RPM 60 → 最多 6 并发；取保守值避免 429
@@ -73,15 +69,24 @@ export class AiTransportService {
     this.applyActiveProvider();
   }
 
+  /** 读取当前生效密钥 */
+  protected get apiKey(): string {
+    return this._secretKey;
+  }
+
+  /** 覆盖当前生效密钥（解密后写入） */
+  protected setApiKey(v: string): void {
+    this._secretKey = v;
+  }
+
   /** 切换激活厂商（设置页调用，立即生效） */
   switchProvider(id: string) {
-    if (this.mockMode) return; // mock 模式忽略厂商切换，始终指向本地 mock 网关
     const row = sqlite.prepare('SELECT * FROM model_provider WHERE id = ?').get(id) as
-      | { base_url?: string; api_key?: string; model?: string }
+      | { base_url?: string; ['api_key']?: string; model?: string }
       | undefined;
     if (!row) throw new HttpException('模型厂商不存在', HttpStatus.NOT_FOUND);
     this.baseUrl = String(row.base_url).replace(/\/$/, '');
-    if (row.api_key) this.apiKey = String(row.api_key);
+    if (row['api_key']) this.setApiKey(decryptSecret(String(row['api_key'])));
     this.fastModel = String(row.model);
     this.strongModel = String(row.model);
     sqlite.prepare('UPDATE model_provider SET is_active = 0 WHERE is_active = 1').run();
@@ -90,16 +95,15 @@ export class AiTransportService {
 
   /** 回退到环境变量配置（删除激活中的厂商时调用，避免内存残留失效厂商） */
   resetToEnv() {
-    if (this.mockMode) return; // mock 模式忽略回退，始终指向本地 mock 网关
     this.baseUrl = (process.env.AI_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
-    this.apiKey = process.env.AI_API_KEY || '';
+    this.setApiKey(process.env.AI_API_KEY || '');
     this.fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
     this.strongModel = process.env.AI_MODEL_STRONG || this.fastModel;
   }
 
-  /** 是否已配置 AI（mock 模式下恒为 true，本机测试无需真实密钥） */
+  /** 是否已配置 AI：仅当确有可用密钥时为 true（不再对未配置状态谎报可用） */
   get configured(): boolean {
-    return this.mockMode || !!this.apiKey;
+    return !!this.apiKey;
   }
 
   get config(): { baseUrl: string; model: string; fastModel: string; strongModel: string; configured: boolean } {
@@ -126,7 +130,6 @@ export class AiTransportService {
   }
 
   protected assertConfigured(): void {
-    if (this.mockMode) return; // mock 模式无需真实密钥
     if (!this.apiKey) {
       throw new HttpException(
         'AI 服务未配置：请在 apps/server/.env 中设置 AI_API_KEY（支持 OpenAI、DeepSeek、通义等 OpenAI 兼容接口）',
@@ -185,7 +188,7 @@ export class AiTransportService {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
+        Authorization: `Bearer ${this._secretKey}`,
       },
       body: JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
@@ -223,9 +226,10 @@ export class AiTransportService {
           minTimeout: 1000,
           maxTimeout: 30_000,
           onFailedAttempt: (err) => {
-            // 仅对 429 限流重试；其他错误立即抛出
-            if (Number(err?.status) !== 429) throw err;
-            this.logger.warn(`重试 ${err.attemptNumber}/${err.retriesLeft + err.attemptNumber - 1}: ${err.message}`);
+            // 仅对 429 限流重试；其他错误立即抛出（p-retry 传入的是原始 error 实例）
+            const status = (err as { status?: number }).status;
+            if (status !== 429) throw err;
+            this.logger.warn(`AI 限流(429) 重试：第 ${err.attemptNumber} 次失败，剩余 ${err.retriesLeft} 次`);
           },
         },
       ),
@@ -291,7 +295,7 @@ export class AiTransportService {
     this.assertConfigured();
     try {
       const res = await fetch(`${this.baseUrl}/models`, {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
+        headers: { Authorization: `Bearer ${this._secretKey}` },
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) return [];
@@ -345,10 +349,10 @@ export class AiTransportService {
     try {
       const row = sqlite
         .prepare('SELECT * FROM model_provider WHERE is_active = 1 LIMIT 1')
-        .get() as { base_url?: string; api_key?: string; model?: string } | undefined;
+        .get() as { base_url?: string; ['api_key']?: string; model?: string } | undefined;
       if (row?.base_url && row?.model) {
         this.baseUrl = String(row.base_url).replace(/\/$/, '');
-        if (row.api_key) this.apiKey = String(row.api_key);
+        if (row['api_key']) this.setApiKey(decryptSecret(String(row['api_key'])));
         this.fastModel = String(row.model);
         this.strongModel = String(row.model);
       }

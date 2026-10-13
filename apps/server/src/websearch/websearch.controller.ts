@@ -7,7 +7,7 @@ import { WebSearchService } from './websearch.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 
-@Controller('api/web')
+@Controller('web')
 @UseGuards(JwtAuthGuard)
 export class WebSearchController {
   constructor(private readonly ws: WebSearchService) {}

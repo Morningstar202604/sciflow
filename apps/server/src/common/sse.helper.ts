@@ -14,11 +14,15 @@ export interface SseStreamOptions {
   forwardReasoning: boolean;
   /** 客户端断连信号 */
   signal?: AbortSignal;
+  /** 流完整结束（自然中止或 [DONE]）时的回调：传入累积的 assistant 全文 + 总 usage tokens */
+  onComplete?: (fullText: string, totalTokens: number) => void;
 }
 
 export interface SseStreamResult {
   /** 异常（客户端断连除外） */
   error?: string;
+  /** 累积的 assistant 正文全文（完整生成时；断连时为截至断开时已生成部分） */
+  fullText?: string;
 }
 
 /** 向客户端写一个 SSE 事件 */
@@ -34,15 +38,20 @@ export function writeSseEvent(res: Response, event: string, data: unknown): void
  *  - [DONE] → 自动终止
  */
 export async function forwardOpenAiSse(res: Response, opts: SseStreamOptions): Promise<SseStreamResult> {
-  const { stream, forwardReasoning, signal } = opts;
+  const { stream, forwardReasoning, signal, onComplete } = opts;
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let naturalEnd = false;
+  let fullText = '';
+  let totalTokens = 0;
 
   try {
     while (true) {
-      if (signal?.aborted) return {};
+      if (signal?.aborted) {
+        onComplete?.(fullText, totalTokens);
+        return { fullText };
+      }
       const { done, value } = await reader.read();
       if (done) { naturalEnd = true; break; }
       buffer += decoder.decode(value, { stream: true });
@@ -58,6 +67,7 @@ export async function forwardOpenAiSse(res: Response, opts: SseStreamOptions): P
           const choice = (json?.choices as Array<{ delta?: Record<string, unknown> }>)?.[0]?.delta ?? {};
           const delta = choice.content;
           const reasoning = forwardReasoning ? choice.reasoning_content || choice.thinking : undefined;
+          if (typeof delta === 'string') fullText += delta;
           const chunk: Record<string, string> = {};
           if (typeof delta === 'string') chunk.delta = delta;
           if (typeof reasoning === 'string') chunk.reasoning = reasoning;
@@ -65,12 +75,13 @@ export async function forwardOpenAiSse(res: Response, opts: SseStreamOptions): P
           // 收尾 usage 块
           const usage = json?.usage as Record<string, number> | undefined;
           if (usage && (usage.prompt_tokens != null || usage.total_tokens != null)) {
+            totalTokens = Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0);
             res.write(
               `data: ${JSON.stringify({
                 usage: {
                   prompt_tokens: Number(usage.prompt_tokens) || 0,
                   completion_tokens: Number(usage.completion_tokens) || 0,
-                  total_tokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0),
+                  total_tokens: totalTokens,
                 },
               })}\n\n`,
             );
@@ -82,11 +93,15 @@ export async function forwardOpenAiSse(res: Response, opts: SseStreamOptions): P
       if (naturalEnd) break;
     }
     res.write('data: [DONE]\n\n');
+    onComplete?.(fullText, totalTokens);
+    return { fullText };
   } catch (e: any) {
-    if (signal?.aborted) return {};
-    return { error: e?.message || String(e) };
+    if (signal?.aborted) {
+      onComplete?.(fullText, totalTokens);
+      return { fullText };
+    }
+    return { error: e?.message || String(e), fullText };
   } finally {
     await reader.cancel().catch(() => undefined);
   }
-  return {};
 }

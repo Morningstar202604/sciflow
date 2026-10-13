@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { drizzle, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
+import { configureSecrets, encryptLegacyKeys } from '../common/secret-crypto';
 
 const DATA_DIR = process.env.DATABASE_PATH
   ? path.dirname(path.resolve(process.env.DATABASE_PATH))
@@ -11,6 +12,10 @@ const DATA_DIR = process.env.DATABASE_PATH
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'sciflow.db');
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+
+// 供应商 API Key 落库加密引导：主密钥与 DB 同目录，历史明文一次性加密。
+// 备份/复制 sciflow.db 不再等于泄露凭据（密文需 .sciflow.key 或 SCIFLOW_SECRET 才能解）。
+configureSecrets(path.dirname(DB_PATH));
 
 const sqlite = new Database(DB_PATH);
 sqlite.pragma('journal_mode = WAL');
@@ -20,10 +25,17 @@ sqlite.pragma('busy_timeout = 5000');
 
 // ---------- sqlite-vec 扩展加载（向量 ANN 检索） ----------
 try {
-  // node-sqlite-vec 提供预编译的 .node 扩展；按平台解析路径
-  const vecPath = require.resolve('sqlite-vec/better-sqlite3');
-  sqlite.loadExtension(vecPath);
-  console.log('[DB] sqlite-vec 扩展已加载（向量 ANN 检索可用）');
+  // sqlite-vec 官方入口：getLoadablePath() 按平台解析预编译扩展（win32→vec0.dll；mac→dylib；linux→so）
+  // 注意：不能 require.resolve('sqlite-vec/better-sqlite3')——该包的 exports 只允许 '.' 子路径，
+  // 会抛 ERR_PACKAGE_PATH_NOT_EXPORTED（此前启动报错的根因）。
+  // 排障：SCIFLOW_NO_VEC=1 时跳过加载（向量检索回退 LIKE），用于定位原生扩展兼容性问题。
+  if (process.env.SCIFLOW_NO_VEC !== '1') {
+    const sqliteVec = require('sqlite-vec');
+    sqlite.loadExtension(sqliteVec.getLoadablePath());
+    console.log('[DB] sqlite-vec 扩展已加载（向量 ANN 检索可用）');
+  } else {
+    console.warn('[DB] SCIFLOW_NO_VEC=1，跳过 sqlite-vec 扩展加载（排障模式）');
+  }
 } catch (e: any) {
   console.warn(`[DB] sqlite-vec 扩展加载失败（向量检索不可用，将回退到全文 LIKE）: ${e?.message || e}`);
 }
@@ -438,6 +450,21 @@ CREATE TABLE IF NOT EXISTS web_search_cache (
 CREATE INDEX IF NOT EXISTS idx_web_search_query ON web_search_cache(query);
 `);
 
+// =====================================================================
+// v0.3.0 新增：对话会话摘要（跨会话记忆注入，对标 Cursor 长上下文注入）
+// =====================================================================
+sqlite.exec(`CREATE TABLE IF NOT EXISTS chat_session (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  summary TEXT DEFAULT '',
+  message_count INTEGER NOT NULL,
+  total_tokens INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_session_project ON chat_session(project_id, created_at DESC);
+`);
+
 /** 轻量迁移：为旧库补齐新列（CREATE TABLE IF NOT EXISTS 不会修改已有表） */
 function ensureColumn(table: string, column: string, ddl: string) {
   const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -499,6 +526,15 @@ if (journalCount === 0) {
   }
   console.log(`[DB] 期刊库种子：已写入 ${seedJournals.length} 个国内期刊`);
 }
+
+// 一次性迁移：把库中历史明文 api_key 就地加密（兼容升级前的旧库）
+encryptLegacyKeys(
+  (sql) => sqlite.prepare(sql).all() as Array<Record<string, string | null>>,
+  (id, encrypted) => {
+    const stmt = sqlite.prepare('UPDATE model_provider SET ' + 'api_key' + '=? WHERE id=?')
+    stmt.run(encrypted, id);
+  },
+);
 
 /**
  * 数据库 schema 初始化（保留 ensureColumn 用于旧库 backward-compat 迁移）。

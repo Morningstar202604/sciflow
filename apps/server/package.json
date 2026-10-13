@@ -1,6 +1,6 @@
 {
   "name": "@sciflow/server",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "node --watch dist/main.js",
@@ -22,11 +22,13 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/throttler": "^6.4.0",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^11.9.0",
+    "better-sqlite3": "~11.9.0",
     "docx": "^9.7.2",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.3",
     "node-llama-cpp": "^3.12.0",
+    "p-limit": "^6.0.0",
+    "p-retry": "^6.2.0",
     "pdf-parse": "^2.4.5",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
@@ -38,8 +40,6 @@
     "@types/express": "^5.0.6",
     "@types/node": "^22.10.0",
     "drizzle-kit": "^0.31.11",
-    "p-limit": "^6.0.0",
-    "p-retry": "^6.2.0",
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   }

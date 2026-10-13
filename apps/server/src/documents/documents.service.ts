@@ -52,15 +52,15 @@ export class DocumentsService {
     return row;
   }
 
-  /** 更新文档；内容变化时自动保存历史版本 */
-  update(id: string, patch: { title?: string; content?: string; outline?: string; status?: string }) {
+  /** 更新文档；内容变化时自动保存历史版本（commitMessage 可选，用于手动触发时注入提交信息） */
+  update(id: string, patch: { title?: string; content?: string; outline?: string; status?: string; commitMessage?: string }) {
     const existing = this.get(id);
     const baseVersion = existing.version ?? 1;
-    let versions = parseJson<{ version: number; content: string; updatedAt: number }[]>(existing.versions, []);
+    let versions = parseJson<{ version: number; content: string; updatedAt: number; name?: string; commitMessage?: string }[]>(existing.versions, []);
     if (patch.content !== undefined && patch.content !== existing.content && existing.content) {
       versions = [
         ...versions,
-        { version: baseVersion, content: existing.content, updatedAt: existing.updatedAt ?? Date.now() },
+        { version: baseVersion, content: existing.content, updatedAt: existing.updatedAt ?? Date.now(), commitMessage: patch.commitMessage },
       ].slice(-MAX_VERSIONS);
     }
     const row = {
@@ -82,9 +82,9 @@ export class DocumentsService {
     return { ok: true };
   }
 
-  /** versions JSON 历史元素：本轮起可选携带 name（纯 JSON 内嵌，无需 ensureColumn/列迁移） */
-  private parseVersions(existing: { versions: string | null }): { version: number; content: string; updatedAt: number; name?: string }[] {
-    return parseJson<{ version: number; content: string; updatedAt: number; name?: string }[]>(existing.versions, []);
+  /** versions JSON 历史元素：支持 name + commitMessage（纯 JSON 内嵌，无需额外 DDL） */
+  private parseVersions(existing: { versions: string | null }): { version: number; content: string; updatedAt: number; name?: string; commitMessage?: string }[] {
+    return parseJson<{ version: number; content: string; updatedAt: number; name?: string; commitMessage?: string }[]>(existing.versions, []);
   }
 
   /**
@@ -108,6 +108,39 @@ export class DocumentsService {
       );
     }
     target.name = trimmed;
+    db.update(documents).set({ versions: JSON.stringify(versions), updatedAt: Date.now() }).where(eq(documents.id, id)).run();
+    return versions;
+  }
+
+  /**
+   * 创建手动版本快照（对标 git commit）：显式点保存某一刻的内容快照，携带 commit message。
+   *  - 幂等：当前内容与最新快照相同时不重复新建（返回已有快照列表）
+   *  - commitMessage 为空时自动生成时间戳兜底
+   *  - 返回更新后的 versions 数组
+   */
+  createSnapshot(id: string, commitMessage?: string) {
+    const existing = this.get(id);
+    const baseVersion = existing.version ?? 1;
+    const versions = parseJson<{ version: number; content: string; updatedAt: number; name?: string; commitMessage?: string }[]>(existing.versions, []);
+    // 与最新快照内容对比：相同则跳过（幂等）
+    const latest = versions[versions.length - 1];
+    if (latest && latest.content === existing.content) return versions;
+    const msg = commitMessage?.trim() || `手动快照 · ${new Date().toLocaleString('zh-CN')}`;
+    const entry: { version: number; content: string; updatedAt: number; name?: string; commitMessage?: string } = { version: baseVersion, content: existing.content ?? '', updatedAt: Date.now(), commitMessage: msg };
+    versions.push(entry);
+    const trimmed = versions.slice(-MAX_VERSIONS);
+    db.update(documents).set({ versions: JSON.stringify(trimmed), updatedAt: Date.now() }).where(eq(documents.id, id)).run();
+    return trimmed;
+  }
+
+  /** 为某个历史版本写入/覆盖 commit message（PATCH /api/documents/:id/versions/:version/commit-message） */
+  setVersionCommitMessage(id: string, version: number, message: string) {
+    const existing = this.get(id);
+    if (typeof version !== 'number' || !Number.isFinite(version)) throw new BadRequestException('version 必须是数字');
+    const versions = this.parseVersions(existing);
+    const target = versions.find((v) => v.version === version);
+    if (!target) throw new BadRequestException(`未找到版本 v${version}`);
+    target.commitMessage = String(message ?? '').slice(0, 200);
     db.update(documents).set({ versions: JSON.stringify(versions), updatedAt: Date.now() }).where(eq(documents.id, id)).run();
     return versions;
   }

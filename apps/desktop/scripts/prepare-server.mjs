@@ -51,7 +51,7 @@ async function main() {
   // ---------- 1. server bundle：pnpm deploy（pnpm 官方部署机制） ----------
   step('生成自包含 server bundle（pnpm deploy --prod）…');
   cleanDir(serverBundleDir);
-  execSync(`pnpm --filter @sciflow/server deploy --prod "${serverBundleDir}"`, {
+  execSync(`pnpm --filter @sciflow/server deploy --legacy --prod "${serverBundleDir}"`, {
     cwd: repoRoot,
     stdio: 'inherit',
     shell: true,

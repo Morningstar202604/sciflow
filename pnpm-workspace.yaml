@@ -7,7 +7,9 @@ allowBuilds:
   electron: true
   "@resvg/resvg-js": true
   msw: false
-  node-llama-cpp: false
+  # node-llama-cpp 必须允许 build scripts 运行，否则其原生二进制不会编译
+  # （HEAD 里的 false 是 bug：导致运行时 GGUF 加载失败）
+  node-llama-cpp: true
 
 overrides:
   esbuild: ^0.25.0

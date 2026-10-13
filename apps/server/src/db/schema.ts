@@ -475,3 +475,19 @@ export const webSearchCache = sqliteTable('web_search_cache', {
 });
 
 export type WebSearchCache = typeof webSearchCache.$inferSelect;
+
+/** 对话会话摘要（跨会话记忆注入：新对话启动时自动注入最近 N 轮摘要作为上下文，对标 Cursor 长上下文） */
+export const chatSessions = sqliteTable('chat_session', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  /** 摘要内容（≤500 字） */
+  summary: text('summary').default(''),
+  /** 本轮对话消息数（不含 system） */
+  messageCount: integer('message_count').notNull(),
+  /** 本轮 token 用量 */
+  totalTokens: integer('total_tokens').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type ChatSession = typeof chatSessions.$inferSelect;

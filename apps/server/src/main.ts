@@ -9,6 +9,20 @@ import { AppModule } from './app.module';
 import { InputValidationPipe } from './common/input-validation.pipe';
 
 async function bootstrap() {
+  // ---------- 启动期安全闸：非回环绑定必须启用鉴权，否则拒绝启动 ----------
+  // 零鉴权 API 会暴露全部语料与 /api/experiments 类执行面；容器里 HOST=0.0.0.0 是常态，
+  // 因此把「暴露 = 必须 AUTH_MODE=jwt」做成硬约束，确需内网裸跑时显式 ALLOW_INSECURE_BIND=1。
+  const bindHost = process.env.HOST || '127.0.0.1';
+  const isLoopback = bindHost === '127.0.0.1' || bindHost === 'localhost' || bindHost === '::1';
+  if (!isLoopback && (process.env.AUTH_MODE || 'none') !== 'jwt' && process.env.ALLOW_INSECURE_BIND !== '1') {
+    console.error(
+      `[SciFlow] 拒绝启动：HOST=${bindHost} 非回环地址，但 AUTH_MODE 未设为 jwt。` +
+      `零鉴权模式下所有科研数据与执行接口都对网络开放。请设置 AUTH_MODE=jwt + JWT_SECRET，` +
+      `或明确承担风险时设置 ALLOW_INSECURE_BIND=1。`,
+    );
+    process.exit(1);
+  }
+
   // ---------- 全局兜底：异步任务（流水线 fire-and-forget）漏网异常不再崩进程 ----------
   process.on('unhandledRejection', (reason) => {
     console.error(`[SciFlow] unhandledRejection 已兜底: ${reason instanceof Error ? reason.stack || reason.message : String(reason)}`);

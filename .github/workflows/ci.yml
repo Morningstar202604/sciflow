@@ -30,19 +30,19 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck server
-        run: pnpm --filter server typecheck
+        run: pnpm --filter @sciflow/server typecheck
 
       - name: Typecheck web
-        run: pnpm --filter web typecheck
+        run: pnpm --filter @sciflow/web typecheck
 
       - name: Unit tests (server)
-        run: pnpm --filter server test
+        run: pnpm --filter @sciflow/server test
 
       - name: Build server
-        run: pnpm --filter server build
+        run: pnpm --filter @sciflow/server build
 
       - name: Build web
-        run: pnpm --filter web build
+        run: pnpm --filter @sciflow/web build
         env:
           CI: false
 

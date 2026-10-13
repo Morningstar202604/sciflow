@@ -7,7 +7,7 @@ import { AgentTraceService } from './agent-trace.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 
-@Controller('api/agent')
+@Controller('agent')
 @UseGuards(JwtAuthGuard)
 export class AgentTraceController {
   constructor(private readonly trace: AgentTraceService) {}

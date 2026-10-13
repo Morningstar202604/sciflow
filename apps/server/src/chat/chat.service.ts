@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { AiService, ChatMessage, ChatStreamOptions } from '../ai/ai.service';
 import { MemoryService } from '../memory/memory.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
+import { ChatSessionService } from './chat-session.service';
 import { db } from '../db/database';
 import { projects } from '../db/schema';
 
@@ -44,19 +45,28 @@ interface ChatRuntimeOptions {
   signal?: AbortSignal;
 }
 
-/** Agent 化科研问答：回答前自动注入项目记忆 + 知识库 RAG 上下文 */
+/** Agent 化科研问答：回答前自动注入项目记忆 + 跨会话摘要 + 知识库 RAG 上下文 */
 @Injectable()
 export class ChatService {
   constructor(
     private readonly ai: AiService,
     private readonly memory: MemoryService,
     private readonly knowledge: KnowledgeService,
+    private readonly chatSession: ChatSessionService,
   ) {}
 
-  /** 组装项目上下文：程序/情景记忆 + 知识库检索片段（NotebookLM 式 RAG 注入）；同时返回去重后的来源列表 */
-  private async contextFor(projectId?: string, question?: string, docContext?: string): Promise<{ context: string; sources: ChatSource[] }> {
+  /** 组装项目上下文：程序/情景记忆 + 知识库检索片段（NotebookLM 式 RAG 注入）；同时返回去重后的来源列表
+   *  historyLen=0 时自动注入最近 N 轮对话摘要（跨会话记忆不丢失） */
+  private async contextFor(projectId?: string, question?: string, docContext?: string, historyLen = 0): Promise<{ context: string; sources: ChatSource[] }> {
     const parts: string[] = [];
     const sources: ChatSource[] = [];
+    // 跨会话摘要注入：新对话（history 为空）时自动注入最近几轮摘要
+    try {
+      if (projectId && historyLen === 0) {
+        const pastCtx = this.chatSession.injectPastSummary(projectId);
+        if (pastCtx) parts.push(pastCtx);
+      }
+    } catch { /* 注入失败不影响主流程 */ }
     // 差距 #22：项目级系统提示 projectPreface 拼在上下文最前（即 system prompt 开头）；无 preface 时行为完全不变
     try {
       if (projectId) {
@@ -110,15 +120,25 @@ export class ChatService {
   }
 
   async answer(message: string, history: ChatMessage[] = [], projectId?: string, docContext?: string, opts: Pick<ChatRuntimeOptions, 'model'> = {}) {
-    const { context, sources } = await this.contextFor(projectId, message, docContext);
+    const { context, sources } = await this.contextFor(projectId, message, docContext, history.length);
     const answerText = context
       ? await this.ai.chatWithContext(message, history, context, { modelName: opts.model })
       : await this.ai.chat(message, history, { modelName: opts.model });
     return { answer: answerText, sources };
   }
 
+  /** 异步记录本轮会话摘要（流结束后由 controller 触发，fire-and-forget） */
+  recordSessionSummary(projectId: string, messages: ChatMessage[], totalTokens: number): void {
+    void this.chatSession.recordSummary(projectId, messages, totalTokens);
+  }
+
+  /** 项目最近会话摘要列表（供前端"对话历史"面板） */
+  listSessionSummaries(projectId: string) {
+    return this.chatSession.listSummaries(projectId);
+  }
+
   stream(message: string, history: ChatMessage[] = [], projectId?: string, docContext?: string, opts: ChatRuntimeOptions = {}) {
-    return this.contextFor(projectId, message, docContext).then(async ({ context, sources }) => {
+    return this.contextFor(projectId, message, docContext, history.length).then(async ({ context, sources }) => {
       const streamOpts: ChatStreamOptions = { modelName: opts.model, enableThinking: opts.enableThinking, signal: opts.signal };
       const stream = context
         ? await this.ai.streamChatWithContext(message, history, context, streamOpts)

@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Res, Req } from '@nestjs/common';
+import { Controller, Post, Body, Res, Req, Get, Query } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import { ChatService } from './chat.service';
 import { ChatMessage } from '../ai/ai.service';
@@ -56,6 +56,9 @@ export class ChatController {
 
     // 深度思考开关：仅显式开启时才把上游推理增量（delta.reasoning_content / delta.thinking）透传给前端。
     const forwardReasoning = body.enableThinking === true;
+    // 当前轮完整消息 = 历史 + 本轮用户输入 + LLM 回复（onComplete 里组入）
+    const historyMsgs: ChatMessage[] = body.history ? [...body.history] : [];
+    if (body.message?.trim()) historyMsgs.push({ role: 'user', content: body.message });
     try {
       const { stream, sources } = await this.chat.stream(
         body.message, body.history || [], body.projectId, body.docContext,
@@ -65,7 +68,18 @@ export class ChatController {
       if (sources.length && !closed) {
         res.write(`data: ${JSON.stringify({ sources })}\n\n`);
       }
-      const result = await forwardOpenAiSse(res, { stream, forwardReasoning, signal: ac.signal });
+      const result = await forwardOpenAiSse(res, {
+        stream,
+        forwardReasoning,
+        signal: ac.signal,
+        // 流完整结束后异步记录本轮会话摘要（fire-and-forget，不阻塞 SSE 收尾）
+        onComplete: (fullText, tokens) => {
+          if (body.projectId && fullText) {
+            const msgs: ChatMessage[] = [...historyMsgs, { role: 'assistant', content: fullText }];
+            this.chat.recordSessionSummary(body.projectId, msgs, tokens);
+          }
+        },
+      });
       if (result.error && !closed) {
         res.write(`data: ${JSON.stringify({ error: result.error })}\n\n`);
       }
@@ -73,5 +87,12 @@ export class ChatController {
       if (!closed) res.write(`data: ${JSON.stringify({ error: e?.message || String(e) })}\n\n`);
     }
     res.end();
+  }
+
+  /** GET /api/chat/sessions?projectId=... — 项目最近对话摘要列表（前端"对话历史"面板） */
+  @Get('sessions')
+  listSessions(@Query('projectId') projectId: string) {
+    if (!projectId) return { error: 'projectId required' };
+    return { sessions: this.chat.listSessionSummaries(projectId) };
   }
 }
