@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bot, ChevronRight, ClipboardCheck, FileText, FlaskConical, Gauge,
   History, Languages, ListTree, Loader2, Mail, MessageSquare, Plus, Sparkles, Trash2, ArrowDownToLine, Upload,
@@ -17,7 +18,8 @@ import {
   downloadBase64, downloadText, jsonText,
 } from '../components/ui';
 import { HBar } from '../components/charts';
-import { WritingEditor } from './writing/WritingEditor';
+import { WritingEditor, getWritingEditorHandle } from './writing/WritingEditor';
+import { OUTLINE_TEMPLATES } from './writing/outline-templates';
 import { WritingPreview } from './writing/WritingPreview';
 import { WritingCitations } from './writing/WritingCitations';
 import { formatRefEntry } from './writing/citeStyles';
@@ -30,8 +32,8 @@ export const CiteReorderButtonLazy = lazy(() => import('./CiteReorderButton').th
 const DocExporter = lazy(() => import('./DocExporter').then((m) => ({ default: m.DocExporter })));
 
 /** 取编辑器 textarea DOM 节点（ui.tsx 的 Textarea 未透传 ref，用 id 定位，不改 ui.tsx） */
-function getEditorTa(): HTMLTextAreaElement | null {
-  return typeof document === 'undefined' ? null : (document.getElementById('sciflow-editor') as HTMLTextAreaElement | null);
+function getEditorHandle() {
+  return typeof document === 'undefined' ? null : getWritingEditorHandle();
 }
 
 const SEC = 'text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5';
@@ -41,8 +43,9 @@ const scoreColor = (v: number, good = 70, mid = 50) => (v >= good ? undefined : 
 
 export function WritingPage({ project, initialDocId }: { project: Project; initialDocId: string | null }) {
   /* ============ 文档与内容状态 ============ */
-  const [docs, setDocs] = useState<Doc[]>([]);
   const [docId, setDocId] = useState<string | null>(initialDocId);
+  /** 已从远端同步到草稿的文档 id（渲染期同步守卫） */
+  const [syncedDocId, setSyncedDocId] = useState<string | null>(null);
   const [doc, setDoc] = useState<Doc | null>(null);
   const [content, setContent] = useState('');
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -62,7 +65,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
   /* ============ 审稿意见闭环状态 ============ */
   const [reviewComments, setReviewComments] = useState<ReviewComment[]>([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [syncedExtrasDocId, setSyncedExtrasDocId] = useState<string | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [replyId, setReplyId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState('');
@@ -72,7 +75,6 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [importingComments, setImportingComments] = useState(false);
 
   /* ============ 引用管理状态 ============ */
-  const [refs, setRefs] = useState<Reference[]>([]);
   const [citations, setCitations] = useState<CitationRow[]>([]);
   const [history, setHistory] = useState<{ type: string; original: string; polished: string; reason: string }[]>([]);
   const [exportFormat, setExportFormat] = useState('apa');
@@ -106,51 +108,62 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
   /* ============ 数据加载 ============ */
 
-  const loadDocs = useCallback(async () => {
-    const list = await api.documents.list(project.id);
-    setDocs(list);
-    setDocId((prev) => (list.some((d) => d.id === prev) ? prev : (list[0]?.id ?? null)));
-  }, [project.id]);
+  // 文档列表 + 文献库（React Query）
+  const qc = useQueryClient();
+  const docsQuery = useQuery({ queryKey: ['docs', project.id], queryFn: () => api.documents.list(project.id) });
+  const refsQuery = useQuery({ queryKey: ['refs', project.id], queryFn: () => api.references.list(project.id), retry: 0 });
+  const docs: Doc[] = useMemo(() => docsQuery.data ?? [], [docsQuery.data]);
+  const refs: Reference[] = useMemo(() => refsQuery.data ?? [], [refsQuery.data]);
+  const loadDocs = () => qc.invalidateQueries({ queryKey: ['docs', project.id] });
+  // 首选中为渲染期派生（React 官方「调整 state」模式，无 effect）
+  if (docId === null && docs.length > 0) setDocId(docs[0].id);
 
-  useEffect(() => {
-    loadDocs().catch((e: unknown) => setError(errMsg(e)));
-    api.references.list(project.id).then(setRefs).catch(() => setRefs([]));
-  }, [loadDocs, project.id]);
+  // 当前文档（React Query）；远程 → 可编辑草稿的同步走渲染期守卫（syncedDocId），不写 effect
+  const docQuery = useQuery({ queryKey: ['doc', docId], queryFn: () => api.documents.get(docId!), enabled: !!docId });
+  if (docId && docQuery.data && syncedDocId !== docId) {
+    setSyncedDocId(docId);
+    setDoc(docQuery.data);
+    setContent(docQuery.data.content ?? '');
+    setOutline(jsonText<Outline | null>(docQuery.data.outline, null));
+  }
+  if (!docId && syncedDocId !== null) {
+    setSyncedDocId(null);
+    setDoc(null);
+    setContent('');
+    setOutline(null);
+  }
 
-  useEffect(() => {
-    if (!docId) {
-      setDoc(null);
-      setContent('');
-      setOutline(null);
-      return;
-    }
-    api.documents
-      .get(docId)
-      .then((d) => {
-        setDoc(d);
-        setContent(d.content ?? '');
-        setOutline(jsonText<Outline | null>(d.outline, null));
-      })
-      .catch((e: unknown) => setError(errMsg(e)));
-  }, [docId]);
-
-  useEffect(() => {
-    if (docId) {
-      api.documents.citations(docId).then(setCitations).catch(() => setCitations([]));
-      api.documents.polishRecords(docId).then(setHistory).catch(() => setHistory([]));
-      setCommentsLoading(true);
-      api.research.reviewComments(docId)
-        .then(setReviewComments)
-        .catch(() => setReviewComments([]))
-        .finally(() => setCommentsLoading(false));
-      api.quality.latest(docId).then(setQualityReport).catch(() => setQualityReport(null));
-      api.experiments.byDocument(docId).then(setDocExperiments).catch(() => setDocExperiments([]));
-    } else {
-      setReviewComments([]);
-      setQualityReport(null);
-      setDocExperiments([]);
-    }
-  }, [docId]);
+  // 关联数据（引用/润色历史/审稿意见/质量/实验）一次性聚合查询；渲染期同步守卫 syncedExtrasDocId
+  const extrasQuery = useQuery({
+    queryKey: ['doc-extras', docId],
+    enabled: !!docId,
+    queryFn: async () => {
+      const id = docId!;
+      const [cs, hs, rcs, qr, exs] = await Promise.all([
+        api.documents.citations(id).catch(() => [] as CitationRow[]),
+        api.documents.polishRecords(id).catch(() => [] as { type: string; original: string; polished: string; reason: string }[]),
+        api.research.reviewComments(id).catch(() => [] as ReviewComment[]),
+        api.quality.latest(id).catch(() => null),
+        api.experiments.byDocument(id).catch(() => [] as Experiment[]),
+      ]);
+      return { cs, hs, rcs, qr, exs };
+    },
+  });
+  if (docId && extrasQuery.data && syncedExtrasDocId !== docId) {
+    setSyncedExtrasDocId(docId);
+    setCitations(extrasQuery.data.cs);
+    setHistory(extrasQuery.data.hs);
+    setReviewComments(extrasQuery.data.rcs);
+    setQualityReport(extrasQuery.data.qr);
+    setDocExperiments(extrasQuery.data.exs);
+  }
+  if (!docId && syncedExtrasDocId !== null) {
+    setSyncedExtrasDocId(null);
+    setReviewComments([]);
+    setQualityReport(null);
+    setDocExperiments([]);
+  }
+  const commentsLoading = !!docId && extrasQuery.isLoading;
 
   /* ============ 保存（防抖 + ⌘S） ============ */
 
@@ -256,7 +269,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     setError('');
     try {
       const d = await api.documents.create(project.id, title);
-      setDocs((s) => [...s, d]);
+      await loadDocs();
       setDocId(d.id);
       setNewDocTitle('');
       setShowNewDoc(false);
@@ -272,7 +285,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     if (!deletingDoc) return;
     try {
       await api.documents.remove(deletingDoc.id);
-      setDocs((s) => s.filter((d) => d.id !== deletingDoc.id));
+      await loadDocs();
       if (docId === deletingDoc.id) setDocId(null);
       toast('info', `文档「${deletingDoc.title}」已删除`);
       setDeletingDoc(null);
@@ -292,6 +305,21 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       setDoc((d) => (d ? { ...d, outline: JSON.stringify(o) } : d));
       setShowOutlinePanel(true);
     });
+
+  /** 路线图 #17：套用本地大纲模板（零 AI，直接落库 outline） */
+  const applyOutlineTemplate = async (key: string) => {
+    if (!docId) return;
+    const tpl = OUTLINE_TEMPLATES.find((t) => t.key === key);
+    if (!tpl) return;
+    const o = tpl.build(doc?.title || '未命名论文');
+    setOutline(o);
+    try {
+      await api.documents.update(docId, { outline: JSON.stringify(o) });
+      toast('success', `已套用模板：${tpl.label}`);
+    } catch (e: unknown) {
+      setError(errMsg(e));
+    }
+  };
 
   const draftSection = (title: string) =>
     run(async () => {
@@ -328,20 +356,15 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
   const spliceIntoCursor = useCallback(
     (insert: string): number => {
-      const ta = getEditorTa();
-      let start = ta?.selectionStart ?? content.length;
-      let end = ta?.selectionEnd ?? content.length;
-      if (Number.isNaN(start) || start < 0) start = end = content.length;
+      const h = getEditorHandle();
+      const pos = h?.getCursor() ?? null;
+      const start = pos ?? content.length;
+      const end = start;
       const sel = content.slice(start, end);
       const next = content.slice(0, start) + sel + insert + content.slice(end);
       setContent(next);
       const caret = start + sel.length + insert.length;
-      requestAnimationFrame(() => {
-        if (ta) {
-          ta.focus();
-          ta.selectionStart = ta.selectionEnd = caret;
-        }
-      });
+      requestAnimationFrame(() => h?.setCursor(caret));
       return caret;
     },
     [content],
@@ -397,11 +420,12 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     [citations],
   );
 
-  useEffect(() => {
-    if (exportFormat !== 'bibtex' && citations.length > 0) {
-      setExported(buildExportedList(exportFormat));
-    }
-  }, [citations, exportFormat, buildExportedList]);
+  // 参考文献列表（派生）：非 bibtex 且已有引用时由当前 citations 直接计算；bibtex 走异步导出落 setExported
+  const exportedDerived = useMemo(
+    () => (exportFormat !== 'bibtex' && citations.length > 0 ? buildExportedList(exportFormat) : null),
+    [citations, exportFormat, buildExportedList],
+  );
+  const effectiveExported = exportedDerived ?? exported;
 
   const exportRefs = async (format: string) => {
     setExportFormat(format);
@@ -419,9 +443,10 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
   const insertCitationAnchor = async (referenceId: string) => {
     if (!docId) return;
-    const ta = getEditorTa();
-    const start = ta?.selectionStart ?? content.length;
-    const end = ta?.selectionEnd ?? content.length;
+    const h = getEditorHandle();
+    const pos = h?.getCursor() ?? null;
+    const start = pos ?? content.length;
+    const end = start;
     const existing = citations.findIndex((c) => c.referenceId === referenceId);
     const n = existing >= 0 ? existing + 1 : citations.length + 1;
     const marker = `[${n}]`;
@@ -429,12 +454,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     const next = content.slice(0, start) + sel + marker + content.slice(end);
     const caret = start + sel.length + marker.length;
     setContent(next);
-    requestAnimationFrame(() => {
-      if (ta) {
-        ta.focus();
-        ta.selectionStart = ta.selectionEnd = caret;
-      }
-    });
+    requestAnimationFrame(() => h?.setCursor(caret));
     if (existing < 0) {
       setAddingCiteId(referenceId);
       try {
@@ -594,7 +614,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
     <WritingPreview
       content={content}
       editorMode={editorMode}
-      exported={exported}
+      exported={effectiveExported}
     />
   );
 
@@ -604,7 +624,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       refs={refs}
       citations={citations}
       exportFormat={exportFormat}
-      exported={exported}
+      exported={effectiveExported}
       citePickerOpen={citePickerOpen}
       addingCiteId={addingCiteId}
       history={history}
@@ -758,7 +778,20 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
           )}
           <div className="mt-auto pt-3 border-t border-slate-100 dark:border-slate-800">
             <Input placeholder="研究方向 / 论文主题" value={topicInput} onChange={(e) => setTopicInput(e.target.value)} />
-            <Button className="w-full mt-2" onClick={generateOutline} disabled={aiBusy || !docId}>
+            <div className="flex gap-1.5 mt-2">
+              <select
+                className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 px-2 py-1.5 text-xs bg-white dark:bg-slate-900 outline-none"
+                value=""
+                onChange={(e) => { if (e.target.value) void applyOutlineTemplate(e.target.value); }}
+                title="套用本地大纲模板（无需 AI）"
+              >
+                <option value="">套用模板…</option>
+                {OUTLINE_TEMPLATES.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <Button className="w-full mt-1.5" onClick={generateOutline} disabled={aiBusy || !docId}>
               {aiBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} AI 生成大纲
             </Button>
           </div>
@@ -792,7 +825,7 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
             if (!docId) return;
             const updated = await api.documents.update(docId, { title: newTitle });
             setDoc(updated);
-            setDocs((s) => s.map((d) => (d.id === updated.id ? updated : d)));
+            await loadDocs();
           }}
           onModeChange={setEditorMode}
           renderPreview={previewSlot}

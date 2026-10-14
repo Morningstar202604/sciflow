@@ -4,8 +4,9 @@ import { db } from '../db/database';
 import { appSettings } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import * as prompts from './prompts';
-import { AiTransportService, ChatMessage, ChatStreamOptions, CompleteOptions } from './ai-transport.service';
-import { safeParse as safeParseFromUtils } from './json-utils';
+import { AiTransportService, ChatMessage, ChatStreamOptions } from './ai-transport.service';
+import { startMockGateway } from './mock-gateway';
+import { jsonrepair } from 'jsonrepair';
 import { parseJson } from '../common/json-guard';
 
 /**
@@ -19,15 +20,41 @@ import { parseJson } from '../common/json-guard';
  */
 @Injectable()
 export class AiService extends AiTransportService {
-  /** 委托给 json-utils（保留此方法以兼容现有调用点，语义 1:1 等价于重构前的 private 实现） */
-  safeParse<T>(text: string, schema: z.ZodType<T>): T | null {
-    return safeParseFromUtils(text, schema);
+  /**
+   * 本地 mock 模式（AI_MOCK=1）：无 AI_API_KEY / 无外网环境下，把 baseUrl 指向进程内
+   * 零依赖的 mock OpenAI 兼容网关（见 mock-gateway.ts），让全链路可端到端跑通。
+   */
+  private readonly mockMode = process.env.AI_MOCK === '1';
+
+  constructor() {
+    super();
+    if (this.mockMode) {
+      this.switchToMockGateway();
+    }
   }
 
-  /** 便捷访问：显式透传给下游的安全 parse（与 this.safeParse 等价，便于未来迁移） */
+  /** mock 模式接管：覆盖传输层连接配置（依赖 transport 的 protected 成员，同类继承链内合法） */
+  private switchToMockGateway() {
+    (this as unknown as { baseUrl: string }).baseUrl = startMockGateway();
+    this.setApiKey('sk-mock-local-placeholder');
+    (this as unknown as { fastModel: string }).fastModel = 'mock-model';
+    (this as unknown as { strongModel: string }).strongModel = 'mock-model';
+  }
+
+  /** 宽松 parse + zod 校验：失败返回 null（调用方自行兜底）。jsonrepair 替代手写括号配对。 */
+  safeParse<T>(text: string, schema: z.ZodType<T>): T | null {
+    try {
+      const raw = JSON.parse(jsonrepair(text)) as unknown;
+      const result = schema.safeParse(raw);
+      return result.success ? result.data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 宽松 JSON 解析：jsonrepair 修复近合法输出（围栏/前缀/截断），失败抛错 */
   jsonOf<T>(text: string): T {
-    // jsonOf 与重构前 private 行为完全一致：解析失败抛错
-    return JSON.parse(stripFencesAndExtract(text)) as T;
+    return JSON.parse(jsonrepair(text)) as T;
   }
 
   // ---------- 科研任务封装 ----------
@@ -82,6 +109,17 @@ export class AiService extends AiTransportService {
       return { title: parsed.title || topic, sections: parsed.sections || [] };
     }
     return { title: topic, sections: [{ title: '引言', subsections: [] }, { title: '相关工作', subsections: [] }, { title: '方法', subsections: [] }, { title: '实验与结果', subsections: [] }, { title: '讨论', subsections: [] }, { title: '结论', subsections: [] }] };
+  }
+
+  /** 研究检索规划（Planner）：产出多语检索关键词，驱动 research 阶段本地跨库检索 */
+  async writeSearchPlan(topic: string): Promise<{ keywords: string[] }> {
+    const raw = await this.complete([{ role: 'user', content: prompts.PLAN_RESEARCH(topic) }], { temperature: 0.3, model: 'fast', context: 'planResearch' });
+    const schema = z.object({
+      searchStrategy: z.object({ keywords: z.array(z.string()).optional().default([]) }).optional(),
+    });
+    const parsed = this.safeParse(raw, schema);
+    const kw = (parsed?.searchStrategy?.keywords || []).map((k) => String(k).trim()).filter(Boolean).slice(0, 8);
+    return { keywords: kw.length ? kw : [topic] };
   }
 
   /** 章节起草 */
@@ -379,38 +417,6 @@ export class AiService extends AiTransportService {
     if (parsed) return parsed;
     return { gaps: [], recommendedTopic: '缺口分析失败：模型输出无法解析，请重试。' };
   }
-}
-
-/**
- * 剥离 markdown 代码围栏 + 提取第一个平衡 JSON 对象文本。
- * 仅给 jsonOf 用 — 与重构前 private jsonOf 行为等价。
- */
-function stripFencesAndExtract(text: string): string {
-  let cleaned = String(text ?? '')
-    .replace(/```json\s*/gi, '')
-    .replace(/```/g, '')
-    .trim();
-  // 若 AI 在 JSON 前加了叙述文字，取第一个平衡 JSON 对象
-  if (!cleaned.startsWith('{')) {
-    const start = cleaned.indexOf('{');
-    if (start >= 0) {
-      let depth = 0, inStr = false, esc = false;
-      for (let i = start; i < cleaned.length; i++) {
-        const c = cleaned[i];
-        if (inStr) {
-          if (esc) esc = false;
-          else if (c === '\\') esc = true;
-          else if (c === '"') inStr = false;
-        } else if (c === '"') inStr = true;
-        else if (c === '{') depth++;
-        else if (c === '}') {
-          depth--;
-          if (depth === 0) { cleaned = cleaned.slice(start, i + 1); break; }
-        }
-      }
-    }
-  }
-  return cleaned;
 }
 
 export type ReviewResult = Awaited<ReturnType<AiService['reviewPaper']>>;

@@ -1,8 +1,9 @@
 import { Component, Suspense, lazy, useCallback, useContext, useEffect, useMemo, useState, createContext, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageErrorBoundary } from './components/PageErrorBoundary';
 import {
-  BookOpen, Brain, Beaker, FlaskConical, LayoutDashboard, Menu, MessageSquare, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
+  BookOpen, Brain, Beaker, FlaskConical, LayoutDashboard, Menu, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
 } from 'lucide-react';
 import { api } from './api/client';
 import type { KnowledgeDoc, Project, Reference } from './types';
@@ -21,11 +22,13 @@ const KnowledgePage = lazy(() => import('./pages/KnowledgePage').then((m) => ({ 
 const ExperimentsPage = lazy(() => import('./pages/ExperimentsPage').then((m) => ({ default: m.ExperimentsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const MemoryPage = lazy(() => import('./pages/MemoryPage').then((m) => ({ default: m.MemoryPage })));
+const WorkspacePage = lazy(() => import('./pages/WorkspacePage').then((m) => ({ default: m.WorkspacePage })));
 const SuspensePage = ({ children }: { children: ReactNode }) => (
   <Suspense fallback={<div className="p-10 text-sm text-slate-400 flex items-center gap-2"><Spinner label="页面加载中…" /></div>}>{children}</Suspense>
 );
 
 export type View =
+  | 'workspace'
   | 'dashboard'
   | 'writing'
   | 'literature'
@@ -38,22 +41,24 @@ export type View =
   | 'memory'
   | 'settings';
 
+/** 全部视图键（由类型收敛而来，作为路径解析的单一白名单来源） */
+const VIEW_KEYS: readonly View[] = ['workspace', 'dashboard', 'writing', 'literature', 'experiments', 'pipeline', 'quality', 'chat', 'submission', 'knowledge', 'memory', 'settings'];
+
 /** 功能导航分组（大厂式：按工作流分组，设置独立收纳到底部） */
 const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: typeof LayoutDashboard }[] }[] = [
   {
-    label: '研究工具',
+    label: '核心工作',
     items: [
-      { key: 'dashboard', label: '工作台', icon: LayoutDashboard },
-      { key: 'writing', label: '论文写作', icon: BookOpen },
-      { key: 'literature', label: '文献调研', icon: FlaskConical },
-      { key: 'experiments', label: '实验记录', icon: Beaker },
+      { key: 'workspace', label: '工作台', icon: LayoutDashboard },
+      { key: 'writing', label: '长文写作', icon: BookOpen },
+      { key: 'literature', label: '文献库', icon: FlaskConical },
       { key: 'knowledge', label: '知识库', icon: BookMarked },
     ],
   },
   {
     label: '自动化',
     items: [
-      { key: 'pipeline', label: '全自动流水线', icon: Workflow },
+      { key: 'pipeline', label: '流水线', icon: Workflow },
       { key: 'quality', label: '质量评分', icon: Sparkles },
       { key: 'memory', label: '记忆中心', icon: Brain },
     ],
@@ -61,14 +66,16 @@ const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: type
   {
     label: '辅助',
     items: [
-      { key: 'chat', label: '科研问答', icon: MessageSquare },
+      { key: 'dashboard', label: '项目总览', icon: LayoutDashboard },
+      { key: 'experiments', label: '实验记录', icon: Beaker },
       { key: 'submission', label: '投稿辅助', icon: Send },
     ],
   },
 ];
 
 const VIEW_LABELS: Record<View, string> = {
-  dashboard: '工作台',
+  workspace: '工作台',
+  dashboard: '项目总览',
   writing: '论文写作',
   literature: '文献调研',
   experiments: '实验记录',
@@ -82,6 +89,48 @@ const VIEW_LABELS: Record<View, string> = {
 };
 
 /** 主题上下文（暗色模式，2026 桌面工具标配） */
+/**
+ * 视图渲染注册表（声明式）：每个视图一个入口，Record<View,...> 由类型系统保证不漏项。
+ * 设置页不依赖项目；其余页面在无项目时由外层统一渲染"请先创建项目"占位。
+ */
+interface PageRenderCtx {
+  project: Project | null;
+  openDoc: (id: string) => void;
+  onNavigate: (v: View) => void;
+  initialDocId: string | null;
+}
+const PAGE_RENDERERS: Record<View, (ctx: PageRenderCtx) => ReactNode> = {
+  workspace: ({ project, openDoc, initialDocId }) =>
+    project ? (
+      <PageErrorBoundary pageName="工作台">
+        <SuspensePage>
+          <WorkspacePage project={project} initialDocId={initialDocId} onOpenFullEditor={openDoc} />
+        </SuspensePage>
+      </PageErrorBoundary>
+    ) : null,
+  settings: () => <PageErrorBoundary pageName="设置"><SuspensePage><SettingsPage /></SuspensePage></PageErrorBoundary>,
+  dashboard: ({ project, onNavigate, openDoc }) =>
+    project ? <PageErrorBoundary pageName="工作台"><SuspensePage><DashboardPage project={project} onNavigate={onNavigate} openDoc={openDoc} /></SuspensePage></PageErrorBoundary> : null,
+  writing: ({ project, initialDocId }) =>
+    project ? <PageErrorBoundary pageName="论文写作"><SuspensePage><WritingPage project={project} initialDocId={initialDocId} /></SuspensePage></PageErrorBoundary> : null,
+  literature: ({ project }) => (project ? <PageErrorBoundary pageName="文献调研"><SuspensePage><LiteraturePage project={project} /></SuspensePage></PageErrorBoundary> : null),
+  experiments: ({ project }) => (project ? <PageErrorBoundary pageName="实验记录"><SuspensePage><ExperimentsPage project={project} /></SuspensePage></PageErrorBoundary> : null),
+  knowledge: ({ project }) => (project ? <PageErrorBoundary pageName="知识库"><SuspensePage><KnowledgePage project={project} /></SuspensePage></PageErrorBoundary> : null),
+  memory: ({ project }) => (project ? <PageErrorBoundary pageName="记忆中心"><SuspensePage><MemoryPage /></SuspensePage></PageErrorBoundary> : null),
+  pipeline: ({ project, openDoc }) =>
+    project ? <PageErrorBoundary pageName="全自动流水线"><SuspensePage><PipelinePage project={project} onOpenDoc={openDoc} /></SuspensePage></PageErrorBoundary> : null,
+  quality: ({ project }) =>
+    project ? (
+      <PageErrorBoundary pageName="质量评分">
+        <Suspense fallback={<div className="p-8 text-sm text-slate-400" role="status" aria-label="加载质量评分">加载质量评分…</div>}>
+          <QualityPage project={project} />
+        </Suspense>
+      </PageErrorBoundary>
+    ) : null,
+  chat: ({ project }) => (project ? <PageErrorBoundary pageName="科研问答"><SuspensePage><ChatPage project={project} /></SuspensePage></PageErrorBoundary> : null),
+  submission: ({ project }) => (project ? <PageErrorBoundary pageName="投稿辅助"><SuspensePage><SubmissionPage project={project} /></SuspensePage></PageErrorBoundary> : null),
+};
+
 export const ThemeContext = createContext<{ theme: 'light' | 'dark'; toggle: () => void }>({
   theme: 'light',
   toggle: () => undefined,
@@ -94,11 +143,8 @@ function AppInner() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [aiReady, setAiReady] = useState(false);
+  const [pickedProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const qc = useQueryClient();
   const [showNewProject, setShowNewProject] = useState(false);
   const [newName, setNewName] = useState('');
   const [renaming, setRenaming] = useState<Project | null>(null);
@@ -107,7 +153,6 @@ function AppInner() {
   const [projectQuery, setProjectQuery] = useState('');
   const [commandOpen, setCommandOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false); // 移动端抽屉侧栏
-  const [writingDocTitle, setWritingDocTitle] = useState(''); // 任务6：写作页当前文档名（面包屑第三段）
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('sciflow-theme') as 'light' | 'dark') || 'light');
 
   // ---- 全局 Toast 反馈 ----
@@ -119,8 +164,8 @@ function AppInner() {
   }, []);
 
   // 路由化：pathname 决定当前视图（hash 路由，刷新/分享/深链不丢状态）；无效路径兜底工作台
-  const rawView = (location.pathname.replace(/^\//, '') || 'dashboard') as View;
-  const view: View = (['dashboard', 'writing', 'literature', 'experiments', 'pipeline', 'quality', 'chat', 'submission', 'knowledge', 'memory', 'settings'] as View[]).includes(rawView) ? rawView : 'dashboard';
+  const rawView = (location.pathname.replace(/^\//, '') || 'workspace') as View;
+  const view: View = VIEW_KEYS.includes(rawView) ? rawView : 'workspace';
   const selectedDocId = searchParams.get('doc');
   const setView = useCallback(
     (v: View) => {
@@ -135,43 +180,29 @@ function AppInner() {
     localStorage.setItem('sciflow-theme', theme);
   }, [theme]);
 
-  // 任务6：写作面包屑补文档层级——写作页且带 ?doc= 时拉取文档名；WritingPage 内部切文档会改 ?doc=，这里随参数变化刷新
-  useEffect(() => {
-    if (view === 'writing' && selectedDocId) {
-      api.documents
-        .get(selectedDocId)
-        .then((d) => setWritingDocTitle(d.title || ''))
-        .catch(() => setWritingDocTitle(''));
-    } else {
-      setWritingDocTitle('');
-    }
-  }, [view, selectedDocId]);
+  // 任务6：写作面包屑文档名——React Query 按 ?doc= 拉取（WritingPage 内部切文档改 ?doc=，queryKey 变化自动刷新）
+  const writingDocQuery = useQuery({
+    queryKey: ['doc-title', selectedDocId],
+    queryFn: () => api.documents.get(selectedDocId!).then((d) => d.title || ''),
+    enabled: view === 'writing' && !!selectedDocId,
+  });
+  const writingDocTitle = writingDocQuery.data ?? '';
 
-  const loadProjects = useCallback(async (attempt = 1) => {
-    try {
-      const list = await api.projects.list();
-      setProjects(list);
-      setCurrentProjectId((prev) => (list.some((p) => p.id === prev) ? prev : (list[0]?.id ?? null)));
-      setError('');
-    } catch (e: unknown) {
-      // 初始化失败自动重试（后端冷启动场景）：最多 4 次，2s 间隔
-      if (attempt < 4) {
-        setTimeout(() => loadProjects(attempt + 1), 2000);
-      } else {
-        setError(errMsg(e));
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
-  useEffect(() => {
-    api
-      .health()
-      .then((h) => setAiReady(h.ai.configured))
-      .catch(() => setAiReady(false));
-    loadProjects();
-  }, [loadProjects]);
+  // 启动数据（React Query）：项目列表带冷启动重试（4 次 / 2s），健康自检失败静默
+  const projectsQuery = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => api.projects.list(),
+    retry: 3,
+    retryDelay: 2000,
+  });
+  const healthQuery = useQuery({ queryKey: ['health'], queryFn: () => api.health(), retry: 0, staleTime: 60_000 });
+  const projects: Project[] = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const aiReady = healthQuery.data ? healthQuery.data.ai.configured : null;
+  const loading = projectsQuery.isLoading;
+  const error = projectsQuery.isError ? errMsg(projectsQuery.error) : '';
+  // 选中项目为派生：显式选择 > 列表首个（不在 effect 里写 state）
+  const currentProjectId = pickedProjectId && projects.some((p) => p.id === pickedProjectId) ? pickedProjectId : (projects[0]?.id ?? null);
 
   // 全局快捷键：⌘K 命令面板 / ⌘N 新建项目 / Esc 关闭
   useEffect(() => {
@@ -197,7 +228,7 @@ function AppInner() {
   const createProject = async () => {
     if (!newName.trim()) return;
     const p = await api.projects.create(newName.trim());
-    setProjects((s) => [...s, p]);
+    void qc.invalidateQueries({ queryKey: ['projects'] });
     setCurrentProjectId(p.id);
     setNewName('');
     setShowNewProject(false);
@@ -207,8 +238,8 @@ function AppInner() {
 
   const renameProject = async () => {
     if (!renaming || !renameText.trim()) return;
-    const updated = await api.projects.update(renaming.id, { name: renameText.trim() });
-    setProjects((s) => s.map((p) => (p.id === updated.id ? updated : p)));
+    await api.projects.update(renaming.id, { name: renameText.trim() });
+    void qc.invalidateQueries({ queryKey: ['projects'] });
     setRenaming(null);
     toast('success', '项目已重命名');
   };
@@ -216,7 +247,7 @@ function AppInner() {
   const confirmDeleteProject = async () => {
     if (!deletingProject) return;
     await api.projects.remove(deletingProject.id);
-    setProjects((s) => s.filter((p) => p.id !== deletingProject.id));
+    void qc.invalidateQueries({ queryKey: ['projects'] });
     if (currentProjectId === deletingProject.id) setCurrentProjectId(null);
     toast('info', '项目已删除');
     setDeletingProject(null);
@@ -304,7 +335,7 @@ function AppInner() {
             <div className="flex items-center justify-between px-2 pt-3 pb-1">
               <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">研究项目</span>
               <div className="flex items-center gap-1">
-                <button className="text-slate-400 hover:text-slate-700" title="刷新项目列表" onClick={() => { setLoading(true); loadProjects(); }}>
+                <button className="text-slate-400 hover:text-slate-700" title="刷新项目列表" onClick={() => void qc.invalidateQueries({ queryKey: ['projects'] })}>
                   <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
                 </button>
                 <button className="text-slate-400 hover:text-slate-700" title="新建项目" onClick={() => setShowNewProject(true)}>
@@ -442,25 +473,7 @@ function AppInner() {
                 </Button>
               </div>
             ) : (
-              <>
-                {view === 'settings' && <PageErrorBoundary pageName="设置"><SuspensePage><SettingsPage /></SuspensePage></PageErrorBoundary>}
-                {view === 'dashboard' && currentProject && <PageErrorBoundary pageName="工作台"><SuspensePage><DashboardPage project={currentProject} onNavigate={setView} openDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage></PageErrorBoundary>}
-                {view === 'writing' && currentProject && <PageErrorBoundary pageName="论文写作"><SuspensePage><WritingPage project={currentProject} initialDocId={selectedDocId} /></SuspensePage></PageErrorBoundary>}
-                {view === 'literature' && currentProject && <PageErrorBoundary pageName="文献调研"><SuspensePage><LiteraturePage project={currentProject} /></SuspensePage></PageErrorBoundary>}
-                {view === 'experiments' && currentProject && <PageErrorBoundary pageName="实验记录"><SuspensePage><ExperimentsPage project={currentProject} /></SuspensePage></PageErrorBoundary>}
-                {view === 'knowledge' && currentProject && <PageErrorBoundary pageName="知识库"><SuspensePage><KnowledgePage project={currentProject} /></SuspensePage></PageErrorBoundary>}
-                {view === 'memory' && currentProject && <PageErrorBoundary pageName="记忆中心"><SuspensePage><MemoryPage /></SuspensePage></PageErrorBoundary>}
-                {view === 'pipeline' && currentProject && <PageErrorBoundary pageName="全自动流水线"><SuspensePage><PipelinePage project={currentProject} onOpenDoc={(id: string) => navigate(`/writing?doc=${id}`)} /></SuspensePage></PageErrorBoundary>}
-                {view === 'quality' && currentProject && (
-                  <PageErrorBoundary pageName="质量评分">
-                    <Suspense fallback={<div className="p-8 text-sm text-slate-400" role="status" aria-label="加载质量评分">加载质量评分…</div>}>
-                      <QualityPage project={currentProject} />
-                    </Suspense>
-                  </PageErrorBoundary>
-                )}
-                {view === 'chat' && currentProject && <PageErrorBoundary pageName="科研问答"><SuspensePage><ChatPage project={currentProject} /></SuspensePage></PageErrorBoundary>}
-                {view === 'submission' && currentProject && <PageErrorBoundary pageName="投稿辅助"><SuspensePage><SubmissionPage project={currentProject} /></SuspensePage></PageErrorBoundary>}
-              </>
+              <>{PAGE_RENDERERS[view]({ project: currentProject, openDoc: (id: string) => navigate(`/writing?doc=${id}`), onNavigate: setView, initialDocId: selectedDocId })}</>
             )}
           </main>
         </div>
@@ -535,25 +548,22 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
   const [docHits, setDocHits] = useState<Reference[]>([]);
   const [kbHits, setKbHits] = useState<KnowledgeDoc[]>([]);
   const [searching, setSearching] = useState(false);
+  const qTrim = q.trim();
+  const searchActive = !!projectId && qTrim.length >= 2;
   useEffect(() => {
-    const query = q.trim();
-    setDocHits([]);
-    setKbHits([]);
-    if (!projectId || query.length < 2) {
-      setSearching(false);
-      return;
-    }
+    if (!searchActive) return;
     let cancelled = false;
-    setSearching(true);
     const timer = setTimeout(async () => {
+      if (cancelled) return;
+      setSearching(true);
       const [refRes, docRes] = await Promise.allSettled([
-        api.references.search(query, 6, projectId),
+        api.references.search(qTrim, 6, projectId),
         api.knowledge.list(projectId),
       ]);
       if (cancelled) return;
       const refs = refRes.status === 'fulfilled' ? refRes.value : [];
       const allDocs = docRes.status === 'fulfilled' ? docRes.value : [];
-      const kb = allDocs.filter((d) => d.name.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
+      const kb = allDocs.filter((d) => d.name.toLowerCase().includes(qTrim.toLowerCase())).slice(0, 6);
       setDocHits(refs);
       setKbHits(kb);
       setSearching(false);
@@ -562,7 +572,11 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [q, projectId]);
+  }, [qTrim, searchActive, projectId]);
+  // 短查询/无项目时展示层派生为空（不在 effect 里强清 state）
+  const shownDocHits = searchActive ? docHits : [];
+  const shownKbHits = searchActive ? kbHits : [];
+  const shownSearching = searchActive && searching;
 
   const goTo = (v: View) => {
     onNavigate(v);
@@ -600,7 +614,7 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
           <kbd className="text-[10px] text-slate-400 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5">Esc</kbd>
         </div>
         <div className="max-h-96 overflow-y-auto py-2">
-          {filtered.length === 0 && docHits.length === 0 && kbHits.length === 0 && !searching && (
+          {filtered.length === 0 && shownDocHits.length === 0 && shownKbHits.length === 0 && !shownSearching && (
             <div className="px-4 py-6 text-center text-sm text-slate-400">没有匹配的命令或内容</div>
           )}
           {filtered.map((c, i) => (
@@ -617,12 +631,12 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
 
           {/* 差距#18：内容搜索结果（文献 / 知识库文档） */}
           {searching && <div className="px-4 py-2 text-[11px] text-slate-400">搜索内容…</div>}
-          {!searching && q.trim().length >= 2 && (docHits.length > 0 || kbHits.length > 0) && (
+          {!shownSearching && searchActive && (shownDocHits.length > 0 || shownKbHits.length > 0) && (
             <>
               <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800 px-4 text-[10px] font-medium uppercase tracking-wider text-slate-400">
                 内容
               </div>
-              {docHits.map((r) => (
+              {shownDocHits.map((r) => (
                 <button
                   key={`ref-${r.id}`}
                   onClick={() => goTo('literature')}
@@ -635,7 +649,7 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
                   <span className="text-[10px] text-teal-500 shrink-0">文献 → 文献调研</span>
                 </button>
               ))}
-              {kbHits.map((d) => (
+              {shownKbHits.map((d) => (
                 <button
                   key={`kb-${d.id}`}
                   onClick={() => goTo('knowledge')}

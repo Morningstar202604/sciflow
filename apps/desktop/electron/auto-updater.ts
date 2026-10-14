@@ -9,14 +9,14 @@
 
 import { app, dialog, BrowserWindow } from 'electron';
 
-export function initAutoUpdater(): void {
+export async function initAutoUpdater(): Promise<void> {
   if (!app.isPackaged) return;
   const feed = process.env.SCIFLOW_UPDATE_URL;
   if (!feed) return; // 未配置更新源 → 完全关闭
 
   try {
-    // electron-updater 为运行时依赖，打包后位于 app.asar/node_modules
-    const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
+    // electron-updater 为运行时依赖，打包后位于 app.asar/node_modules（动态 import 保持懒加载）
+    const { autoUpdater } = await import('electron-updater');
     autoUpdater.setFeedURL({ provider: 'generic', url: feed });
     autoUpdater.autoDownload = false; // 先询问再下载，用户可控
 

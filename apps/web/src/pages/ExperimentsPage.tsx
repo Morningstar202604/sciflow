@@ -1,4 +1,5 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Beaker, Check, Copy, Loader2, Play, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import { ToastContext } from '../App';
@@ -37,9 +38,9 @@ const INSTALL_CMDS: { platform: string; cmd: string; hint: string }[] = [
 ];
 
 export function ExperimentsPage({ project }: { project: Project }) {
-  const [exps, setExps] = useState<Experiment[]>([]);
+  // experiments 列表 + 文档下拉（React Query）
   const [selected, setSelected] = useState<Experiment | null>(null);
-  const [docs, setDocs] = useState<Doc[]>([]);
+  const qc = useQueryClient();
   const [goal, setGoal] = useState('');
   const [code, setCode] = useState(DEFAULT_CODE);
   const [documentId, setDocumentId] = useState('');
@@ -68,22 +69,16 @@ export function ExperimentsPage({ project }: { project: Project }) {
     }
   };
 
-  const load = async () => {
-    try {
-      const [list, docList] = await Promise.all([
-        api.experiments.list(project.id),
-        api.documents.list(project.id).catch(() => [] as Doc[]),
-      ]);
-      setExps(list);
-      setDocs(docList);
-    } catch (e: unknown) {
-      setError(errMsg(e));
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, [project.id]);
+  const expsQuery = useQuery({
+    queryKey: ['exps', project.id],
+    queryFn: async () => {
+      const [list, docList] = await Promise.all([api.experiments.list(project.id), api.documents.list(project.id).catch(() => [] as Doc[])]);
+      return { list, docList };
+    },
+  });
+  const exps: Experiment[] = expsQuery.data?.list ?? [];
+  const docs: Doc[] = expsQuery.data?.docList ?? [];
+  const invalidateExps = () => void qc.invalidateQueries({ queryKey: ['exps', project.id] });
 
   const run = async () => {
     if (!code.trim() || running) return;
@@ -96,7 +91,7 @@ export function ExperimentsPage({ project }: { project: Project }) {
         code,
         documentId: documentId || null,
       });
-      setExps((s) => [exp, ...s]);
+      invalidateExps();
       setSelected(exp);
       setConclusionDraft(exp.conclusion);
       if (typeof exp.memoryMonitored === 'boolean') {
@@ -131,7 +126,7 @@ export function ExperimentsPage({ project }: { project: Project }) {
         code: exp.code,
         documentId: exp.documentId,
       });
-      setExps((s) => [fresh, ...s]);
+      invalidateExps();
       setSelected(fresh);
       setConclusionDraft(fresh.conclusion);
       if (typeof fresh.memoryMonitored === 'boolean') {
@@ -150,7 +145,7 @@ export function ExperimentsPage({ project }: { project: Project }) {
     setSaving(true);
     try {
       const updated = await api.experiments.update(selected.id, { conclusion: conclusionDraft });
-      setExps((s) => s.map((x) => (x.id === updated.id ? updated : x)));
+      invalidateExps();
       setSelected(updated);
       toast('success', '结论已保存');
     } catch (e: unknown) {
@@ -164,7 +159,7 @@ export function ExperimentsPage({ project }: { project: Project }) {
     if (!deleting) return;
     try {
       await api.experiments.remove(deleting.id);
-      setExps((s) => s.filter((x) => x.id !== deleting.id));
+      invalidateExps();
       if (selected?.id === deleting.id) setSelected(null);
       toast('info', '实验记录已删除');
     } catch (e: unknown) {

@@ -1,5 +1,9 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { z } from 'zod';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { sqlite } from '../db/database';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService } from '../references/references.service';
@@ -272,6 +276,35 @@ export class McpService {
     }
   }
 
+  // ---------- 官方 MCP SDK（协议层：stdio / Streamable HTTP 双传输） ----------
+
+  /**
+   * 基于官方 @modelcontextprotocol/sdk 构建 MCP Server：
+   * 工具清单一处定义（this.tools），REST 端点与 MCP 协议端点共用同一实现，
+   * 避免"自造协议"与真协议双维护。
+   */
+  buildSdkServer(): Server {
+    const server = new Server(
+      { name: 'sciflow', version: '0.3.0' },
+      { capabilities: { tools: {} } },
+    );
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: this.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema as { type: 'object'; properties?: Record<string, object> },
+      })),
+    }));
+    server.setRequestHandler(CallToolRequestSchema, async (req) => {
+      const r = await this.call(req.params.name, (req.params.arguments || {}) as Record<string, any>);
+      return {
+        content: r.content as { type: 'text'; text: string }[],
+        isError: r.isError,
+      };
+    });
+    return server;
+  }
+
   // ---------- 外部 MCP 服务器（客户端：接入任意 MCP 兼容服务，工具生态互通） ----------
 
   /** 已配置的外部 MCP 服务器列表 */
@@ -279,30 +312,57 @@ export class McpService {
     return sqlite.prepare('SELECT id, name, url, enabled, created_at AS createdAt FROM mcp_server ORDER BY created_at').all();
   }
 
-  /** 探测外部服务器工具清单（协议兼容：GET {url}/tools） */
-  async discoverExternal(url: string) {
+  /**
+   * 官方 SDK 客户端：Streamable HTTP 连接外部 MCP 服务器（带超时与关闭收尾）。
+   * v0.4 起外部互通走真 MCP 协议（原自造 GET /tools + POST /call 已删除）。
+   */
+  private async withExternalClient<T>(url: string, timeoutMs: number, fn: (client: Client) => Promise<T>): Promise<T> {
     const base = String(url || '').replace(/\/$/, '');
     if (!/^https?:\/\//.test(base)) throw new HttpException('URL 需以 http(s):// 开头', HttpStatus.BAD_REQUEST);
-    const res = await fetch(`${base}/tools`, { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) throw new HttpException(`外部 MCP 探测失败 (${res.status})`, HttpStatus.BAD_GATEWAY);
-    const data = (await res.json().catch(() => ({}))) as { tools?: { name?: string; description?: string }[] };
-    if (!data?.tools?.length) throw new HttpException('该地址未返回 MCP 工具清单（需实现 GET {url}/tools）', HttpStatus.BAD_GATEWAY);
-    return data;
+    const client = new Client({ name: 'sciflow', version: '0.4.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(base));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_r, rej) => {
+      timer = setTimeout(() => rej(new Error(`连接超时（${timeoutMs}ms）`)), timeoutMs);
+    });
+    try {
+      await Promise.race([client.connect(transport), timeout]);
+      return await Promise.race([fn(client), timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      try { await client.close(); } catch { /* 关闭失败不影响结果 */ }
+    }
   }
 
-  /** 调用外部服务器工具（协议兼容：POST {url}/call {name, arguments}） */
+  /** 探测外部服务器工具清单（MCP tools/list，Streamable HTTP） */
+  async discoverExternal(url: string) {
+    try {
+      return await this.withExternalClient(url, 15_000, async (client) => {
+        const r = await client.listTools();
+        const tools = (r.tools || []).map((t) => ({ name: t.name, description: t.description || '' }));
+        if (!tools.length) throw new HttpException('该服务器未提供任何 MCP 工具', HttpStatus.BAD_GATEWAY);
+        return { tools };
+      });
+    } catch (e: any) {
+      if (e instanceof HttpException) throw e;
+      throw new HttpException(`外部 MCP 探测失败：${e?.message || e}（需为 MCP Streamable HTTP 端点）`, HttpStatus.BAD_GATEWAY);
+    }
+  }
+
+  /** 调用外部服务器工具（MCP tools/call，Streamable HTTP） */
   async callExternal(serverId: string, name: string, args: Record<string, any>) {
     const row = sqlite.prepare('SELECT * FROM mcp_server WHERE id = ?').get(serverId) as { url?: string } | undefined;
     if (!row?.url) throw new HttpException('外部 MCP 服务器不存在', HttpStatus.NOT_FOUND);
-    const base = String(row.url).replace(/\/$/, '');
-    const res = await fetch(`${base}/call`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, arguments: args }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!res.ok) throw new HttpException(`外部工具调用失败 (${res.status})`, HttpStatus.BAD_GATEWAY);
-    const data = await res.json();
+    let data: unknown;
+    try {
+      data = await this.withExternalClient(row.url, 60_000, async (client) => {
+        const r = await client.callTool({ name, arguments: args || {} });
+        return { content: r.content, isError: r.isError === true };
+      });
+    } catch (e: any) {
+      if (e instanceof HttpException) throw e;
+      throw new HttpException(`外部工具调用失败：${e?.message || e}`, HttpStatus.BAD_GATEWAY);
+    }
     // Guardrail ②：外部（第三方）返回视为不可信内容（untrustedContentHint，2026 安全模式）
     // 第三方数据可能夹带间接提示注入（AIjacking），返回给模型时需与指令隔离
     return {

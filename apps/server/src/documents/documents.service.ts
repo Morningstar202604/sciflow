@@ -11,7 +11,7 @@ import { Document, Packer, Paragraph, HeadingLevel, AlignmentType } from 'docx';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService } from '../references/references.service';
 import { parseAuthors as parseAuthorArr, surnameOf } from '../common/authors';
-import { parseStringList, parseJson } from '../common/json-guard';
+import { parseJson } from '../common/json-guard';
 import { toCslAuthors } from '../common/citation-csl';
 
 const MAX_VERSIONS = 20;
@@ -265,7 +265,7 @@ export class DocumentsService {
 
   /** 三段式润色/降重并记录历史（图表/参考文献尾部原样保留，避免被当章节润色洗掉） */
   async polish(id: string, text: string, mode: 'polish' | 'reduce' = 'polish') {
-    const doc = this.get(id);
+    this.get(id);
     const content = String(text ?? '');
     const refIdx = content.indexOf('\n\n## 参考文献');
     const figIdx = content.indexOf('\n\n## 图表');
@@ -291,7 +291,7 @@ export class DocumentsService {
 
   /** 学术翻译 */
   async translate(id: string, text: string, targetLang: 'zh' | 'en') {
-    const doc = this.get(id);
+    this.get(id);
     const translated = await this.ai.translate(text, targetLang);
     db.insert(polishRecords)
       .values({

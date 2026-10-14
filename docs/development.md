@@ -19,7 +19,7 @@
 | `references/` | 文献库 / PRISMA 筛选 / 编码矩阵 / 引用网络 / 综述 | 是 `/api/references` |
 | `knowledge/` | RAG 知识库（BM25 + 向量混合检索） | 是 `/api/knowledge` |
 | `pipeline/` | 流水线状态机 + 断点续跑 | 是 `/api/pipeline` |
-| `orchestrator/` | Supervisor 多智能体编排（Planner/Research/Writer/Reviewer/Polisher） | 否（被 pipeline 调用） |
+| `agent/` | Agent 执行轨迹（agent_execution / agent_step 记录与查询） | 是 `/api/agent-trace` |
 | `research/` | 研究设计、模拟评审、审稿意见（`research.controller`） | 是 `/api/research` |
 | `research/quality.controller.ts` | 7 维质量评分 | 是 `/api/quality` |
 | `research/submission.controller.ts` | 选刊 / Cover Letter / 投稿状态跟踪 | 是 `/api/submission` |

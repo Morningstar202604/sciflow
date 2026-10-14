@@ -28,7 +28,6 @@ import * as path from 'node:path';
 
 const MODEL_NAME = 'bge-small-zh-v1.5-q4_k_m.gguf';
 const MODEL_URL = 'https://hf-mirror.com/BAAI/bge-small-zh-v1.5/resolve/main/gguf/bge-small-zh-v1.5-q4_k_m.gguf';
-const EMBEDDING_DIM = 384;
 const CACHE_DIR = path.resolve(process.env.SCIFLOW_MODEL_CACHE || path.join(process.env.HOME || '/tmp', '.sciflow', 'models'));
 
 @Injectable()

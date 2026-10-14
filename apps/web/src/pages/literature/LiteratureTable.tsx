@@ -1,4 +1,5 @@
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useMemo, useState } from 'react';
+import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table';
 import { BookOpenCheck, FileDown, FlaskConical, Loader2, ShieldCheck, StickyNote, Trash2, Upload } from 'lucide-react';
 import type { EvidenceResult, PaperComparisonResult, Project, Reference, ReferenceGraph, DeepDiveResult, GapResult, ExtractedPaper, ExtractionField, ExtractionTableResult, ScreeningItem } from '../../types';
 import { Badge, Button, Card, CollapsibleCard, Empty, ErrorBox, Input, Spinner, Textarea, jsonText, errMsg } from '../../components/ui';
@@ -348,10 +349,12 @@ export function LiteratureTable(props: LiteratureTableProps) {
     }
   };
 
-  useEffect(() => {
-    if (showExtraction) loadExtraction();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExtraction, project.id]);
+  // 抽取表开启时加载（事件驱动：onToggle 里触发，不再用 effect）
+  const toggleExtraction = () => {
+    const next = !showExtraction;
+    setShowExtraction(next);
+    if (next) void loadExtraction();
+  };
 
   const addField = async () => {
     if (!newFieldKey.trim() || !newFieldLabel.trim()) {
@@ -379,13 +382,13 @@ export function LiteratureTable(props: LiteratureTableProps) {
     }
   };
 
-  const saveExtValue = async (fieldId: string, referenceId: string, value: string) => {
+  const saveExtValue = useCallback(async (fieldId: string, referenceId: string, value: string) => {
     try {
       await api.references.setExtractionValue(fieldId, referenceId, value);
     } catch (e: unknown) {
       setExtError(errMsg(e));
     }
-  };
+  }, []);
 
   // visualization aggregation
   const yearDist = useMemo(() => {
@@ -465,6 +468,62 @@ export function LiteratureTable(props: LiteratureTableProps) {
     if (f.kind === 'select') return v.split(/[;；\n]/).map((s) => s.trim()).filter(Boolean).join('; ');
     return v;
   };
+
+  // TanStack Table：抽取矩阵（动态列 = 文献信息 + 各抽取字段；表头点击排序）
+  const [extSorting, setExtSorting] = useState<SortingState>([{ id: 'year', desc: false }]);
+  const extColumns = useMemo<ColumnDef<ExtractionTableResult['rows'][number]>[]>(() => {
+    const info: ColumnDef<ExtractionTableResult['rows'][number]>[] = [
+      {
+        id: 'title',
+        header: '文献',
+        accessorFn: (r) => r.title,
+        cell: (ctx) => {
+          const row = ctx.row.original;
+          return (
+            <div className="text-left">
+              <div className="font-medium text-slate-700 dark:text-slate-200 leading-snug max-w-[200px] truncate" title={row.title}>{row.title}</div>
+              <div className="text-slate-400 dark:text-slate-500 mt-0.5">{row.year || 'n.d.'} · {row.venue || '未标注'}</div>
+            </div>
+          );
+        },
+      },
+      { id: 'year', header: '年份', accessorFn: (r) => r.year ?? 0, cell: () => null, enableSorting: true },
+    ];
+    const fieldCols: ColumnDef<ExtractionTableResult['rows'][number]>[] = extFields.map((f) => ({
+      id: `f_${f.id}`,
+      header: f.label,
+      accessorFn: (r) => String(r.values[f.key] ?? r.values[f.id] ?? ''),
+      cell: (ctx) => {
+        const row = ctx.row.original;
+        const val = String(row.values[f.key] ?? row.values[f.id] ?? '');
+        return f.kind === 'select' ? (
+          <select
+            className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1 text-xs outline-none focus:border-teal-500"
+            value={val}
+            onChange={(e) => saveExtValue(f.id, row.referenceId, e.target.value)}
+          >
+            <option value="">—</option>
+            {f.options.map((o) => (
+              <option key={o} value={o}>{o}</option>
+            ))}
+          </select>
+        ) : (
+          <Input className="text-xs h-7" placeholder="…" defaultValue={val} onBlur={(e) => saveExtValue(f.id, row.referenceId, e.target.value)} />
+        );
+      },
+    }));
+    // 年份列仅用于排序、不占视觉列：把它并入 title 列之后但隐藏渲染
+    return [...info.filter((c) => c.id !== 'year'), ...fieldCols];
+  }, [extFields, saveExtValue]);
+  const extRows = extTable?.rows ?? [];
+  const extTableInstance = useReactTable({
+    data: extRows,
+    columns: extColumns,
+    state: { sorting: extSorting },
+    onSortingChange: setExtSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
 
   const exportExtractionCsv = async () => {
     if (!extTable || extTable.rows.length === 0 || extFields.length === 0) {
@@ -685,7 +744,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
                       type="checkbox"
                       className="mt-1.5 accent-teal-600"
                       checked={selectedRefs.has(r.id)}
-                      onChange={() => setSelectedRefs((s0) => { const n = new Set(s0); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })}
+                      onChange={() => setSelectedRefs((s0) => { const n = new Set(s0); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })}
                       title="勾选后可用于文献对比"
                     />
                     <div className="flex-1 min-w-0">
@@ -904,7 +963,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
                   onChange={() =>
                     setScreenSelected((prev) => {
                       const n = new Set(prev);
-                      n.has(s.referenceId) ? n.delete(s.referenceId) : n.add(s.referenceId);
+                      if (n.has(s.referenceId)) n.delete(s.referenceId); else n.add(s.referenceId);
                       return n;
                     })
                   }
@@ -930,7 +989,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
         title="编码抽取表（跨文献数据矩阵）"
         summary={extTable ? `${extFields.length} 字段 · ${extTable.rows.length} 篇` : '定义抽取字段并逐篇编码'}
         open={showExtraction}
-        onToggle={() => setShowExtraction(!showExtraction)}
+        onToggle={toggleExtraction}
       >
         <ErrorBox message={extError} />
         <div className="flex items-center justify-between mb-3">
@@ -985,46 +1044,32 @@ export function LiteratureTable(props: LiteratureTableProps) {
           <div className="overflow-auto rounded-lg border border-slate-100 dark:border-slate-800 max-h-[420px]">
             <table className="w-full text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 sticky top-0">
-                <tr>
-                  <th className="px-2 py-2 text-left min-w-[200px]">文献</th>
-                  {extFields.map((f) => (
-                    <th key={f.id} className="px-2 py-2 text-left min-w-[120px]">{f.label}</th>
-                  ))}
-                </tr>
+                {extTableInstance.getHeaderGroups().map((hg) => (
+                  <tr key={hg.id}>
+                    {hg.headers.map((h) => (
+                      <th
+                        key={h.id}
+                        className={`px-2 py-2 text-left ${h.column.id === 'title' ? 'min-w-[200px]' : 'min-w-[120px]'}`}
+                        onClick={h.column.id === 'title' ? undefined : h.column.getToggleSortingHandler()}
+                        title={h.column.id === 'title' ? undefined : '点击排序'}
+                      >
+                        <span className={h.column.id === 'title' ? '' : 'cursor-pointer select-none'}>
+                          {flexRender(h.column.columnDef.header, h.getContext())}
+                          {h.column.getIsSorted() === 'asc' ? ' ↑' : h.column.getIsSorted() === 'desc' ? ' ↓' : ''}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                ))}
               </thead>
               <tbody>
-                {extTable.rows.map((row) => (
-                  <tr key={row.referenceId} className="border-t border-slate-100 dark:border-slate-800 align-top">
-                    <td className="px-2 py-2">
-                      <div className="font-medium text-slate-700 dark:text-slate-200 leading-snug max-w-[200px] truncate" title={row.title}>{row.title}</div>
-                      <div className="text-slate-400 dark:text-slate-500 mt-0.5">{row.year || 'n.d.'} · {row.venue || '未标注'}</div>
-                    </td>
-                    {extFields.map((f) => {
-                      const val = row.values[f.key] ?? row.values[f.id] ?? '';
-                      return (
-                        <td key={f.id} className="px-2 py-1.5">
-                          {f.kind === 'select' ? (
-                            <select
-                              className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1 text-xs outline-none focus:border-teal-500"
-                              value={val}
-                              onChange={(e) => saveExtValue(f.id, row.referenceId, e.target.value)}
-                            >
-                              <option value="">—</option>
-                              {f.options.map((o) => (
-                                <option key={o} value={o}>{o}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <Input
-                              className="text-xs h-7"
-                              placeholder="…"
-                              defaultValue={val}
-                              onBlur={(e) => saveExtValue(f.id, row.referenceId, e.target.value)}
-                            />
-                          )}
-                        </td>
-                      );
-                    })}
+                {extTableInstance.getRowModel().rows.map((r) => (
+                  <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800 align-top">
+                    {r.getVisibleCells().map((c) => (
+                      <td key={c.id} className={c.column.id === 'title' ? 'px-2 py-2' : 'px-2 py-1.5'}>
+                        {flexRender(c.column.columnDef.cell ?? ((ctx: { getValue: () => unknown }) => String(ctx.getValue() ?? '')), c.getContext())}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

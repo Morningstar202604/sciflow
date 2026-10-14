@@ -3,6 +3,7 @@ import { sql, eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { Cite } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
+import '@citation-js/plugin-ris';
 import { z } from 'zod';
 import { db } from '../db/database';
 import { references, screeningQueue, extractionFields, extractionValues, documents, citations } from '../db/schema';
@@ -17,7 +18,8 @@ const createSchema = z.object({
   projectId: z.string().min(1),
   hit: z.object({
     title: z.string().min(1).max(500),
-    authors: z.array(z.string()).optional().default([]),
+    // 作者三形态兼容（字符串 / {name} / {family,given}）——归一化统一走 parseAuthors（common/authors 单一来源）
+    authors: z.array(z.union([z.string(), z.record(z.string(), z.unknown())])).optional().default([]),
     year: z.number().int().min(1000).max(2100).nullable().optional(),
     venue: z.string().max(500).optional().default(''),
     doi: z.string().max(200).optional().default(''),
@@ -111,10 +113,12 @@ export class ReferencesService {
   create(projectId: string, hit: Partial<PaperHit> & { title: string }) {
     const validated = createSchema.parse({ projectId, hit });
     projectId = validated.projectId;
-    hit = validated.hit;
+    hit = validated.hit as Partial<PaperHit> & { title: string };
+    // 作者归一化（对象数组 → 字符串数组，单一来源 parseAuthors）；入库只存字符串形态
+    const authorsNorm = parseAuthors(hit.authors);
     // 空元数据守卫：无作者且无年份的条目（如 Agentic RAG 补检的纯标题）不进文献库，
     // 避免污染引用池导致 [Unknown n.d.] / 佚名
-    const authorsOk = (hit.authors || []).length > 0;
+    const authorsOk = authorsNorm.length > 0;
     if (!authorsOk && !hit.year) return null;
     // 标题归一化指纹去重：命中同项目已存在文献时，新条目标记为其重复（保留两条记录供筛选流程核对）
     const fp = fingerprint(hit.title);
@@ -129,7 +133,7 @@ export class ReferencesService {
       id: randomUUID(),
       projectId,
       title: hit.title,
-      authors: JSON.stringify(hit.authors || []),
+      authors: JSON.stringify(authorsNorm),
       year: hit.year ?? null,
       venue: hit.venue || '',
       doi: hit.doi || '',
@@ -161,7 +165,7 @@ export class ReferencesService {
   /** PATCH /:id：阅读状态 / 标签 / 文献笔记（zod 校验） */
   update(id: string, patch: { readingStatus?: string; tags?: string; notes?: string | null }) {
     const validated = updateSchema.parse({ id, patch });
-    const existing = this.get(validated.id);
+    this.get(validated.id);
     const set: Record<string, unknown> = {};
     if (validated.patch.readingStatus !== undefined) {
       set.readingStatus = validated.patch.readingStatus;
@@ -295,7 +299,10 @@ export class ReferencesService {
         .values({ id, projectId, referenceId, status, reason, reviewer: 'me', createdAt: now, updatedAt: now })
         .run();
     }
-    return db.select().from(screeningQueue).where(eq(screeningQueue.id, id)).get();
+    // 回包带文献标题（前端筛选列表无需二次查询；与 screenList 的 join 口径一致）
+    const row = db.select().from(screeningQueue).where(eq(screeningQueue.id, id)).get();
+    const ref = db.select().from(references).where(eq(references.id, referenceId)).get();
+    return { ...row, title: ref?.title || '' };
   }
 
   /** 批量筛选（事务包裹，全部成功或全部回滚） */
@@ -540,7 +547,11 @@ export class ReferencesService {
   }
 
   private toBibtex(refs: (typeof references.$inferSelect)[]): string {
-    return new Cite(this.toCslJson(refs)).format('bibtex');
+    const raw = new Cite(this.toCslJson(refs)).format('bibtex');
+    // citation-js 会为大写保护的单词加花括号（{Graph} {Regression}），保证 BibTeX 编译时大小写不丢。
+    // 但下载/交换场景普遍期望明文标题（下游工具不需要保护，且肉眼可读）——按测试契约解包单词级保护括号。
+    // 负向后行断言保证 LaTeX 命令参数（\textbf{...}）不被解包；非单词内容（数学/空格/符号）保持原样。
+    return raw.replace(/(?<!\\)\{([A-Za-z0-9][A-Za-z0-9_-]*)\}/g, '$1');
   }
 
   private toRis(refs: (typeof references.$inferSelect)[]): string {

@@ -161,7 +161,7 @@ async function bootstrap() {
   }
 
   createWindow(`http://127.0.0.1:${serverHandle.port}`);
-  initAutoUpdater();
+  void initAutoUpdater();
 }
 
 if (gotLock) {

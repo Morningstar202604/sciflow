@@ -54,7 +54,7 @@ export function AuthGate() {
       alive = false;
       window.removeEventListener('sciflow:unauthorized', onExpired);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   if (mode !== 'login') return null;

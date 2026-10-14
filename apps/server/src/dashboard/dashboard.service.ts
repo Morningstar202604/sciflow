@@ -44,7 +44,7 @@ export class DashboardService {
         docCount,
         refCount,
       };
-    } catch (e: any) {
+    } catch {
       return {
         pendingOutline: 0,
         overdueSubmissions: [],

@@ -7,6 +7,8 @@ import { eq, inArray, and, asc } from 'drizzle-orm';
 import { AiService } from '../ai/ai.service';
 import { EmbeddingService } from './embedding.service';
 import { fingerprint } from '../common/fingerprint';
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import * as unpdf from 'unpdf';
 import { parseAuthors } from '../common/authors';
 
 const CHUNK_SIZE = 800; // 每块约 800 字（段落聚合，与文档切分逻辑保持一致）
@@ -29,22 +31,18 @@ export class KnowledgeService {
     private readonly embedding: EmbeddingService,
   ) {}
 
-  /** 文本分块：按段落聚合到 CHUNK_SIZE */
-  private chunkText(text: string): string[] {
-    const cleaned = text.replace(/\r/g, '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  /** 文本分块：RecursiveCharacterTextSplitter（@langchain/textsplitters）——按段落→换行→中文句读递归切分到 CHUNK_SIZE */
+  private readonly splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: CHUNK_SIZE,
+    chunkOverlap: 0,
+    separators: ['\n\n', '\n', '。', '；', '，', ' ', ''],
+  });
+
+  private async chunkText(text: string): Promise<string[]> {
+    const cleaned = text.replace(/\r/g, '').replace(/[ 	]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
     if (!cleaned) return [];
-    const paragraphs = cleaned.split('\n\n').filter((p) => p.trim().length > 0);
-    const chunks: string[] = [];
-    let buf = '';
-    for (const p of paragraphs) {
-      if (buf && buf.length + p.length > CHUNK_SIZE) {
-        chunks.push(buf.trim());
-        buf = '';
-      }
-      buf += (buf ? '\n\n' : '') + p;
-    }
-    if (buf.trim()) chunks.push(buf.trim());
-    return chunks;
+    const parts = await this.splitter.splitText(cleaned);
+    return parts.map((p) => p.trim()).filter(Boolean);
   }
 
   // ---------- 文献库↔知识库打通（#5） ----------
@@ -124,13 +122,13 @@ export class KnowledgeService {
   /** 上传文档（type: text | pdf | markdown；content 为文本或 PDF 的 base64）
    *  RAG 升级：每块生成 BLOB 向量（sqlite-vec ANN 检索）+ 文档上下文前缀（Contextual Retrieval） */
   async upload(projectId: string, name: string, type: string, content: string) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>;
     let text = '';
     if (type === 'pdf') {
       try {
-        const buf = Buffer.from(content, 'base64');
-        const parsed = await pdfParse(buf);
+        // unpdf（pdf.js 的 serverless 封装，替代停更的 pdf-parse）
+        const { extractText } = unpdf;
+        const buf = new Uint8Array(Buffer.from(content, 'base64'));
+        const parsed = await extractText(buf, { mergePages: true });
         text = parsed.text || '';
       } catch (e: any) {
         throw new HttpException(`PDF 解析失败: ${e.message}`, HttpStatus.BAD_REQUEST);
@@ -138,7 +136,7 @@ export class KnowledgeService {
     } else {
       text = content;
     }
-    const chunks = this.chunkText(text);
+    const chunks = await this.chunkText(text);
     if (chunks.length === 0) throw new HttpException('文档内容为空或无法解析', HttpStatus.BAD_REQUEST);
 
     const docId = randomUUID();
@@ -290,21 +288,18 @@ export class KnowledgeService {
     }
   }
 
-  /** FTS5 全文检索（BM25 评分，真正替代假 LIKE 兜底） */
+  /**
+   * FTS5 全文检索（trigram tokenizer + BM25 评分）。
+   * 中文查询构造：CJK 连续段按 3-gram 展开、拉丁词直接入词，全部用 OR 连接
+   * （trigram 短语查询要求单 token ≥3 字符；OR 保召回，bm25 负责排序）。
+   * 无可用 token（如 2 字中文查询）或 FTS 异常时回落 likeSearch（终极兜底）。
+   */
   private ftsSearch(projectId: string, question: string, topK: number): any[] {
     const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
     if (docs.length === 0) return [];
-    const docIds = docs.map((d) => d.id);
-    // FTS5 查询语法净化：去除会导致语法错误的运算符（AND/OR/NOT/括号/@#:），按空格拆 token 空格连接即为隐式 AND
-    const tokens = question
-      .replace(/[(){}\-@#:^~]/g, ' ')
-      .split(/\s+/)
-      .filter((w) => w.length > 0 && w.length <= 32)
-      .map((w) => `"${w.replace(/"/g, '""')}"`)
-      .join(' ');
-    if (!tokens) return [];
+    const tokens = KnowledgeService.buildTrigramQuery(question);
+    if (!tokens) return this.likeSearch(projectId, topK);
     try {
-      const placeholders = docIds.map(() => '?').join(',');
       const rows = sqlite
         .prepare(
           `SELECT f.chunk_id AS chunk_id, c.doc_id AS doc_id, c.content AS content,
@@ -320,15 +315,27 @@ export class KnowledgeService {
            LIMIT ?`,
         )
         .all(projectId, tokens, topK * 2) as any[]; // bm25() 值越小越相关；多召回留给 rerank
-      return rows;
+      return rows.length ? rows : this.likeSearch(projectId, topK);
     } catch {
-      // FTS5 不可用或查询语法错误时返回空，上游由 annSearch 的 catch 处理
-      return [];
+      // FTS5 不可用或查询语法错误 → LIKE 终极兜底
+      return this.likeSearch(projectId, topK);
     }
   }
 
+  /** 查询 → FTS5 trigram MATCH 表达式（OR 连接 3-gram 与拉丁词；不可构造时返回空串） */
+  static buildTrigramQuery(question: string): string {
+    const q = (question || '').replace(/[(){}"@#:^~\\]/g, ' ');
+    const parts: string[] = [];
+    for (const w of q.match(/[A-Za-z0-9][A-Za-z0-9_-]{2,}/g) || []) parts.push(w);
+    for (const run of q.match(/[一-鿿]{3,}/g) || []) {
+      for (let i = 0; i + 3 <= run.length; i++) parts.push(run.slice(i, i + 3));
+    }
+    const uniq = [...new Set(parts)].slice(0, 24);
+    return uniq.map((t) => `"${t}"`).join(' OR ');
+  }
+
   /** LIKE 兜底检索（FTS5 不可用或查询语法错误时的终极兜底） */
-  private likeSearch(projectId: string, topK: number): any[] {
+  private likeSearch(projectId: string, _topK: number): any[] {
     const NO_SCORE = 999;
     const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
     if (docs.length === 0) return [];

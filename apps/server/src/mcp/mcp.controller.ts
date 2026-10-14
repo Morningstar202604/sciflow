@@ -1,4 +1,6 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Req, Res, All } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { McpService } from './mcp.service';
 
 @Controller('mcp')
@@ -28,6 +30,24 @@ export class McpController {
   @Post('call')
   call(@Body() body: { name: string; arguments?: Record<string, any> }) {
     return this.mcp.call(body?.name, body?.arguments);
+  }
+
+  // ---------- 官方 MCP 协议端点（Streamable HTTP，供 Claude Desktop 等真 MCP 客户端接入） ----------
+
+  /**
+   * MCP 协议入口：POST /api/mcp/rpc（无状态 Streamable HTTP）。
+   * 客户端配置示例：{"mcpServers":{"sciflow":{"url":"http://127.0.0.1:3000/api/mcp/rpc"}}}
+   */
+  @All('rpc')
+  async rpc(@Req() req: Request, @Res() res: Response) {
+    const server = this.mcp.buildSdkServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on('close', () => {
+      void transport.close();
+      void server.close();
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
   }
 
   // ---------- 外部 MCP 服务器（客户端） ----------

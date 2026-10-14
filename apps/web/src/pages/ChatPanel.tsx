@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bot, Brain, ChevronDown, ChevronUp, Copy, FileText, Loader2, MessageSquare, PlayCircle, RotateCcw, Send, Sparkles, Square, Wand2, Languages } from 'lucide-react';
+import { Streamdown } from 'streamdown';
 import { api, streamChat } from '../api/client';
 import type { Doc, IntentResult, Project } from '../types';
 import { Card } from '../components/ui';
@@ -194,7 +195,7 @@ export function ChatPanel({
                 {m.role === 'user' ? (
                   <div className="text-xs text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 rounded-lg px-2.5 py-1.5 whitespace-pre-wrap">{m.content}</div>
                 ) : (
-                  <div className="text-xs whitespace-pre-wrap leading-relaxed text-slate-600 dark:text-slate-300">
+                  <div className="text-xs leading-relaxed text-slate-600 dark:text-slate-300 chat-md">
                     {m.reasoning ? (
                       <details open={m.streaming} className="mb-1.5">
                         <summary className="cursor-pointer select-none text-[10px] font-medium text-teal-700 dark:text-teal-300 flex items-center gap-1 list-none marker:hidden">
@@ -203,7 +204,7 @@ export function ChatPanel({
                         <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 border-l-2 border-teal-300 dark:border-teal-700 pl-2 leading-relaxed max-h-28 overflow-y-auto">{m.reasoning}</div>
                       </details>
                     ) : null}
-                    {m.content || (m.streaming ? <Loader2 size={12} className="animate-spin text-teal-500" /> : '')}
+                    {m.content ? <Streamdown mode={m.streaming ? 'streaming' : 'static'}>{m.content}</Streamdown> : m.streaming ? <Loader2 size={12} className="animate-spin text-teal-500" /> : null}
                     {m.streaming && <span className="inline-block w-1 h-3 bg-current opacity-60 ml-0.5 align-middle pulse-dot" />}
                     {m.usage && !m.streaming && (
                       <div className="mt-0.5 text-[9px] text-slate-400 dark:text-slate-500">↑{fmtNum(m.usage.prompt_tokens)} ↓{fmtNum(m.usage.completion_tokens)}</div>

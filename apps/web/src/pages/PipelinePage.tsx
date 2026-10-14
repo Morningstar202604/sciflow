@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Bot, Brain, Check, CircleDashed, Eye, Loader2, Plus, RotateCcw, Trash2, Workflow, Zap } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Brain, Check, CircleDashed, Eye, Loader2, Plus, RotateCcw, Trash2, Workflow, Zap } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
-import type { AgentRun, Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
+import type { Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
 import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Spinner, jsonText, errMsg } from '../components/ui';
-import { HBar, ProgressRing, Sparkline } from '../components/charts';
+import { ProgressRing, Sparkline } from '../components/charts';
 
 const STEP_LABELS: Record<string, string> = {
   'topic-verify': '① 主题验证',
@@ -134,7 +135,6 @@ function stripTemplates(list: ManagedTemplate[]) {
 }
 
 export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenDoc?: (docId: string) => void }) {
-  const [tasks, setTasks] = useState<PipelineTask[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [topic, setTopic] = useState('');
   const [templateId, setTemplateId] = useState<string>('');
@@ -155,14 +155,10 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
   const [editableOutline, setEditableOutline] = useState<Outline | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
-  const [showAgents, setShowAgents] = useState(false);
   const toast = useContext(ToastContext);
-  const [agents, setAgents] = useState<AgentRun[]>([]);
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   // 差距#9a：待删除的任务记录（二次确认后调用 DELETE /api/pipeline/:id；失败/中断任务同样可删）
   const [deletingTask, setDeletingTask] = useState<PipelineTask | null>(null);
 
-  const active = tasks.find((t) => t.id === activeId) ?? null;
 
   /** 自定义模板按项目隔离加载：后端 templates 字段优先；后端为空且 localStorage 有旧值时一次性迁移写回后端 */
   useEffect(() => {
@@ -196,7 +192,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
     return () => {
       cancelled = true;
     };
-  }, [project.id]);
+  }, [project.id, project.templates]);
 
   /** 自定义模板持久化：写后端项目 templates 字段（PATCH /api/projects/:id），失败 toast 提示 */
   const persistCustomTemplates = async (list: ManagedTemplate[]) => {
@@ -211,6 +207,33 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
   const templates: ManagedTemplate[] = [...PRESET_TEMPLATES, ...customs];
   const selected = templates.find((t) => t.id === templateId) || null;
 
+  const normalize = (t: PipelineTask): PipelineTask => ({
+    ...t,
+    steps: Array.isArray(t.steps) ? t.steps : jsonText<PipelineStep[]>(String(t.steps || '[]'), []),
+    trace: typeof t.trace === 'string' ? t.trace : JSON.stringify(t.trace || []),
+  });
+
+  // 任务列表（React Query）+ 活动任务 3s 轮询（refetchInterval，busy 时才启用）
+  const qc = useQueryClient();
+  const tasksQuery = useQuery({
+    queryKey: ['pipe-tasks', project.id],
+    queryFn: async () => (await api.pipeline.list(project.id)).map(normalize),
+  });
+  const tasks: PipelineTask[] = tasksQuery.data ?? [];
+  const activeIdEff = activeId && tasks.some((t) => t.id === activeId) ? activeId : (tasks[0]?.id ?? null);
+  const activeBase = tasks.find((t) => t.id === activeIdEff) ?? null;
+  const activeBusy = !!activeBase && (activeBase.status === 'running' || activeBase.status === 'awaiting_confirmation');
+  const activePollQuery = useQuery({
+    queryKey: ['pipe-task', activeIdEff],
+    enabled: activeBusy,
+    queryFn: () => api.pipeline.get(activeIdEff!),
+    refetchInterval: activeBusy ? 3000 : false,
+  });
+  const active = activePollQuery.data ? normalize(activePollQuery.data) : activeBase;
+  const refresh = async () => {
+    await qc.invalidateQueries({ queryKey: ['pipe-tasks', project.id] });
+  };
+
   /** 研究计划（Planner 输出，存在 topic-verify 步骤的 output JSON 中） */
   const activePlan = (() => {
     if (!active) return null;
@@ -224,6 +247,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
     }
   })();
 
+
   /** ReAct 轨迹（think → act → observe） */
   const activeTrace = (() => {
     if (!active) return [];
@@ -235,49 +259,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
     }
   })();
 
-  const normalize = (t: PipelineTask): PipelineTask => ({
-    ...t,
-    steps: Array.isArray(t.steps) ? t.steps : jsonText<PipelineStep[]>(String(t.steps || '[]'), []),
-    trace: typeof t.trace === 'string' ? t.trace : JSON.stringify(t.trace || []),
-  });
 
-  const refresh = useCallback(async () => {
-    try {
-      const list = (await api.pipeline.list(project.id)).map(normalize);
-      setTasks(list);
-      if (activeId && list.length) {
-        const cur = normalize(await api.pipeline.get(activeId));
-        setTasks((s) => s.map((t) => (t.id === cur.id ? cur : t)));
-      } else if (list.length) {
-        setActiveId(list[0].id);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [project.id, activeId]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  // 轮询活动任务（3 秒）
-  useEffect(() => {
-    if (pollTimer.current) clearInterval(pollTimer.current);
-    const isBusy = active && (active.status === 'running' || active.status === 'awaiting_confirmation');
-    if (isBusy) {
-      pollTimer.current = setInterval(() => {
-        api.pipeline
-          .get(active.id)
-          .then((t) => setTasks((s) => s.map((x) => (x.id === t.id ? normalize(t) : x))))
-          .catch(() => undefined);
-        api.pipeline.agents(active.id).then(setAgents).catch(() => undefined);
-      }, 3000);
-      api.pipeline.agents(active.id).then(setAgents).catch(() => undefined);
-    }
-    return () => {
-      if (pollTimer.current) clearInterval(pollTimer.current);
-    };
-  }, [active?.id, active?.status]);
 
   const createTask = async () => {
     if (!topic.trim()) return;
@@ -291,7 +273,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
         : topic.trim();
       const t = await api.pipeline.create(project.id, finalTopic);
       toast('success', tpl ? `流水线已启动（模板：${tpl.label}），Agent 编排开始执行` : '流水线已启动，Agent 编排开始执行');
-      setTasks((s) => [t, ...s]);
+      await refresh();
       setActiveId(t.id);
       setTopic('');
     } catch (e: unknown) {
@@ -396,11 +378,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
     if (!deletingTask) return;
     try {
       await api.pipeline.remove(deletingTask.id);
-      setTasks((s) => {
-        const next = s.filter((t) => t.id !== deletingTask.id);
-        if (activeId === deletingTask.id) setActiveId(next[0]?.id ?? null);
-        return next;
-      });
+      await refresh();
       toast('success', `已删除任务「${deletingTask.topic}」`);
     } catch (e: unknown) {
       toast('error', '删除失败：' + errMsg(e));
@@ -680,86 +658,6 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                   </Card>
                 )}
 
-                {/* Supervisor 编排视图（Phase 3：子 Agent 执行轨迹） */}
-                {agents.length > 0 && (
-                  <Card className="p-3 mb-3 bg-teal-50/40 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="flex items-center gap-1.5 text-xs font-semibold text-teal-700 dark:text-teal-300">
-                        <Bot size={13} className="text-teal-600" /> Supervisor 多 Agent 编排
-                      </span>
-                      <Button variant="outline" className="text-xs px-2 py-1" onClick={() => setShowAgents((v) => !v)} aria-expanded={showAgents} aria-controls="agents-content">
-                        <Eye size={12} aria-hidden="true" /> {showAgents ? '收起' : `${agents.length} 个 Agent`}
-                      </Button>
-                    </div>
-                    {showAgents && (
-                      <div id="agents-content" role="region" aria-label="多 Agent 编排详情" className="text-xs">
-                        <div className="flex items-center gap-1.5 mb-2 text-teal-600 dark:text-teal-400">
-                          <Activity size={12} /> 规划 → 并行检索 → 写作 → 评审 → 润色（每格一个子 Agent 执行单元）
-                        </div>
-                        {/* 各 Agent 角色耗时汇总 HBar（value=总耗时秒，sub=实例数，hint=单实例明细） */}
-                        {(() => {
-                          const labels: Record<string, string> = { planner: '规划', research: '检索', writer: '写作', reviewer: '评审', polisher: '润色' };
-                          const items = (['planner', 'research', 'writer', 'reviewer', 'polisher'] as const)
-                            .map((type) => {
-                              const group = agents.filter((a) => a.agentType === type);
-                              if (!group.length) return null;
-                              const totalSec = group.reduce((s, a) => s + (a.durationMs || 0), 0) / 1000;
-                              const hint = group.map((a) => `${a.agentName} ${(a.durationMs / 1000).toFixed(1)}s`).join('；');
-                              return { label: `${labels[type]} Agent`, value: Math.round(totalSec * 10) / 10, sub: `${group.length}实例`, hint };
-                            })
-                            .filter(Boolean) as { label: string; value: number; sub: string; hint: string }[];
-                          if (!items.length) return null;
-                          return (
-                            <div className="mb-3 rounded bg-white/60 dark:bg-slate-900/40 p-2">
-                              <div className="text-[11px] font-medium text-teal-700 dark:text-teal-400 mb-1.5">各角色耗时汇总（秒，悬停看单实例）</div>
-                              <HBar items={items} barHeight={6} />
-                            </div>
-                          );
-                        })()}
-                        {/* 按角色分组的执行链（2026 Supervisor-Worker 编排视图） */}
-                        <div className="space-y-2">
-                          {['planner', 'research', 'writer', 'reviewer', 'polisher'].map((type) => {
-                            const group = agents.filter((a) => a.agentType === type);
-                            if (group.length === 0) return null;
-                            const labels: Record<string, string> = { planner: '规划 Agent', research: '检索 Agent', writer: '写作 Agent', reviewer: '评审 Agent', polisher: '润色 Agent' };
-                            const colors: Record<string, string> = {
-                              planner: 'border-teal-300 bg-teal-50 dark:bg-teal-900/30 dark:border-teal-700 border-l-[3px] border-l-teal-500',
-                              research: 'border-sky-300 bg-sky-50 dark:bg-sky-900/30 dark:border-sky-700 border-l-[3px] border-l-sky-500',
-                              writer: 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-700 border-l-[3px] border-l-emerald-500',
-                              reviewer: 'border-amber-300 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-700 border-l-[3px] border-l-amber-500',
-                              polisher: 'border-rose-300 bg-rose-50 dark:bg-rose-900/30 dark:border-rose-700 border-l-[3px] border-l-rose-500',
-                            };
-                            const allDone = group.every((a) => a.status === 'done');
-                            const anyFail = group.some((a) => a.status === 'failed');
-                            return (
-                              <div key={type} className={`rounded-lg border p-2 ${colors[type]}`}>
-                                <div className="flex items-center gap-1.5 mb-1.5">
-                                  <span className={`w-1.5 h-1.5 rounded-full ${anyFail ? 'bg-rose-500' : allDone ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'}`} />
-                                  <span className="font-medium text-[11px] text-slate-600 dark:text-slate-300">{labels[type]}</span>
-                                  <span className="text-[10px] text-slate-400 ml-auto">{group.length} 个实例{group.some((a) => a.durationMs > 0) ? ` · 总耗时 ${(group.reduce((s, a) => s + a.durationMs, 0) / 1000).toFixed(1)}s` : ''}</span>
-                                </div>
-                                <div className="space-y-1">
-                                  {group.map((a) => (
-                                    <div key={a.id} className="flex items-center gap-2 bg-white/80 dark:bg-slate-900/60 rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1">
-                                      <span
-                                        className={`w-2 h-2 rounded-full shrink-0 ${
-                                          a.status === 'done' ? 'bg-emerald-500' : a.status === 'failed' ? 'bg-rose-500' : 'bg-amber-400 animate-pulse'
-                                        }`}
-                                      />
-                                      <span className="font-mono text-[11px] text-slate-600 dark:text-slate-300 w-24 shrink-0">{a.agentName}</span>
-                                      <span className="text-slate-500 dark:text-slate-400 flex-1 min-w-0 truncate">{a.output || a.input}</span>
-                                      <span className="text-slate-400 dark:text-slate-500 shrink-0">{a.status === 'done' ? `${(a.durationMs / 1000).toFixed(1)}s` : a.status === 'failed' ? `✗ ${(a.error || '').slice(0, 18)}` : '…'}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </Card>
-                )}
 
                 {/* 步骤时间线（品牌渐变徽章 + 纵向连接线，链条式阅读） */}
                 <div className="space-y-0 mb-4">

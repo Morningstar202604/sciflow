@@ -51,3 +51,12 @@ pnpm-debug.log*
 .vscode/
 .idea/
 .DS_Store
+.aqg/
+.v2c/
+# Playwright / promptfoo 产物
+test-results/
+playwright-report/
+.promptfoo/
+
+# OpenAPI 生成中间库
+openapi.tmp.db*

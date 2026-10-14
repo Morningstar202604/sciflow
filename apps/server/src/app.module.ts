@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { LoggerModule } from 'nestjs-pino';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AiModule } from './ai/ai.module';
@@ -24,6 +25,16 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 
 @Module({
   imports: [
+    // 结构化日志（pino）：LOG_LEVEL 可配；LOG_PRETTY=1 时本地人类可读
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: process.env.LOG_LEVEL || 'info',
+        autoLogging: { ignore: (req: any) => ['/api/health', '/api/usage/summary'].some((p) => String(req.url || '').startsWith(p)) },
+        ...(process.env.LOG_PRETTY === '1'
+          ? { transport: { target: 'pino/file', options: { destination: 1 } } }
+          : {}),
+      },
+    }),
     // 全局频率限制：每分钟 60 次（AI 调用 + API），防止 token 成本爆炸 / DoS
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     AiModule,

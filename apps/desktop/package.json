@@ -1,11 +1,12 @@
 {
   "name": "@sciflow/desktop",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "SciFlow 桌面端（Electron 封装：内嵌 NestJS 后端 + 本地 SQLite，离线可用）",
   "main": "dist-electron/main.js",
   "author": "SciFlow Contributors",
   "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/Morningstar202604/sciflow.git" },
   "scripts": {
     "build:main": "tsc -p tsconfig.json",
     "prepare:resources": "node scripts/prepare-server.mjs",
@@ -21,7 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
-    "electron": "^33.4.11",
+    "electron": "^38.8.6",
     "electron-builder": "^25.1.8",
     "typescript": "^5.9.3"
   }

@@ -1,19 +1,16 @@
+#!/usr/bin/env node
 /**
- * CLI 入口模式（headless 批处理，对标 Cursor CLI / Cline headless / Codex CLI）
- *
- * 用途：
- *   - 无界面服务器上直接调用流水线、导出文档、查询 Agent 轨迹
- *   - CI/CD 集成、定时任务、批处理脚本
+ * CLI 入口（headless 批处理，对标 Cursor CLI / Cline headless / Codex CLI）
  *
  * 用法（编译后）：
  *   node apps/server/dist/cli.js <command> [options]
+ *   sciflow health | project list | pipeline run|status | doc export | chat sessions | mcp serve
  *
- * 命令列表（v0.2.1）：
- *   health                              — 健康检查
- *   project list                        — 列出所有项目
- *   pipeline run   --project <id> --topic <text>   — 触发流水线并等待完成
- *   doc export     --project <id> --doc <id> --format md|docx — 导出文档（Base64）
- *   chat sessions  --project <id>       — 列出最近对话摘要
+ * `mcp serve` 以 stdio 启动真 MCP Server（官方 @modelcontextprotocol/sdk），
+ * 供 Claude Desktop / Cursor 等 MCP 客户端直接接入：
+ *   {"mcpServers":{"sciflow":{"command":"node","args":["<repo>/apps/server/dist/cli.js","mcp","serve"]}}}
+ *
+ * 解析由 commander 承担（替代原手写 argv 解析）。
  */
 
 import 'dotenv/config';
@@ -21,34 +18,12 @@ import { join } from 'node:path';
 import { config as loadEnv } from 'dotenv';
 loadEnv({ path: join(__dirname, '..', '.env') });
 
+import { Command } from 'commander';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { SpawnSyncOptions, spawnSync } from 'node:child_process';
 
-const CLI_VERSION = '0.3.0';
-
-interface CliCommand {
-  name: string;
-  description: string;
-  usage?: string;
-  run: (args: Record<string, string>, services: any) => Promise<number>;
-}
-
-function parseArgs(argv: string[]): { command: string[]; args: Record<string, string> } {
-  const args: Record<string, string> = {};
-  const command: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith('--')) {
-      const key = a.slice(2);
-      const val = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : 'true';
-      args[key] = val;
-    } else {
-      command.push(a);
-    }
-  }
-  return { command, args };
-}
+const CLI_VERSION = '0.4.0';
 
 /** 单次同步 HTTP 请求（复用已启动的本地服务，避免 CLI 自身启 server） */
 function localApi(path: string, opts?: { method?: string; body?: unknown }): any {
@@ -65,151 +40,148 @@ function localApi(path: string, opts?: { method?: string; body?: unknown }): any
   try { return JSON.parse(res.stdout as string); } catch { return res.stdout as string; }
 }
 
-const commands: CliCommand[] = [
-  {
-    name: 'health',
-    description: '健康检查',
-    run: async () => {
-      try {
-        const r = localApi('/api/health');
-        console.log(JSON.stringify(r, null, 2));
-        return r.status === 'ok' ? 0 : 1;
-      } catch (e: any) {
-        console.error('服务不可达，请先启动后端：pnpm server:dev');
-        console.error(`  详情：${e.message}`);
-        return 1;
-      }
-    },
-  },
-  {
-    name: 'project list',
-    description: '列出所有项目',
-    run: async () => {
-      // 直接查 DB（CLI 自身可不启 server）
-      const { db } = await import('./db/database');
-      const { projects } = await import('./db/schema');
-      const list = db.select().from(projects).all();
-      console.table(list.map((p: any) => ({ id: p.id, name: p.name, status: p.status })));
-      return 0;
-    },
-  },
-  {
-    name: 'pipeline run',
-    description: '触发流水线并等待（阻塞直到完成或失败）',
-    run: async (args) => {
-      if (!args.project || !args.topic) {
-        console.error('缺少参数：--project <id> --topic <text>');
-        return 1;
-      }
-      const { PipelineService } = await import('./pipeline/pipeline.service');
-      const ps = app.get(PipelineService);
-      const task = await ps.create(args.project, args.topic);
-      console.log(`[pipeline] 已创建任务 ${task.id}，主题：${args.topic}`);
-      console.log('[pipeline] 流水线为异步执行，请用以下命令跟踪进度：');
-      console.log(`  node cli.js pipeline status --id ${task.id}`);
-      return 0;
-    },
-  },
-  {
-    name: 'pipeline status',
-    description: '查询流水线任务进度',
-    usage: 'node cli.js pipeline status --id <taskId>',
-    run: async (args) => {
-      if (!args.id) { console.error('缺少参数：--id <taskId>'); return 1; }
-      const { db } = await import('./db/database');
-      const { pipelineTasks } = await import('./db/schema');
-      const { eq } = await import('drizzle-orm');
-      const task = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, args.id)).get() as any;
-      if (!task) { console.error(`任务不存在：${args.id}`); return 1; }
-      console.log(JSON.stringify({
-        id: task.id,
-        topic: task.topic,
-        status: task.status,
-        currentStep: task.current_step,
-        retryCount: task.retry_count,
-        createdAt: new Date(task.created_at).toISOString(),
-        updatedAt: new Date(task.updated_at).toISOString(),
-      }, null, 2));
-      return 0;
-    },
-  },
-  {
-    name: 'doc export',
-    description: '导出文档（Base64；--format md|docx）',
-    run: async (args) => {
-      if (!args.doc || !args.project) {
-        console.error('缺少参数：--project <id> --doc <id> [--format md|docx]');
-        return 1;
-      }
-      const { DocumentsService } = await import('./documents/documents.service');
-      const ds = app.get(DocumentsService);
-      const format = (args.format || 'md').toLowerCase();
-      if (format === 'docx') {
-        const r = await ds.exportDocx(args.doc);
-        console.log(r.base64);
-      } else {
-        const r = ds.exportMarkdown(args.doc);
-        console.log(r.markdown);
-      }
-      return 0;
-    },
-  },
-  {
-    name: 'chat sessions',
-    description: '列出最近对话摘要',
-    run: async (args) => {
-      if (!args.project) { console.error('缺少参数：--project <id>'); return 1; }
-      const { ChatService } = await import('./chat/chat.service');
-      const cs = app.get(ChatService);
-      const sessions = cs.listSessionSummaries(args.project);
-      console.table(sessions.map((s: any) => ({
-        id: s.id.slice(0, 8),
-        summary: s.summary ? (s.summary.length > 60 ? s.summary.slice(0, 60) + '…' : s.summary) : '(empty)',
-        messages: s.messageCount,
-        tokens: s.totalTokens,
-        at: new Date(s.createdAt).toLocaleString(),
-      })));
-      return 0;
-    },
-  },
-];
-
 let app: any;
-
-async function bootstrap() {
-  app = await NestFactory.createApplicationContext(AppModule, { logger: false });
-  const { command, args } = parseArgs(process.argv.slice(2));
-  const cmdName = command.join(' ');
-  if (!cmdName || args.help || args.h) {
-    console.log(`SciFlow CLI v${CLI_VERSION} — headless 批处理入口\n`);
-    console.log('用法：node apps/server/dist/cli.js <command> [--options]\n');
-    console.log('可用命令：');
-    for (const c of commands) {
-      console.log(`  ${c.name.padEnd(22)} ${c.description}`);
-      if (c.usage) console.log(`  ${' '.repeat(22)} → ${c.usage}`);
-    }
-    console.log('\n通用选项：--help, -h   显示此帮助');
-    console.log('退出码：0=成功，1=失败/缺参');
-    await app.close();
-    return;
-  }
-  const cmd = commands.find((c) => c.name === cmdName);
-  if (!cmd) {
-    console.error(`未知命令：${cmdName}`);
-    console.error(`可用命令：${commands.map((c) => c.name).join(' | ')}`);
-    console.error('提示：加 --help 查看完整帮助');
-    await app.close();
-    process.exit(1);
-  }
-  try {
-    const exitCode = await cmd.run(args, app);
-    await app.close();
-    process.exit(exitCode ?? 0);
-  } catch (e: any) {
-    console.error(`命令执行失败：${e?.message || e}`);
-    await app.close();
-    process.exit(1);
-  }
+/** 惰性创建 Nest 应用上下文（仅需要直连服务的命令会触发） */
+async function getApp() {
+  if (!app) app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+  return app;
+}
+async function closeApp() {
+  if (app) { await app.close(); app = null; }
 }
 
-void bootstrap();
+const program = new Command();
+program
+  .name('sciflow')
+  .description('SciFlow CLI — headless 批处理入口')
+  .version(CLI_VERSION, '--version', '显示版本');
+
+program
+  .command('health')
+  .description('健康检查（需后端已启动）')
+  .action(async () => {
+    try {
+      const r = localApi('/api/health');
+      console.log(JSON.stringify(r, null, 2));
+      process.exitCode = r?.status === 'ok' ? 0 : 1;
+    } catch (e: any) {
+      console.error('服务不可达，请先启动后端：pnpm dev:server');
+      console.error(`  详情：${e.message}`);
+      process.exitCode = 1;
+    }
+  });
+
+const project = program.command('project').description('项目管理');
+project
+  .command('list')
+  .description('列出所有项目（直读 SQLite，无需后端）')
+  .action(async () => {
+    const { db } = await import('./db/database');
+    const { projects } = await import('./db/schema');
+    const list = db.select().from(projects).all();
+    console.table(list.map((p: any) => ({ id: p.id, name: p.name, status: p.status })));
+  });
+
+const pipeline = program.command('pipeline').description('流水线（LangGraph 编排）');
+pipeline
+  .command('run')
+  .description('创建流水线任务（异步执行；用 pipeline status 跟踪）')
+  .requiredOption('--project <id>', '项目 ID')
+  .requiredOption('--topic <text>', '研究主题')
+  .action(async (opts) => {
+    const ctx = await getApp();
+    const { PipelineService } = await import('./pipeline/pipeline.service');
+    const ps = ctx.get(PipelineService);
+    const task = await ps.create(opts.project, opts.topic);
+    console.log(`[pipeline] 已创建任务 ${task.id}，主题：${opts.topic}`);
+    console.log(`[pipeline] 跟踪进度：node cli.js pipeline status --id ${task.id}`);
+    await closeApp();
+  });
+pipeline
+  .command('status')
+  .description('查询流水线任务进度')
+  .requiredOption('--id <taskId>', '任务 ID')
+  .action(async (opts) => {
+    const { db } = await import('./db/database');
+    const { pipelineTasks } = await import('./db/schema');
+    const { eq } = await import('drizzle-orm');
+    const task = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, opts.id)).get() as any;
+    if (!task) { console.error(`任务不存在：${opts.id}`); process.exitCode = 1; return; }
+    console.log(JSON.stringify({
+      id: task.id,
+      topic: task.topic,
+      status: task.status,
+      currentStep: task.currentStep,
+      retryCount: task.retryCount,
+      documentId: task.documentId,
+      lastError: task.lastError,
+      createdAt: new Date(task.createdAt).toISOString(),
+      updatedAt: new Date(task.updatedAt).toISOString(),
+    }, null, 2));
+  });
+
+const doc = program.command('doc').description('文档导出');
+doc
+  .command('export')
+  .description('导出文档（md 输出到 stdout；docx 输出 Base64）')
+  .requiredOption('--doc <id>', '文档 ID')
+  .option('--project <id>', '项目 ID（保留参数，导出不需要）')
+  .option('--format <fmt>', 'md | docx', 'md')
+  .action(async (opts) => {
+    const ctx = await getApp();
+    const { DocumentsService } = await import('./documents/documents.service');
+    const ds = ctx.get(DocumentsService);
+    if (String(opts.format).toLowerCase() === 'docx') {
+      const r = await ds.exportDocx(opts.doc);
+      console.log(r.base64);
+    } else {
+      const r = ds.exportMarkdown(opts.doc);
+      console.log(r.markdown);
+    }
+    await closeApp();
+  });
+
+const chat = program.command('chat').description('科研问答');
+chat
+  .command('sessions')
+  .description('列出最近对话摘要')
+  .requiredOption('--project <id>', '项目 ID')
+  .action(async (opts) => {
+    const ctx = await getApp();
+    const { ChatService } = await import('./chat/chat.service');
+    const cs = ctx.get(ChatService);
+    const sessions = cs.listSessionSummaries(opts.project);
+    console.table(sessions.map((s: any) => ({
+      id: s.id.slice(0, 8),
+      summary: s.summary ? (s.summary.length > 60 ? s.summary.slice(0, 60) + '…' : s.summary) : '(empty)',
+      messages: s.messageCount,
+      tokens: s.totalTokens,
+      at: new Date(s.createdAt).toLocaleString(),
+    })));
+    await closeApp();
+  });
+
+const mcp = program.command('mcp').description('MCP 协议');
+mcp
+  .command('serve')
+  .description('以 stdio 启动真 MCP Server（官方 SDK；供 Claude Desktop 等客户端接入）')
+  .action(async () => {
+    const ctx = await getApp();
+    const { McpService } = await import('./mcp/mcp.service');
+    const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+    const mcps = ctx.get(McpService);
+    const server = mcps.buildSdkServer();
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    // stderr 输出协议日志（stdout 保留给 JSON-RPC）
+    console.error('[sciflow-mcp] stdio server 已就绪，等待客户端握手（Ctrl+C 退出）');
+    const shutdown = async () => { try { await server.close(); } finally { await closeApp(); process.exit(0); } };
+    process.on('SIGINT', () => void shutdown());
+    process.on('SIGTERM', () => void shutdown());
+  });
+
+program.parseAsync(process.argv).catch(async (e) => {
+  console.error(`命令执行失败：${e?.message || e}`);
+  await closeApp();
+  process.exit(1);
+});

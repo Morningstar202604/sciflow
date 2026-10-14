@@ -5,6 +5,9 @@ import { config as loadEnv } from 'dotenv';
 // 导致 AI_BASE_URL/AI_MODEL/AI_API_KEY 等配置丢失（settings/check 503、流水线创建 400 的根因）。
 loadEnv({ path: join(__dirname, '..', '.env') });
 import { NestFactory } from '@nestjs/core';
+import helmet from 'helmet';
+import { Logger } from 'nestjs-pino';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { InputValidationPipe } from './common/input-validation.pipe';
 
@@ -32,11 +35,11 @@ async function bootstrap() {
   });
 
   // ---------- 优雅关闭：SIGTERM/SIGINT 时安全落盘（WAL check point）+ 退出 ----------
-  let app: any;
+  let appRef: { close(): Promise<any> } | null = null;
   const shutdown = async (signal: string) => {
     console.log(`[SciFlow] 收到 ${signal}，正在优雅关闭…`);
     try {
-      if (app) await app.close();
+      if (appRef) await appRef.close();
     } finally {
       process.exit(0);
     }
@@ -44,7 +47,11 @@ async function bootstrap() {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
-  app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  appRef = app;
+  app.useLogger(app.get(Logger));
+  // HTTP 安全头（helmet 默认集：CSP 关闭以兼容本地静态资源；其余 X-Content-Type-Options/HSTS/Referrer-Policy 等生效）
+  app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   // CORS：默认仅放行本地开发来源，可通过 CORS_ORIGIN 配置（如逗号分隔多个域名；* 表示全放行）
   const corsOrigin = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173')
     .split(',')
@@ -55,6 +62,12 @@ async function bootstrap() {
     credentials: true,
   });
   app.setGlobalPrefix('api');
+  // OpenAPI 契约：本地文档端点（/api/docs）+ 供 openapi-typescript 生成前端类型（pnpm openapi:gen）
+  const openapiDoc = SwaggerModule.createDocument(
+    app,
+    new DocumentBuilder().setTitle('SciFlow API').setDescription('本地优先科研工作台（单用户）').setVersion('0.4.0').build(),
+  );
+  SwaggerModule.setup('api/docs', app, openapiDoc);
   // 全局输入校验（轻量兜底，零新增依赖）：仅约束 @Body() 为 JSON 对象，不剥字段、不误伤现有端点
   app.useGlobalPipes(new InputValidationPipe());
   const port = Number(process.env.PORT || 3000);

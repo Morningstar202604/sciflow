@@ -58,7 +58,7 @@ export class UsageService {
         byCaller,
         byDay,
       };
-    } catch (e) {
+    } catch {
       // 表不存在（首次部署无调用）时返回零值
       this.logger.debug('llm_call_log 表不存在或查询失败，返回零值');
       return {

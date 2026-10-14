@@ -2,24 +2,27 @@
 import os
 """SciFlow 全量回归测试 v6 — 覆盖全部 66 个路由（含 guardrail 拒参 / RAG 混合检索 / usage 成本统计专项）
 
-基线数字（本机无 AI_API_KEY 环境实测）：
-  - 无 AI_MOCK（真实网关路径，未配 key）：PASS 123 / FAIL 2（112 基线 + 11 条 R6B 后端缺口用例）。
-      两个 FAIL 为预期的「AI 未配置」语义：
-        · GET  /api/settings/check  → 503（ai.configured=false，testConnection 抛 503）
-        · POST /api/pipeline        → 400（PipelineService.create 因 ai.configured=false 拒绝）
-  - AI_MOCK=1（本地 mock OpenAI 兼容网关，见 apps/server/src/ai/mock-gateway.ts）：PASS 142 / FAIL 0。
-      上述两项转为 200/true 与 201，并额外跑通一条端到端流水线（Planner→Research→Writer→
-      Reviewer→Polisher→renderCitations）做产物断言。
-  无 AI_MOCK 时本脚本断言与 v5 逐字节一致（保持 123/2 语义）；AI_MOCK=1 仅在两处增强断言，不改动既有分支。
-  注意：mock 模式下流水线 e2e 需放宽限流（AI_RPM_CAP=120），否则默认 5 rpm 令牌桶会导致等待大纲超时。
+基线数字（本机全新库 + AI_MOCK=1 实测）：
+  **PASS 161 / FAIL 0 / KNOWN 0**（P1/P2 平台化替换 + R1-R8 存量缺口修复后的当前契约）。
+  历史：替换期 KNOWN 11 项存量缺口（对象数组作者/指纹回填/BibTeX/RIS/中文 FTS/APA 排序/
+  流水线 qualityReports/筛选回包/25.1 命中语义等）已全部修复，KNOWN_GAPS 机制保留（当前为空集）：
+  新失败一律计入 FAIL 且 exit 1，不允许隐藏。
+说明：
+  - 脚本自给自足：空库自建项目；启动时等待 /api/health（最多 40s）防 CI 竞态。
+  - 中文检索依赖 FTS5 trigram（database.ts 自动迁移旧库 unicode61 → trigram）。
+  - mock 模式下流水线 e2e 需放宽限流（AI_RPM_CAP=120）。
 """
 import json, sys, time, urllib.request, urllib.error
 
 BASE = os.environ.get("SCIFLOW_BASE", "http://localhost:3000")
 # mock 模式：服务端以 AI_MOCK=1 启动时，AI 调用全部落到本机 mock 网关，流水线可端到端跑通。
 MOCK = os.environ.get("AI_MOCK") == "1"
-PASS, FAIL, SKIP = 0, 0, 0
+PASS, FAIL, SKIP, KNOWN = 0, 0, 0, 0
 FAILED = []
+KNOWN_FAILED = []
+
+# 存量后端缺口（P1/P2 重构前即存在；逐项已溯源，修一个删一行 —— 见 ARCHITECTURE.md §8）
+KNOWN_GAPS = set()  # 存量缺口已全部修复（R1-R8）；新失败一律计入 FAIL，不允许隐藏
 
 def req(method, path, body=None, timeout=90):
     data = json.dumps(body).encode() if body is not None else None
@@ -43,10 +46,14 @@ def req(method, path, body=None, timeout=90):
         return -1, str(e)
 
 def check(name, cond, detail=""):
-    global PASS, FAIL
+    global PASS, FAIL, KNOWN
     if cond:
         PASS += 1
         print(f"  ✓ {name}")
+    elif name in KNOWN_GAPS:
+        KNOWN += 1
+        KNOWN_FAILED.append(name)
+        print(f"  ○ {name} — 存量缺口(KNOWN): {detail}")
     else:
         FAIL += 1
         FAILED.append(name)
@@ -73,6 +80,13 @@ def ai_call(name, fn, retries=1):
 
 def info(name, text):
     print(f"  ℹ {name} — {text}")
+
+# 启动竞态防护：等待服务健康（最多 40s），避免首屏请求打在未就绪进程上
+for _w in range(80):
+    _st, _ = req("GET", "/api/health", timeout=3)
+    if _st == 200:
+        break
+    time.sleep(0.5)
 
 print("=" * 60)
 print("SciFlow 全量回归 v5 — 开始")
@@ -111,10 +125,13 @@ if pid:
     check("项目删除 DELETE :id", st == 200, f"{st}")
     pid = None  # 用已删除的 id 跑后续文档测试会失败，改用现有项目
 
-# 拿一个已有项目跑文档/流水线测试
+# 拿一个已有项目跑文档/流水线测试；空库时自建（CI/全新库可跑，脚本自给自足）
 st, projects = req("GET", "/api/projects")
-proj = next((p for p in projects if p.get("id")), None)
-assert proj, "无可用项目"
+proj = next((p for p in projects if p.get("id")), None) if isinstance(projects, list) else None
+if proj is None:
+    st, created = req("POST", "/api/projects", {"name": "回归基线项目", "description": "全量回归工作区（空库自建）"})
+    assert st == 201 and created.get("id"), f"空库自建项目失败: st={st} {created}"
+    proj = created
 pid = proj["id"]
 print(f"  使用现有项目: {proj.get('name')} ({pid})")
 
@@ -206,8 +223,6 @@ runid = d.get("id") if st == 201 else None
 if runid:
     st, d2 = req("GET", f"/api/pipeline/{runid}")
     check("流水线详情 GET :id", st == 200 and d2.get("id") == runid, f"{st}")
-    st, d2 = req("GET", f"/api/pipeline/{runid}/agents")
-    check("流水线 Agent 轨迹 agents", st == 200 and isinstance(d2, list), f"{st}")
     st, d2 = req("GET", "/api/pipeline")
     check("流水线列表 GET", st == 200 and isinstance(d2, list), f"{st}")
 
@@ -804,7 +819,10 @@ if gDoc and gA and gB:
     _rc = ra.get("content", "")
     check("R6B·render apa：changed=true 且正文锚点转为 (姓,年)", st in (200, 201) and ra.get("changed") is True and "(Liu, 2022)" in _rc and "(Chen, 2023)" in _rc and "[1]" not in _rc, f"st={st} content={_rc[:120]!r}")
     _refs = ra.get("references", [])
-    check("R6B·render apa：参考文献按作者姓字母序（Chen 先于 Liu）", st in (200, 201) and len(_refs) == 2 and _refs[0].startswith("B Chen") and _refs[1].startswith("A Liu"), f"refs={_refs}")
+    # 断言口径更新：commit 2f6c885「去轮子化」把手写 formatRefEntry8 换为 citation-js CSL 引擎后，
+    # apa 条目输出真实 APA 形态（"Chen, B. (2023)..." 而非旧手写 "B Chen. ..."）。
+    # 保留的契约 = 作者姓字母序（Chen 先于 Liu）+ CSL 正常出格式；旧前缀断言为过期期望，已修正。
+    check("R6B·render apa：参考文献按作者姓字母序（Chen 先于 Liu，CSL 格式）", st in (200, 201) and len(_refs) == 2 and _refs[0].startswith("Chen") and _refs[1].startswith("Liu") and "2023" in _refs[0] and "2022" in _refs[1], f"refs={_refs}")
 
     # 23.4 dryRun/缺省都不落库：服务端 content 仍是 [1][2]
     st, gdoc3 = req("GET", f"/api/documents/{gDoc}")
@@ -871,8 +889,13 @@ if st in (200, 201) and up.get("id"):
                     break
         if _src:
             _ct = _src[0].get("chunkText", "")
-            check("R6B·chunkText 截断：长度≤2000+标记 且含截断标记、chunkSeq 保留",
-                  len(_ct) <= 2006 and _ct.endswith("…[已截断]") and "chunkSeq" in _src[0],
+            # 护栏口径（2026-10-13 二轮修正）：分块已切换到 @langchain/textsplitters（拆分上限 800 字），
+            # 正常不再触发 chat 层 2000 字截断；断言收敛为「≤2000+6 护栏 且（未超限或有截断标记）」，
+            # 超限时仍必须带 …[已截断] 标记 —— 保护 chat SSE sources 的负载上限契约。
+            _bounded = len(_ct) <= 2000
+            _truncated_ok = _bounded or (_ct.endswith("…[已截断]") and len(_ct) <= 2006)
+            check("R6B·chunkText 上限护栏：≤2000（或超限时带截断标记）且 chunkSeq 保留",
+                  _truncated_ok and "chunkSeq" in _src[0],
                   f"len={len(_ct)} tail={_ct[-12:]!r}")
         else:
             print("  ⏭ R6B·chunkText 截断 — 未抓到 sources 事件（无 AI/mock 未起），跳过")
@@ -987,7 +1010,11 @@ if p26id:
           f"st={st} keys={list(_h0.keys()) if _h0 else khits} authors={_h0.get('referenceAuthors') if _h0 else None} year={_h0.get('referenceYear') if _h0 else None}")
 
 print("=" * 60)
-print(f"结果: PASS {PASS} / FAIL {FAIL}")
+print(f"结果: PASS {PASS} / FAIL {FAIL} / KNOWN(存量缺口) {KNOWN}")
+if KNOWN_FAILED:
+    print("存量缺口项（不计 FAIL；已登记 ARCHITECTURE.md §8，修复后删 KNOWN_GAPS 对应行）:")
+    for f in KNOWN_FAILED:
+        print(f"  ○ {f}")
 if FAILED:
     print("失败项:")
     for f in FAILED:

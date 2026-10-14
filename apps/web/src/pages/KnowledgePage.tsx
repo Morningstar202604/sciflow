@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookMarked, Brain, Check, ChevronDown, ChevronUp, FileText, Link2, Loader2, MessageSquare, Quote, Trash2, Unlink, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
@@ -158,23 +159,24 @@ function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const doc = docs.find((d) => d.id === docId) ?? null;
 
-  // 选中文档后拉真实 chunk 正文 + outline（GET /knowledge/:id）；失败则静默回退到文档名规则
-  useEffect(() => {
-    if (!docId) {
-      setDetail(null);
+  // 选中文档后拉真实 chunk 正文 + outline（GET /knowledge/:id）；在事件处理器内取数（无 effect 同步 setState）
+  const pickDoc = (id: string) => {
+    setDocId(id);
+    setRevealed({});
+    setDetail(null);
+    if (!id) {
+      setLoadingDetail(false);
       return;
     }
     setLoadingDetail(true);
-    setDetail(null);
-    setRevealed({});
     api.knowledge
-      .get(docId)
+      .get(id)
       .then(setDetail)
       .catch(() => setDetail(null))
       .finally(() => setLoadingDetail(false));
-  }, [docId]);
+  };
 
-  const topics = doc ? deriveTopics(doc.name) : [];
+  const topics = useMemo(() => (doc ? deriveTopics(doc.name) : []), [doc]);
   const cards = useMemo(() => {
     if (!doc) return [];
     if (detail && detail.chunks.length > 0) {
@@ -198,10 +200,7 @@ function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
       <div className="max-w-md">
         <select
           value={docId}
-          onChange={(e) => {
-            setDocId(e.target.value);
-            setRevealed({});
-          }}
+          onChange={(e) => pickDoc(e.target.value)}
           className="w-full rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-sm bg-white dark:bg-slate-900 outline-none focus:border-teal-500"
         >
           <option value="">选择一份资料…</option>
@@ -252,7 +251,6 @@ function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
 }
 
 export function KnowledgePage({ project }: { project: Project }) {
-  const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<KnowledgeQueryResult | null>(null);
   const [busy, setBusy] = useState('');
@@ -262,7 +260,6 @@ export function KnowledgePage({ project }: { project: Project }) {
   const [dragging, setDragging] = useState(false);
   const [deleting, setDeleting] = useState<KnowledgeDoc | null>(null);
   // 文献库↔知识库打通（#5）：项目内可选文献 + 正在展开绑定下拉的文档
-  const [refs, setRefs] = useState<Reference[]>([]);
   const [bindingDocId, setBindingDocId] = useState<string | null>(null);
   // 绑定下拉的标题搜索关键词（前端过滤 title/venue/年份）
   const [bindQuery, setBindQuery] = useState('');
@@ -274,26 +271,16 @@ export function KnowledgePage({ project }: { project: Project }) {
   const [citing, setCiting] = useState(false);
   const [citedKeys, setCitedKeys] = useState<Record<string, boolean>>({});
 
+  // 知识库文档列表 + 文献库（React Query）
+  const qc = useQueryClient();
+  const kbDocsQuery = useQuery({ queryKey: ['kb-docs', project.id], queryFn: () => api.knowledge.list(project.id) });
+  const kbRefsQuery = useQuery({ queryKey: ['kb-refs', project.id], queryFn: () => api.references.list(project.id), retry: 0 });
+  const docs: KnowledgeDoc[] = useMemo(() => kbDocsQuery.data ?? [], [kbDocsQuery.data]);
+  const refs: Reference[] = useMemo(() => kbRefsQuery.data ?? [], [kbRefsQuery.data]);
   const load = async () => {
-    try {
-      setDocs(await api.knowledge.list(project.id));
-    } catch (e: unknown) {
-      setError(errMsg(e));
-    }
+    await qc.invalidateQueries({ queryKey: ['kb-docs', project.id] });
+    await qc.invalidateQueries({ queryKey: ['kb-refs', project.id] });
   };
-
-  const loadRefs = async () => {
-    try {
-      setRefs(await api.references.list(project.id));
-    } catch {
-      /* 文献库暂时不可用时不阻断知识库页 */
-    }
-  };
-
-  useEffect(() => {
-    load();
-    loadRefs();
-  }, [project.id]);
 
   /** 绑定/解除文献：referenceId 传 null 解除 */
   const bindRef = async (doc: KnowledgeDoc, referenceId: string | null) => {

@@ -159,24 +159,6 @@ export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
 export type ReflexionLog = typeof reflexionLogs.$inferSelect;
 export type MemoryLog = typeof memoryLogs.$inferSelect;
 
-/** Phase 3：子 Agent 执行单元（Supervisor 编排的独立任务记录） */
-export const agentRuns = sqliteTable('agent_run', {
-  id: text('id').primaryKey(),
-  taskId: text('task_id').notNull(), // 所属流水线任务
-  agentType: text('agent_type').notNull(), // planner | research | writer | reviewer | polisher
-  agentName: text('agent_name').notNull(), // 实例名（如 research#1、writer#intro）
-  status: text('status').default('running'), // pending | running | done | failed
-  input: text('input').default(''), // 输入（摘要）
-  output: text('output').default(''), // 输出摘要
-  detail: text('detail').default(''), // JSON：完整输入/输出/思考
-  error: text('error').default(''),
-  durationMs: integer('duration_ms').default(0),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-});
-
-export type AgentRun = typeof agentRuns.$inferSelect;
-
 /** 模型厂商（可插拔多模型：OpenAI/DeepSeek/通义/豆包/Agnes 等，LiteLLM 式） */
 export const modelProviders = sqliteTable('model_provider', {
   id: text('id').primaryKey(),
@@ -405,7 +387,7 @@ export const users = sqliteTable('user', {
 
 export type User = typeof users.$inferSelect;
 
-/** Agent 执行轨迹（对标 Cursor/Cline 调用链追踪 + OpenHands 面板）。主表名为 agent_execution 避让已有 agent_run（流水线步骤日志）。 */
+/** Agent 执行轨迹（对标 Cursor/Cline 调用链追踪 + OpenHands 面板）。 */
 export const agentExecutions = sqliteTable('agent_execution', {
   id: text('id').primaryKey(),
   projectId: text('project_id').notNull(),

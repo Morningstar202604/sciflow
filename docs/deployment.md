@@ -104,8 +104,8 @@ pnpm --filter @sciflow/web build     # 产物在 apps/web/dist，纯静态文件
 | `AI_MODEL_FAST` | fast 档（问答 / 润色 / 翻译 / 评审 JSON） | 空 → 回落 `AI_MODEL` | `ai/ai.service.ts` |
 | `AI_MODEL_STRONG` | strong 档（规划 / 长文起草） | 空 → 回落 fast 档 | `ai/ai.service.ts` |
 | `AI_RPM_CAP` | 每分钟 AI 调用上限（令牌桶，防 429） | **代码内 `5`**（`.env.example` / compose 写 `8`） | `ai/ai.service.ts` |
-| `AI_MOCK` | 设为 `1` 启用本机零依赖 mock 网关 | 关闭 | `ai/ai.service.ts`、`ai/mock-gateway.ts` |
-| `AI_MOCK_PORT` | mock 网关端口（仅回环） | `5099` | `ai/mock-gateway.ts` |
+| `AI_MOCK` | 设为 `1` 启用进程内 mock 网关（MSW 拦截，不占端口） | 关闭 | `ai/ai.service.ts`、`ai/mock-gateway.ts` |
+| `MOCK_HTTP_PORT` | mock HTTP 包装脚本端口（仅回环，供 promptfoo 等外部工具） | `5099` | `apps/server/scripts/mock-openai-http.mjs` |
 | `CORS_ORIGIN` | 允许的前端来源，逗号分隔；`*` 全放行 | `http://localhost:5173,http://127.0.0.1:5173` | `main.ts` |
 | `SANDBOX_PYTHON` | 实验沙箱解释器路径 | 空 → 自动探测 `python3` / `python` | `experiments/experiments.service.ts` |
 | `SANDBOX_TIMEOUT_MS` | 沙箱单次执行超时（毫秒） | `10000` | `experiments/experiments.service.ts` |

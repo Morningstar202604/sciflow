@@ -1,6 +1,6 @@
 {
   "name": "sciflow",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "SciFlow - 全自动 AI 科研助手（多 Agent 编排流水线）",
   "scripts": {
@@ -13,6 +13,11 @@
     "start": "pnpm --filter @sciflow/server start",
     "db:push": "pnpm --filter @sciflow/server db:push",
     "db:studio": "pnpm --filter @sciflow/server db:studio",
+    "lint": "eslint .",
+    "test:e2e": "playwright test",
+    "eval:prompts": "promptfoo eval -c evals/promptfooconfig.yaml",
+    "format": "prettier --write .",
+    "openapi:gen": "pnpm --filter @sciflow/server build && node scripts/openapi-gen.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "backup": "node scripts/backup-db.mjs"
   },
@@ -21,7 +26,16 @@
   },
   "packageManager": "pnpm@11.7.0",
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@resvg/resvg-js": "^2.6.2",
-    "concurrently": "^10.0.5"
+    "concurrently": "^10.0.5",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "promptfoo": "^0.124.1",
+    "typescript-eslint": "^8.71.2"
   }
 }

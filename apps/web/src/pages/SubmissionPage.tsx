@@ -1,4 +1,5 @@
-import { useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useState, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarClock, Check, FilePen, Forward, Globe2, Library, Loader2, Mail, MessageSquareReply, Plus, Send, Trash2,
 } from 'lucide-react';
@@ -75,7 +76,6 @@ export function SubmissionPage({ project }: { project: Project }) {
   const [writingBack, setWritingBack] = useState<string | null>(null);
 
   // 投稿跟踪
-  const [tracks, setTracks] = useState<SubmissionTrack[]>([]);
   const [regForm, setRegForm] = useState({ docId: '', journalId: '', journalName: '', date: todayISO(), status: 'submitted' as SubmissionStatus, note: '', prevId: '', revDeadline: '' });
   const [openTrackId, setOpenTrackId] = useState<string | null>(null);
   const [eventFor, setEventFor] = useState<string | null>(null);
@@ -90,7 +90,6 @@ export function SubmissionPage({ project }: { project: Project }) {
   const [parseResult, setParseResult] = useState<ParseEmailResult | null>(null);
   const [confirming, setConfirming] = useState(false);
   // 任务2：每条投稿关联文档的 open 审稿意见数（预取，用于「从审稿意见记录事件」按钮禁用态）
-  const [openCounts, setOpenCounts] = useState<Record<string, number>>({});
   const toast = useContext(ToastContext);
 
   // 拉取项目内文档，否则「选择项目内论文」下拉恒空
@@ -111,20 +110,22 @@ export function SubmissionPage({ project }: { project: Project }) {
     }
   };
 
-  // 审稿意见闭环：切换文档时拉取该文档的 review_comment
-  useEffect(() => {
-    if (!selDoc) {
+  // 审稿意见闭环：切换文档时拉取该文档的 review_comment（在 pickDoc 事件内取数，无 effect）
+  const loadComments = (docId: string) => {
+    if (!docId) {
       setComments([]);
       return;
     }
-    api.research.reviewComments(selDoc).then(setComments).catch(() => setComments([]));
-  }, [selDoc]);
+    api.research.reviewComments(docId).then(setComments).catch(() => setComments([]));
+  };
 
-  // 投稿跟踪列表加载（同时预取每条投稿关联文档的 open 审稿意见数）
-  const loadTracks = useCallback(async () => {
-    try {
+  // 投稿跟踪列表（React Query，tab=track 时启用；同时预取每条投稿的 open 审稿意见数）
+  const qc = useQueryClient();
+  const tracksQuery = useQuery({
+    queryKey: ['tracks', project.id],
+    enabled: tab === 'track',
+    queryFn: async () => {
       const list = await api.submission.listTracks(project.id);
-      setTracks(list);
       const counts: Record<string, number> = {};
       await Promise.all(
         list.map(async (t) => {
@@ -140,15 +141,14 @@ export function SubmissionPage({ project }: { project: Project }) {
           }
         }),
       );
-      setOpenCounts(counts);
-    } catch (e: unknown) {
-      setError(errMsg(e) || '投稿列表加载失败');
-    }
-  }, [project.id]);
-
-  useEffect(() => {
-    if (tab === 'track') loadTracks();
-  }, [tab, loadTracks]);
+      return { list, counts };
+    },
+  });
+  const tracks: SubmissionTrack[] = tracksQuery.data?.list ?? [];
+  const openCounts: Record<string, number> = tracksQuery.data?.counts ?? {};
+  const loadTracks = async () => {
+    await qc.invalidateQueries({ queryKey: ['tracks', project.id] });
+  };
 
   const run = async (fn: () => Promise<string>) => {
     setBusy(true);
@@ -200,6 +200,7 @@ export function SubmissionPage({ project }: { project: Project }) {
 
   const pickDoc = (id: string) => {
     setSelDoc(id);
+    loadComments(id);
     const d = docs.find((x) => x.id === id);
     if (d) {
       setTitle(d.title);

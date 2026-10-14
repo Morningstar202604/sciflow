@@ -2,15 +2,21 @@
 
 > **Local-First AI Research Workbench · 单用户本地科研智能体工作台**
 
+[![CI](https://github.com/Morningstar202604/sciflow/actions/workflows/ci.yml/badge.svg)](https://github.com/Morningstar202604/sciflow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A520%20(CI%2022)-339933.svg)](package.json)
+[![pnpm](https://img.shields.io/badge/pnpm-11.7.0-f69220.svg)](package.json)
+[![version](https://img.shields.io/badge/version-0.4.0-black.svg)](CHANGELOG.md)
+
 > **🌐 语言 / Language：[中文](README.md) · [English](README.en.md)**
 
-> **仓库镜像（四平台同步）**
-> [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> 四仓由 CI 级验证保障：typecheck ×2 · vitest · build ×2 · 密钥校验，全部公开可克隆。
+> **仓库镜像（五平台同步）**
+> [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
+> 五仓同步同一套 CI：lint · typecheck ×2 · vitest ×2 · build ×2 · mock 全量回归（161 项）· promptfoo 契约评估 · Playwright 冒烟，全部公开可克隆。
 
-SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一个研究主题，由 Supervisor 编排器调度多类专业子智能体（Planner / 并行 Research / Writer / Reviewer / Polisher），完成 **文献调研 → 研究规划 → 大纲 → 分章起草（边写边查的 Agentic RAG）→ 质量门评分（不达标自动 Reflexion 回炉）→ 润色 → 引用格式化 → 投稿辅助** 的科研全生命周期，并以 NotebookLM 式 RAG 知识库 + 可视化工作台沉淀过程资产。
+SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一个研究主题，自动完成 **文献调研 → 研究规划 → 大纲（人工确认）→ 分章起草（边写边查的 Agentic RAG）→ 质量门评分（不达标自动 Reflexion 回炉）→ 润色 → 引用格式化 → 投稿辅助** 的科研全生命周期，并以 NotebookLM 式 RAG 知识库 + 可视化工作台沉淀过程资产。
 
-- **零外部 AI 依赖、零重型图表库**：前端图表全部为手写 SVG（`apps/web/src/components/charts.tsx`）；AI 只通过 **OpenAI 兼容协议**对接你自己的模型 Key。
+- **零外部 AI 依赖**：AI 只通过 **OpenAI 兼容协议**（Vercel AI SDK 传输层）对接你自己的模型 Key，兼容 Ollama / LM Studio 等本地端点。
 - **本地优先**：SQLite 单文件开箱即跑，你的文献、笔记、记忆、Key 全部落本地，不建多租户、不上传第三方云。
 
 ## 📸 界面预览
@@ -39,19 +45,18 @@ SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一�
 - **文内锚点重排**：顺序编码制正文 `[n]` 保持插入序；著者-年制按正文首现自动加 a/b 后缀重排（`CiteReorderButton`）。
 - **BibTeX / RIS 导入导出**：文献库元数据去重指纹、`reading_status` 状态机（unread / reading / read / cited）。
 - **PRISMA 筛选 + 编码矩阵**：文献调研页按纳入/排除标准筛选、编码归纳。
-- **力导向引用网络**：手写 SVG 可交互图谱，直观呈现文献间引用关系。
+- **力导向引用网络**：sigma.js + graphology + ForceAtlas2（WebGL 渲染）可交互图谱，直观呈现文献间引用关系。
 
 ### 知识库 RAG（NotebookLM 式）
-- 本地 **BM25 + TF 向量余弦混合检索**，零依赖中文 Bigram 分词；知识库资料与文献双向绑定，命中块带来源作者/年份卡片。
+- 本地 **sqlite-vec 向量 ANN + FTS5 trigram 全文**混合检索（嵌入模型不可用时自动回退全文；中文查询 3-gram OR 展开）；知识库资料与文献双向绑定，命中块带来源作者/年份卡片。
 
-### 全自动流水线（多智能体）
-- Supervisor 编排：**Planner**（目标/子问题/检索策略/风险）→ **Research 并行 ReAct**（think→act→observe 自主补检）→ 大纲人工确认点 → **Writer** 分章起草 → **Reviewer 7 维质量门**（<80 触发 Reflexion 反思并回炉重写，最多 3 轮，自动取最高分轮次定稿）→ **Polisher** 润色 → 引用格式化。
-- **执行轨迹可视化**：流水线页展示每个子智能体的状态 / 耗时 / 摘要（`/api/pipeline/:id/agents`）。
+### 全自动流水线
+- **LangGraph 编排 + 人工确认点**：主题验证 → 文献调研 → 大纲生成 → **大纲人工确认（interrupt）** → 分章起草（并行，并发数可配）→ **7 维质量门**（<80 触发 Reflexion 回炉，最多 3 轮，自动取最高分轮次定稿）→ 润色 → 引用格式化；对话工作台内直接确认与续跑。
 - **Checkpoint 断点续跑**：服务重启后自动恢复中断任务，从草稿阶段幂等续跑。
 - **模型路由**：fast / strong 双档，问答润色走快模型，规划/长文/评审自动切强模型。
 
 ### 质量与评审
-- **7 维质量评分**：文献 / 逻辑 / 引用 / 语言 / 创新 / 图表 / 格式（0–100），手写 SVG 雷达图 + 历史评分对比。
+- **7 维质量评分**：文献 / 逻辑 / 引用 / 语言 / 创新 / 图表 / 格式（0–100），Recharts 雷达图 + 历史评分对比。
 - **审稿闭环**：审稿意见结构化解析、逐条回复模板、修回截止日倒计时。
 
 ### 投稿辅助
@@ -71,19 +76,19 @@ SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一�
 
 | 端 | 技术 |
 | --- | --- |
-| 后端 `apps/server` | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· zod · 原生 fetch（OpenAI 兼容协议）· 内置零依赖 mock AI 网关（仅 `node:http`） |
-| 前端 `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · react-markdown + KaTeX · lucide-react · **手写 SVG 图表（无 ECharts 等重型图库）** |
-| 桌面端 `apps/desktop` | Electron 33 · 内嵌后端（`ELECTRON_RUN_AS_NODE`）· 本地 SQLite（userData 隔离）· electron-builder 三平台打包 · electron-updater 自动更新（opt-in） |
-| 工程 | pnpm workspace · vitest 5 · GitHub Actions（Node 22）· Python 3 回归脚本 |
+| 后端 `apps/server` | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· Vercel AI SDK（OpenAI 兼容）· LangGraph（编排 / 断点续跑 / 人工确认）· MCP 官方 SDK · zod · helmet + pino · MSW 进程内 mock 网关 |
+| 前端 `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · TanStack Query / Table · Recharts · sigma.js + graphology · streamdown（流式 Markdown）· CodeMirror 6 · react-markdown + KaTeX |
+| 桌面端 `apps/desktop` | Electron 38（内嵌 Node 22，原生支持 require(ESM)）· 内嵌后端（`ELECTRON_RUN_AS_NODE`）· 本地 SQLite（userData 隔离，打包时自动按 Electron ABI 重编原生模块）· electron-builder 三平台打包 · electron-updater 自动更新（opt-in） |
+| 工程 | pnpm workspace · vitest（server 16 / web 15）· Playwright 冒烟 · promptfoo 契约评估 · GitHub Actions 三 job（类型/单测/构建 · 全量回归 · E2E+评测）· Python 3 回归脚本（161 项） |
 
 **架构概览**
 
 ```
 apps/server/src/   后端模块（NestJS）
-├── ai/            统一 LLM 服务 + Prompt 模板 + mock 网关 + 全局令牌桶限流
+├── ai/            AI SDK 模型层 + Prompt 模板 + MSW mock 网关 + 全局令牌桶限流
 ├── projects/      项目管理        ├── documents/   文档/润色/翻译/引用/版本/导出
-├── references/    文献库 + 综述     ├── knowledge/   RAG 知识库（BM25+向量）
-├── pipeline/      流水线状态机     ├── orchestrator/ Supervisor 多智能体编排
+├── references/    文献库 + 综述     ├── knowledge/   RAG 知识库（向量 + FTS5 全文）
+├── pipeline/      LangGraph 编排（interrupt/checkpointer）├── agent/  Agent 执行轨迹
 ├── research/      文献调研 + 质量评分 + 投稿辅助（controller 集中于此）
 ├── judgment/      评审闭环         ├── experiments/  实验沙箱
 ├── chat/          SSE 流式问答     ├── memory/       情景/程序记忆
@@ -97,7 +102,7 @@ Pipeline(全自动流水线) · Quality(质量评分) · Experiments(实验记�
 Chat(科研问答) · Submission(投稿辅助) · Settings(设置)
 ```
 
-数据链条：`Project → Document（多版本）→ Citation → Reference（真实可追溯）`；`PipelineTask` / `AgentRun` / `ReflexionLog` / `MemoryLog` / `LlmCallLog` 分别记录流水线状态、子智能体执行单元、回炉反思、记忆沉淀与 token 成本。
+数据链条：`Project → Document（多版本）→ Citation → Reference（真实可追溯）`；`PipelineTask` / `AgentExecution` / `ReflexionLog` / `MemoryLog` / `LlmCallLog` 分别记录流水线状态、Agent 执行轨迹、回炉反思、记忆沉淀与 token 成本。
 
 ## 🚀 快速开始
 
@@ -151,8 +156,7 @@ SciFlow 支持**任意 OpenAI 兼容端点**，只需要填 `base_url` + `model`
 | `AI_MODEL_FAST` | fast 档（问答/润色/翻译/评审 JSON） | 留空则回落 `AI_MODEL` |
 | `AI_MODEL_STRONG` | strong 档（规划/长文起草） | 留空则回落 `AI_MODEL` |
 | `AI_RPM_CAP` | 每分钟 AI 调用上限（令牌桶防 429） | `8`（长流水线建议 100+） |
-| `AI_MOCK` | 设为 `1` 启用本机 mock 网关（无 Key / 无外网跑全链路） | `1` |
-| `AI_MOCK_PORT` | mock 网关端口（默认 5099，仅回环） | `5099` |
+| `AI_MOCK` | 设为 `1` 启用进程内 mock 网关（MSW 拦截，无 Key / 无外网跑全链路） | `1` |
 | `CORS_ORIGIN` | 允许的前端来源（逗号分隔） | `http://localhost:5173` |
 
 兼容端点示例（任选其一，格式均为 `base_url` + 模型名）：火山方舟 `https://ark.cn-beijing.volces.com/api/v3`、DeepSeek `https://api.deepseek.com/v1`、豆包、智谱 `https://open.bigmodel.cn/api/paas/v4`、Kimi `https://api.moonshot.cn/v1`、Ollama 本地 `http://localhost:11434/v1`、云知声 u2-flash 网关等。
@@ -166,16 +170,23 @@ SciFlow 支持**任意 OpenAI 兼容端点**，只需要填 `base_url` + `model`
 pnpm --filter @sciflow/server typecheck
 pnpm --filter @sciflow/web typecheck
 
-# 单元测试（vitest 5，引用格式化等核心纯逻辑）
+# 单元测试（vitest：server 16 条 + web 15 条）
 pnpm --filter @sciflow/server test
+pnpm --filter @sciflow/web test
 
 # 构建（双端）
 pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
+
+# E2E 冒烟（Playwright；前置：mock 后端 :3000 + web dev :5173 均已启动）
+pnpm exec playwright test
+
+# prompt 契约评估（promptfoo，离线；前置：server build + 下方 mock HTTP 网关）
+pnpm exec promptfoo eval -c evals/promptfooconfig.yaml
 ```
 
 ### 内置 mock AI 网关（无 Key / 无外网跑全链路）
 
-`AI_MOCK=1` 时进程内起一个仅监听回环、零依赖（`node:http`）的 mock OpenAI 兼容网关，按 prompt 关键词返回**确定性**响应（研究计划/大纲 JSON、带 `[Ref:N]` 的中文章节、≈87 分 7 维评分不回炉、三段式润色、RAG 答案、期刊匹配等），并支持 SSE 分块。
+`AI_MOCK=1` 时以 **MSW 在进程内拦截**全部 AI 调用（不占端口、零网络），按 prompt 关键词返回**确定性**响应（研究计划/大纲 JSON、带 `[Ref:N]` 的中文章节、≈87 分 7 维评分不回炉、三段式润色、RAG 答案、期刊匹配等），并支持 SSE 分块。
 
 ```bash
 # 起后端（mock 模式，放宽限流）
@@ -187,12 +198,15 @@ SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
   python3 scripts/full_regression.py
 ```
 
-回归基线（本机实测）：**mock 网关 PASS 162 / FAIL 0**；真实网关路径（未配 Key）PASS 143，其中 2 项为预期的「AI 未配置」语义（`settings/check`→503、创建流水线→400），不代表缺陷。mock 网关仅用于测试/演示，不代表真实模型能力。
+> 外部工具（如 promptfoo）需要真实 HTTP 端点时：`node apps/server/scripts/mock-openai-http.mjs`——复用同一路由表，监听 `127.0.0.1:5099`。
+
+回归基线（全新库 + mock 网关实测，见 `scripts/full_regression.py`）：**PASS 161 / FAIL 0 / KNOWN 0**（KNOWN 机制保留但当前为空集：历史 11 项存量缺口已全部修复）。mock 网关仅用于测试/演示，不代表真实模型能力。
 
 ## 📚 文档索引
 
 | 文档 | 内容 |
 | --- | --- |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 架构唯一真理源：依赖地图 / 防重复造轮子守则 / 阶段进度与待办 |
 | [`docs/product-roadmap.md`](docs/product-roadmap.md) | 产品路线图：现状能力矩阵、设计原则、差距与缺口 |
 | [`docs/index.html`](docs/index.html) | 项目官网（静态单页，浏览器直开；GitHub Pages 首页） |
 | [`docs/sciflow-code-tree.html`](docs/sciflow-code-tree.html) | 全仓代码树可视化（浏览器打开） |

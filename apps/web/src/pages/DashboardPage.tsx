@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Beaker, FileText, FlaskConical, Gauge, Plus, Workflow, ArrowRight } from 'lucide-react';
 import { api } from '../api/client';
-import type { DashboardOverview, Doc, Project, Reference } from '../types';
+import type { DashboardOverview, Project } from '../types';
 import { Button, Card, Empty, Skeleton, Badge, jsonText, SectionTitle, Textarea, errMsg } from '../components/ui';
 import { Donut, HBar, MetricCard } from '../components/charts';
 import { useContext } from 'react';
@@ -13,42 +14,39 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
   onNavigate: (v: View) => void;
   openDoc: (id: string) => void;
 }) {
-  const [docs, setDocs] = useState<Doc[]>([]);
-  const [refs, setRefs] = useState<Reference[]>([]);
-  const [knowledgeCount, setKnowledgeCount] = useState(0);
-  const [pipelineCount, setPipelineCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const qc = useQueryClient();
+  // 总览数据（React Query）：项目域聚合一次拉齐
+  const dashQuery = useQuery({
+    queryKey: ['dash', project.id],
+    queryFn: async () => {
+      const [d, r, k, p] = await Promise.all([
+        api.documents.list(project.id),
+        api.references.list(project.id),
+        api.knowledge.list(project.id).catch(() => [] as never[]),
+        api.pipeline.list(project.id).catch(() => [] as never[]),
+      ]);
+      return { docs: d, refs: r, knowledgeCount: k.length, pipelineCount: p.length };
+    },
+  });
+  const docs = dashQuery.data?.docs ?? [];
+  const refs = dashQuery.data?.refs ?? [];
+  const knowledgeCount = dashQuery.data?.knowledgeCount ?? 0;
+  const pipelineCount = dashQuery.data?.pipelineCount ?? 0;
+  const loading = dashQuery.isLoading;
   const [newTitle, setNewTitle] = useState('');
   /** 科研全链路总览：后端未就绪/失败时为 null，前端降级为小字提示，不白屏 */
-  const [overview, setOverview] = useState<DashboardOverview | null>(null);
+  const overviewQuery = useQuery({ queryKey: ['dash-overview'], queryFn: () => api.dashboard.overview(), retry: 0 });
+  const overview: DashboardOverview | null = overviewQuery.data ?? null;
   /** 差距#22：项目级系统提示（写作偏好），本地草稿态 */
   const [prefaceDraft, setPrefaceDraft] = useState(project.preface || '');
   const [prefaceEditing, setPrefaceEditing] = useState(false);
   const [prefaceSaving, setPrefaceSaving] = useState(false);
   const toast = useContext(ToastContext);
 
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      api.documents.list(project.id),
-      api.references.list(project.id),
-      api.knowledge.list(project.id).catch(() => []),
-      api.pipeline.list(project.id).catch(() => []),
-    ])
-      .then(([d, r, k, p]) => {
-        setDocs(d);
-        setRefs(r);
-        setKnowledgeCount(k.length);
-        setPipelineCount(p.length);
-      })
-      .finally(() => setLoading(false));
-    api.dashboard.overview().then(setOverview).catch(() => setOverview(null));
-  }, [project.id]);
-
   const createDoc = async () => {
     if (!newTitle.trim()) return;
     const doc = await api.documents.create(project.id, newTitle.trim());
-    setDocs((s) => [...s, doc]);
+    void qc.invalidateQueries({ queryKey: ['dash', project.id] });
     setNewTitle('');
     toast('success', `草稿「${doc.title}」已创建`);
     openDoc(doc.id);

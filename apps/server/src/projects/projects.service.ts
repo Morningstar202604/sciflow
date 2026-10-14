@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db } from '../db/database';
-import { projects, documents, references, pipelineTasks, agentRuns, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments, experiments, submissions, submissionStatusEvents, citations, qualityReports, polishRecords, knowledgeDocs, knowledgeChunks, memoryLogs } from '../db/schema';
+import { projects, documents, references, pipelineTasks, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments, experiments, submissions, submissionStatusEvents, citations, qualityReports, polishRecords, knowledgeDocs, knowledgeChunks, memoryLogs } from '../db/schema';
 import { parseJson } from '../common/json-guard';
 
 /** Zod schemas for projects input validation */
@@ -73,10 +73,9 @@ export class ProjectsService {
     const docIds = db.select().from(documents).where(eq(documents.projectId, id)).all().map((d) => d.id);
     // 捕获本项目抽取字段 id（extraction_value 按 field_id 关联，删字段前需级联清理取值）
     const fieldIds = db.select().from(extractionFields).where(eq(extractionFields.projectId, id)).all().map((f) => f.id);
-    // 级联清理：文档、文献、流水线任务及其子 Agent 轨迹、反思日志
+    // 级联清理：文档、文献、流水线任务及其反思日志
     const tasks = db.select().from(pipelineTasks).where(eq(pipelineTasks.projectId, id)).all();
     for (const t of tasks) {
-      db.delete(agentRuns).where(eq(agentRuns.taskId, t.id)).run();
       db.delete(reflexionLogs).where(eq(reflexionLogs.taskId, t.id)).run();
     }
     // 科研高级功能级联清理：审稿意见（按文档）、筛选队列（按项目）、抽取取值与字段（按项目）

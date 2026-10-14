@@ -61,6 +61,67 @@ async function main() {
   fs.writeFileSync(bundleEnv, '# 桌面端通常无需此文件：AI Key 在应用「设置」页配置（存本地数据库）。\n');
   ok(`server bundle 就绪：${serverBundleDir}`);
 
+  // ---------- 1.5 Electron ABI：为内嵌 Node 重编原生模块 ----------
+  // 背景：server bundle 的 better-sqlite3 在开发机按 Node ABI 编译；Electron 内嵌 Node 的 ABI
+  // 与系统 Node 不同（Node24=137 / Electron38 内嵌 Node22=127），不重编会在运行时报 ERR_DLOPEN_FAILED。
+  // 本步骤读取 desktop 的 electron 版本，按 Electron 目标重编（幂等：ABI 戳一致则跳过）。
+  step('为 Electron ABI 重编原生模块（better-sqlite3）…');
+  const electronPkgPath = path.join(desktopDir, 'node_modules', 'electron', 'package.json');
+  if (!fs.existsSync(electronPkgPath)) {
+    console.error('\x1b[31m[prepare]\x1b[0m 未找到 electron（请先 pnpm install）');
+    process.exit(1);
+  }
+  const electronVersion = JSON.parse(fs.readFileSync(electronPkgPath, 'utf8')).version;
+
+  /** 在 server bundle 内定位 better-sqlite3 模块目录（pnpm .pnpm 布局优先，回退深搜 binding.gyp） */
+  function findBetterSqlite3(rootDir) {
+    const pnpmDir = path.join(rootDir, 'node_modules', '.pnpm');
+    if (fs.existsSync(pnpmDir)) {
+      const hit = fs.readdirSync(pnpmDir).find((d) => d.startsWith('better-sqlite3@'));
+      if (hit) {
+        const dir = path.join(pnpmDir, hit, 'node_modules', 'better-sqlite3');
+        if (fs.existsSync(path.join(dir, 'binding.gyp'))) return dir;
+      }
+    }
+    const stack = [rootDir];
+    while (stack.length) {
+      const d = stack.pop();
+      let entries = [];
+      try {
+        entries = fs.readdirSync(d, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const full = path.join(d, e.name);
+        if (e.name === 'better-sqlite3' && fs.existsSync(path.join(full, 'binding.gyp'))) return full;
+        if (e.name === '.pnpm' || e.name === 'node_modules' || e.name === 'build' || e.name === 'deps' || e.name === 'src' || e.name === 'lib') stack.push(full);
+      }
+    }
+    return null;
+  }
+
+  const sqliteDir = findBetterSqlite3(serverBundleDir);
+  if (!sqliteDir) {
+    console.warn('\x1b[33m[prepare]\x1b[0m 未在 bundle 内找到 better-sqlite3（跳过 ABI 重编）');
+  } else {
+    const abiStamp = path.join(sqliteDir, '.electron-abi');
+    const binary = path.join(sqliteDir, 'build', 'Release', 'better_sqlite3.node');
+    const upToDate = fs.existsSync(binary) && fs.existsSync(abiStamp) && fs.readFileSync(abiStamp, 'utf8').trim() === electronVersion;
+    if (upToDate) {
+      ok(`better-sqlite3 已是 Electron ${electronVersion} ABI（跳过）`);
+    } else {
+      // 统一使用系统 CA（部分内网/企业证书环境需要）；Windows 走 node-gyp + MSVC，无需 shell 特判
+      execSync(
+        `npx --yes node-gyp rebuild --release --target=${electronVersion} --dist-url=https://electronjs.org/headers`,
+        { cwd: sqliteDir, stdio: 'inherit', shell: true, env: { ...process.env, NODE_OPTIONS: '--use-system-ca' } },
+      );
+      fs.writeFileSync(abiStamp, electronVersion);
+      ok(`better-sqlite3 已按 Electron ${electronVersion} ABI 重编`);
+    }
+  }
+
   // ---------- 2. web 静态产物 ----------
   step('复制前端产物…');
   cleanDir(webDir);

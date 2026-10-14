@@ -77,18 +77,15 @@ export function VersionDiffModal({
   onSelectB: (v: string) => void;
   onRestore: (s: VersionSnapshot) => void;
 }) {
-  // 版本命名：优先后端 versions[].name，本地态兜底会话内即时刷新
-  const [names, setNames] = useState<Record<number, string>>({});
+  // 版本命名：优先后端 versions[].name，本地态兜底会话内即时刷新。
+  // 后端 name 以「派生合并」接入（无 effect 播种）：本地已有值优先，其余来自快照。
+  const [localNames, setLocalNames] = useState<Record<number, string>>({});
   const [migNote, setMigNote] = useState('');
-
-  // 用后端返回的 name 播种本地态（已有本地值不覆盖）
-  useEffect(() => {
-    setNames((prev) => {
-      const next = { ...prev };
-      for (const s of snapshots) if (s.name && !next[s.version]) next[s.version] = s.name;
-      return next;
-    });
-  }, [snapshots]);
+  const names = useMemo(() => {
+    const next: Record<number, string> = {};
+    for (const s of snapshots) if (s.name) next[s.version] = s.name;
+    return { ...next, ...localNames };
+  }, [snapshots, localNames]);
 
   /** 一次性迁移：挂载/打开时把 localStorage 旧命名逐条写后端，成功后删 key；失败保留待重试 */
   useEffect(() => {
@@ -115,7 +112,7 @@ export function VersionDiffModal({
         try {
           await api.documents.setVersionName(docId, v, name);
           if (cancelled) return;
-          setNames((p) => ({ ...p, [v]: name }));
+          setLocalNames((p) => ({ ...p, [v]: name }));
           try { localStorage.removeItem(k); } catch { /* ignore */ }
         } catch {
           failed++; // 保留原 key 供下次重试
@@ -132,7 +129,7 @@ export function VersionDiffModal({
 
   const renameVersion = async (v: number, name: string) => {
     const trimmed = name.trim();
-    setNames((p) => ({ ...p, [v]: trimmed })); // 乐观更新，会话内即时生效
+    setLocalNames((p) => ({ ...p, [v]: trimmed })); // 乐观更新，会话内即时生效
     try {
       await api.documents.setVersionName(docId, v, trimmed);
     } catch (e: unknown) {

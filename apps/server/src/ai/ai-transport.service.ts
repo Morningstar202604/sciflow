@@ -2,6 +2,9 @@ import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import pRetry from 'p-retry';
 import pLimit from 'p-limit';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { generateText, generateObject, streamText, jsonSchema as aiJsonSchema, type ModelMessage, type LanguageModelUsage } from 'ai';
+import type { LanguageModel } from 'ai';
 import { decryptSecret } from '../common/secret-crypto';
 import { sqlite } from '../db/database';
 import { db } from '../db/database';
@@ -38,14 +41,15 @@ export interface CompleteOptions {
   signal?: AbortSignal;
   /** 思考模式开关：仅 true 时附加上下文厂商 thinking 参数；不支持的厂商静默忽略 */
   enableThinking?: boolean;
-  /** JSON Schema 结构化输出（OpenAI response_format: json_schema） */
+  /** JSON Schema 结构化输出（经 AI SDK jsonSchema 包装走 response_format） */
   jsonSchema?: { name: string; schema: Record<string, unknown> };
 }
 
 /**
- * 底层 LLM 传输层 — 纯 OpenAI-兼容 HTTP 协议调用、并发限流、
- * 退避重试、token 成本落库、多厂商切换。
+ * 底层 LLM 传输层 — 经 Vercel AI SDK（@ai-sdk/openai-compatible）访问 OpenAI 兼容端点，
+ * 保留 fast/strong 路由、p-limit 限流、p-retry 退避、token 成本落库、多厂商切换。
  *
+ * 协议细节（SSE 解析、分块拼装、usage 提取）由 AI SDK 承担，本层不再手写。
  * 不含任何 domain 级 prompt / 业务方法（那些在 AiService 里）。
  * 其他不相干服务也可以独立注入本 provider，复用 transport 层。
  */
@@ -160,40 +164,53 @@ export class AiTransportService {
     }
   }
 
-  /** 统一构造 OpenAI 兼容补全请求 */
-  protected buildChatRequest(
-    model: string,
-    messages: ChatMessage[],
-    opts: { temperature?: number; maxTokens?: number; stream?: boolean; streamIncludeUsage?: boolean; enableThinking?: boolean; jsonSchema?: { name: string; schema: Record<string, unknown> } },
-    timeoutMs: number,
-    signal?: AbortSignal,
-  ) {
-    const body: Record<string, unknown> = {
-      model,
-      messages,
-      temperature: opts.temperature ?? 0.7,
-      max_tokens: opts.maxTokens ?? 4096,
-      stream: opts.stream ?? false,
-    };
-    // OpenAI 兼容流式：要求最后一个 chunk 带 usage 统计
-    if (opts.stream && opts.streamIncludeUsage) body.stream_options = { include_usage: true };
-    // 推理开关：仅显式开启时附加方舟/智谱系 thinking 参数
-    if (opts.enableThinking) body.thinking = { type: 'enabled' };
-    // JSON Schema 结构化输出
-    if (opts.jsonSchema) {
-      body.response_format = { type: 'json_schema', json_schema: { name: opts.jsonSchema.name, strict: true, schema: opts.jsonSchema.schema } };
-    }
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    return fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this._secretKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
-    });
+
+
+  /**
+   * AI SDK v7 语义：system 消息不得混入 messages/prompt（真实厂家会直接 400：
+   * "System messages are not allowed... Use the instructions option instead"；mock 网关不校验）。
+   * 统一拆分：system → instructions，其余保持顺序。
+   */
+  private splitSystemMessages(messages: ChatMessage[]): { instructions: string | undefined; rest: ModelMessage[] } {
+    const sys = messages
+      .filter((m) => m.role === 'system')
+      .map((m) => m.content)
+      .join('\n\n')
+      .trim();
+    const rest = messages.filter((m) => m.role !== 'system') as unknown as ModelMessage[];
+    return { instructions: sys || undefined, rest };
   }
+
+
+  /** 上游限流判定：AI SDK 用 statusCode；兼容 status 字段与厂商文案（含中文"速率限制"/英文 rate limit/quota/429） */
+  static isRetriableLimit(err: unknown): boolean {
+    const e = err as { statusCode?: number; status?: number; message?: string } | null;
+    if (e?.statusCode === 429 || e?.status === 429) return true;
+    const msg = String(e?.message || '');
+    return /\(429\)|\b429\b|rate.?limit|too many requests|quota|速率限制|限流|限额/i.test(msg);
+  }
+
+  /** AI SDK usage（对象/数值两种版本兼容）→ 平铺 token 数 */
+  private usageTokens(usage: LanguageModelUsage | undefined): { prompt: number; completion: number } {
+    if (!usage) return { prompt: 0, completion: 0 };
+    const num = (v: unknown): number => (typeof v === 'number' ? v : typeof (v as { total?: unknown })?.total === 'number' ? (v as { total: number }).total : 0);
+    return { prompt: num(usage.inputTokens), completion: num(usage.outputTokens) };
+  }
+
+  /** 构造 AI SDK 模型实例（每次调用读取当前 baseUrl/key，保证设置页切换立即生效） */
+  protected buildModel(modelId: string, signal?: AbortSignal): LanguageModel {
+    void signal;
+    const provider = createOpenAICompatible({
+      name: 'sciflow',
+      baseURL: this.baseUrl,
+      apiKey: this._secretKey,
+      headers: { Authorization: `Bearer ${this._secretKey}` },
+      supportsStructuredOutputs: true,
+    });
+    return provider(modelId);
+  }
+
+  /** 非 stream_options.include_usage 兼容探测：某些网关拒绝该参数（保留容错语义由 AI SDK headers/参数层处理） */
 
   /** 非流式补全（p-limit 限流 + p-retry 指数退避重试 + token 成本追踪） */
   async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
@@ -205,92 +222,134 @@ export class AiTransportService {
     return this.limit(async () =>
       pRetry(
         async () => {
-          const res = await this.buildChatRequest(model, messages, { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false }, 180_000);
-          if (!res.ok) {
-            const errText = await res.text().catch(() => '');
-            // 429 触发重试；其他 HTTP 错误立即抛出不重试
-            if (res.status === 429) {
-              throw new HttpException(`AI 限流 (429)`, 429);
-            }
-            throw new HttpException(`AI 服务调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
+          const { instructions, rest } = this.splitSystemMessages(messages);
+          const callArgs = {
+            model: this.buildModel(model),
+            temperature: opts.temperature ?? 0.7,
+            maxOutputTokens: opts.maxTokens ?? 4096,
+            abortSignal: opts.signal,
+            instructions,
+            messages: rest,
+          };
+          if (opts.jsonSchema) {
+            // 结构化路径：走 generateObject（v7 中 response_format json_schema 仅由它下发）
+            const { object, usage } = await generateObject({
+              ...callArgs,
+              schema: aiJsonSchema(opts.jsonSchema.schema),
+            });
+            const text = JSON.stringify(object);
+            if (!text.trim()) throw new HttpException('AI 返回空响应', 429);
+            return { text, usage };
           }
-          const data = (await res.json()) as Record<string, unknown>;
-          const content = String((data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content ?? '').trim();
-          // 空响应按失败重试
-          if (!content) throw new HttpException('AI 返回空响应', 429);
-          return { content, data };
+          const { text, usage } = await generateText(callArgs);
+          if (!text.trim()) throw new HttpException('AI 返回空响应', 429);
+          return { text, usage };
         },
         {
-          retries: 3,
+          retries: 4,
           factor: 2,
-          minTimeout: 1000,
-          maxTimeout: 30_000,
+          minTimeout: 2000,
+          maxTimeout: 60_000,
           onFailedAttempt: (err) => {
-            // 仅对 429 限流重试；其他错误立即抛出（p-retry 传入的是原始 error 实例）
-            const status = (err as { status?: number }).status;
-            if (status !== 429) throw err;
-            this.logger.warn(`AI 限流(429) 重试：第 ${err.attemptNumber} 次失败，剩余 ${err.retriesLeft} 次`);
+            if (!AiTransportService.isRetriableLimit(err)) throw err;
+            this.logger.warn(`AI 限流重试：第 ${err.attemptNumber} 次失败，剩余 ${err.retriesLeft} 次（${String((err as { message?: string }).message || '').slice(0, 80)}）`);
           },
         },
       ),
-    ).then(({ content, data }) => {
-      const usage = (data?.usage as Record<string, number> | undefined) || {};
+    ).then(({ text, usage }) => {
+      const tokens = this.usageTokens(usage);
       this.logLlmCall({
         caller,
         model,
-        promptTokens: Number(usage.prompt_tokens) || 0,
-        completionTokens: Number(usage.completion_tokens) || 0,
+        promptTokens: tokens.prompt,
+        completionTokens: tokens.completion,
         latencyMs: Date.now() - t0,
         success: true,
       });
-      return content;
+      return text;
     }).catch((err) => {
       this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: err?.message });
       if (err instanceof HttpException) throw err;
-      throw new HttpException('AI 服务调用失败（多次重试后仍失败）', HttpStatus.BAD_GATEWAY);
+      if (AiTransportService.isRetriableLimit(err)) throw new HttpException('AI 限流 (429)：上游速率限制，请降低 AI_RPM_CAP 或升级模型配额', 429);
+      throw new HttpException(`AI 服务调用失败: ${String(err?.message || err).slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
     });
   }
 
-  /** 流式补全，返回上游响应体（Web ReadableStream），用于 SSE 转发 */
+  /** 结构化补全：zod schema 强约束输出（约束工程主路径，替代手写 JSON 抠取） */
+  async completeStructured<T>(messages: ChatMessage[], schema: import('zod').core.$ZodType, opts: CompleteOptions = {}): Promise<T> {
+    this.assertConfigured();
+    const t0 = Date.now();
+    const model = this.resolveModel(opts);
+    const caller = opts.context || 'general';
+    return this.limit(async () =>
+      pRetry(
+        async () => {
+          const { instructions, rest } = this.splitSystemMessages(messages);
+          const { object, usage } = await generateObject({
+            model: this.buildModel(model),
+            temperature: opts.temperature ?? 0.3,
+            maxOutputTokens: opts.maxTokens ?? 4096,
+            abortSignal: opts.signal,
+            schema,
+            instructions,
+            messages: rest,
+          });
+          return { object: object as T, usage };
+        },
+        { retries: 2, factor: 2, minTimeout: 1000, maxTimeout: 15_000, onFailedAttempt: (err) => { throw err; } },
+      ),
+    ).then(({ object, usage }) => {
+      const tokens = this.usageTokens(usage);
+      this.logLlmCall({ caller, model, promptTokens: tokens.prompt, completionTokens: tokens.completion, latencyMs: Date.now() - t0, success: true });
+      return object;
+    }).catch((err) => {
+      this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: err?.message });
+      throw new HttpException(`AI 结构化输出失败: ${String(err?.message || err).slice(0, 200)}`, HttpStatus.BAD_GATEWAY);
+    });
+  }
+
+  /** 流式补全：返回 OpenAI 兼容 SSE 文本流（经 AI SDK streamText → 转接为上游 ReadableStream 语义，供 sse.helper 转发） */
   async completeStream(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<ReadableStream<Uint8Array>> {
     this.assertConfigured();
     const t0 = Date.now();
     const model = this.resolveModel(opts);
     const caller = opts.context || 'general';
-    const reqOpts = {
-      temperature: opts.temperature,
-      maxTokens: opts.maxTokens,
-      stream: true,
-      streamIncludeUsage: opts.streamIncludeUsage,
-      enableThinking: opts.enableThinking,
-    };
-    // 用 p-limit 排队，避免并发流式请求打爆上游
+    const selfLog = this.logLlmCall.bind(this);
     return this.limit(async () => {
-      let res = await this.buildChatRequest(model, messages, reqOpts, 300_000, opts.signal);
-      // 部分厂商拒绝 stream_options.include_usage → 去掉该参数容错重试一次
-      if (!res.ok && opts.streamIncludeUsage) {
-        const status = res.status;
-        await res.body?.cancel().catch(() => undefined);
-        this.logger.warn(`上游拒绝 stream_options.include_usage (HTTP ${status})，去掉该参数重试`);
-        res = await this.buildChatRequest(
-          model,
-          messages,
-          { temperature: opts.temperature, maxTokens: opts.maxTokens, stream: true, enableThinking: opts.enableThinking },
-          300_000,
-          opts.signal,
-        );
-      }
-      if (!res.ok || !res.body) {
-        const errText = await res.text().catch(() => '');
-        this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: `HTTP ${res.status}` });
-        throw new HttpException(`AI 流式调用失败 (${res.status}): ${errText.slice(0, 300)}`, HttpStatus.BAD_GATEWAY);
-      }
-      this.logLlmCall({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: true });
-      return res.body;
+      const { instructions, rest } = this.splitSystemMessages(messages);
+      const result = streamText({
+        model: this.buildModel(model, opts.signal),
+        temperature: opts.temperature ?? 0.7,
+        maxOutputTokens: opts.maxTokens ?? 4096,
+        abortSignal: opts.signal,
+        instructions,
+        messages: rest,
+      });
+      // streamText.textStream → 重新编码为 SSE data: 行流，保持 sse.helper 的转发契约
+      const encoder = new TextEncoder();
+      const sse = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          try {
+            for await (const delta of result.textStream) {
+              if (delta) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: delta }, index: 0 }] })}\n\n`));
+            }
+            const usage = await result.usage;
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, index: 0, finish_reason: 'stop' }], usage: { prompt_tokens: usage?.inputTokens ?? 0, completion_tokens: usage?.outputTokens ?? 0, total_tokens: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0) } })}\n\n`));
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            selfLog({ caller, model, promptTokens: usage?.inputTokens ?? 0, completionTokens: usage?.outputTokens ?? 0, latencyMs: Date.now() - t0, success: true });
+          } catch (err: any) {
+            selfLog({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: err?.message });
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: String(err?.message || err) })}\n\n`));
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return sse;
     });
   }
 
-  /** 查询可用模型列表（OpenAI 兼容 /v1/models） */
+  /** 查询可用模型列表（OpenAI 兼容 /models；openai-compatible v4 未暴露列表方法，保留 fetch） */
   async listModels(): Promise<string[]> {
     this.assertConfigured();
     try {
@@ -313,27 +372,13 @@ export class AiTransportService {
     const target = model || this.fastModel;
     const t0 = Date.now();
     try {
-      const res = await this.buildChatRequest(
-        target,
-        [{ role: 'user', content: '请只回复两个字：正常' }],
-        // 推理型网关（u2-flash / DeepSeek-R1 兼容）会先消耗 token 在 reasoning_content 上；
-        // max_tokens 太小会把正文挤成空串，误报「空回复」。给足预算，并在正文为空时回退 reasoning 佐证连通。
-        { temperature: 0, maxTokens: 512, stream: false },
-        30_000,
-      );
-      if (!res.ok) {
-        const err = await res.text().catch(() => '');
-        return { ok: false, reply: `HTTP ${res.status}: ${err.slice(0, 200)}`, model: target, latencyMs: Date.now() - t0 };
-      }
-      const data = (await res.json()) as Record<string, unknown>;
-      const msg = (data.choices as Array<{ message?: Record<string, unknown> }>)?.[0]?.message ?? {};
-      const content = String(msg.content ?? '').trim();
-      // 正文非空直接回显；正文空但推理通道有内容，说明网关连通、只是预算被推理吃掉
-      const reply = content
-        ? content
-        : msg.reasoning_content || msg.thinking
-          ? '（连通正常：推理通道有输出，正文为空——可忽略）'
-          : '（空回复）';
+      const { text } = await generateText({
+        model: this.buildModel(target),
+        temperature: 0,
+        maxOutputTokens: 512,
+        messages: [{ role: 'user', content: '请只回复两个字：正常' }],
+      });
+      const reply = text.trim() || '（空回复）';
       return { ok: true, reply, model: target, latencyMs: Date.now() - t0 };
     } catch (e: any) {
       return { ok: false, reply: e.message || String(e), model: target, latencyMs: Date.now() - t0 };

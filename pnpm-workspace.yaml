@@ -10,6 +10,28 @@ allowBuilds:
   # node-llama-cpp 必须允许 build scripts 运行，否则其原生二进制不会编译
   # （HEAD 里的 false 是 bug：导致运行时 GGUF 加载失败）
   node-llama-cpp: true
+  # 遥测类 postinstall：显式拒绝执行（不联网、无副作用）
+  autoevals: false
+  '@scarf/scarf': false
+
+minimumReleaseAgeExclude:
+  - '@typescript-eslint/eslint-plugin@8.71.2'
+  - '@typescript-eslint/parser@8.71.2'
+  - '@typescript-eslint/project-service@8.71.2'
+  - '@typescript-eslint/scope-manager@8.71.2'
+  - '@typescript-eslint/tsconfig-utils@8.71.2'
+  - '@typescript-eslint/type-utils@8.71.2'
+  - '@typescript-eslint/types@8.71.2'
+  - '@typescript-eslint/typescript-estree@8.71.2'
+  - '@typescript-eslint/utils@8.71.2'
+  - '@typescript-eslint/visitor-keys@8.71.2'
+  - typescript-eslint@8.71.2
+  - '@aws-sdk/credential-provider-node@3.972.86'
 
 overrides:
   esbuild: ^0.25.0
+
+# 显式声明「忽略构建脚本」（pnpm 10+ 机制）
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
+  - autoevals

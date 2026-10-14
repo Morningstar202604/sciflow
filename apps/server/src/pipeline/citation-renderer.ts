@@ -127,7 +127,7 @@ export class CitationRenderer {
         const ref = this.db.select().from(references).where(eq(references.id, refId)).get();
         insertOne(refId, suppSpot.get(idx), ref?.doi || '');
       }
-    } catch (e: any) {
+    } catch {
       // swallow — citation back-fill is best-effort
     }
   }

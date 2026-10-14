@@ -2,6 +2,31 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.4.0] - 2026-10-15
+
+平台级重构（去手搓化 × 成熟件换装）+ 真实模型端到端验收 + 五平台镜像发布。
+
+### Added
+- **Vercel AI SDK 模型层**（`ai@7` + `@ai-sdk/openai-compatible`）：传输 / 流式 / 重试 / 结构化输出整体换装，`generateObject` + zod 取代手写 JSON 抠取（`jsonrepair` 仅兜底）；兼容 Ollama / LM Studio 本地端点。
+- **LangGraph 编排层**：主流水线重写为真 DAG——`interrupt()` 大纲人工确认、SqliteSaver checkpointer 断点续跑、质量门 Reflexion 回炉回环、分章起草 p-limit 并行（`AI_DRAFT_CONCURRENCY` 可配）。
+- **MCP 官方 SDK**：`POST /api/mcp/rpc`（Streamable HTTP）+ `cli mcp serve`（stdio）双传输，替换自造 REST 工具协议。
+- **前端栈升级**：TanStack Query 全站数据获取（含流水线轮询）、TanStack Table（钉 `^8.21.3`）抽取矩阵、sigma.js + graphology 重写引用网络（WebGL）、streamdown 流式 Markdown、CodeMirror 6 写作编辑器、react-router 声明式路由。
+- **对话优先工作台（WorkspacePage）**：对话线程 + 内联流水线卡（大纲确认在对话内完成）+ 文档预览；线程 localStorage 持久化 + 会话历史侧栏。
+- **知识库检索升级**：sqlite-vec 向量 ANN + FTS5 **trigram** 全文混合检索（中文可检索，3-gram OR 展开）、`@langchain/textsplitters` 分块、`unpdf` PDF 解析。
+- **质量工程**：eslint flat config 全仓 0 error（39 项豁免清零）；vitest（server 16 / web 15，含 msw 网络层拦截）；autoevals 离线 scorer 守护；promptfoo 契约评估；Playwright 冒烟；`pnpm openapi:gen`（Swagger → openapi-typescript，111 paths）；CI 扩为三 job（类型/单测/构建 + mock 全量回归 161 项 + E2E/评测）。
+- **mock 网关重制**：MSW 进程内拦截（`AI_MOCK` 不再占端口）；`apps/server/scripts/mock-openai-http.mjs` 将同一路由表暴露为 `127.0.0.1:5099` HTTP 端点，供 promptfoo 等外部工具离线调用。
+- **五平台镜像**：GitCode / Gitee / GitHub ×3 同步发布（CI 徽章 + 镜像导航 + 英文 README 重写为真实口径）。
+
+### Fixed
+- **AI SDK v7 system 消息语义**（真实模型 400 根因）：system 统一拆出为 `instructions`（generateText / generateObject / streamText 三调用点全覆盖）。
+- **限流误判**：识别 `statusCode` 字段与中英文「速率限制 / 配额」文案，退避放宽至 4 次 / 2s→60s（此前免费档上游配额错误不重试即失败）。
+- **默认视图短路**：根路径意外落旧 dashboard（`||` 短路三元兜底）修复为对话工作台；E2E 断言收紧。
+- **Electron 33 → 38**：内嵌 Node 22 原生 `require(ESM)`，解决 `swagger@12` / `p-retry@6` / `ai@7` ESM-only 依赖链；better-sqlite3 打包时按 Electron ABI 自动重编（幂等 ABI 戳）。
+- **评审维度独立性**：评分锚点 + 引用存疑不再连坐其他维度（"疑似/无法核实"表述，不臆断学术不端）；大纲 prompt 写作类型感知（综述不得套「实验与结果」章节）。
+
+### Changed
+- README（中文 + 英文）/ docs 与实现全面对齐（图表 / 引用网络 / 检索 / 编排口径）；版本统一 `0.4.0`（root / server / web / desktop / CLI）。
+
 ## [0.3.0] - 2026-10
 
 方向修正：还原被误删的完整功能集，做可交付可打包的完整智能体。

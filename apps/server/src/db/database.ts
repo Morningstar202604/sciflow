@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import * as sqliteVecMod from 'sqlite-vec';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
@@ -30,7 +31,7 @@ try {
   // 会抛 ERR_PACKAGE_PATH_NOT_EXPORTED（此前启动报错的根因）。
   // 排障：SCIFLOW_NO_VEC=1 时跳过加载（向量检索回退 LIKE），用于定位原生扩展兼容性问题。
   if (process.env.SCIFLOW_NO_VEC !== '1') {
-    const sqliteVec = require('sqlite-vec');
+    const sqliteVec = sqliteVecMod;
     sqlite.loadExtension(sqliteVec.getLoadablePath());
     console.log('[DB] sqlite-vec 扩展已加载（向量 ANN 检索可用）');
   } else {
@@ -177,21 +178,6 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge_doc(project_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_doc ON knowledge_chunk(doc_id);
 CREATE INDEX IF NOT EXISTS idx_reflexion_task ON reflexion_log(task_id);
 CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_log(type);
-CREATE TABLE IF NOT EXISTS agent_run (
-  id TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL,
-  agent_type TEXT NOT NULL,
-  agent_name TEXT NOT NULL,
-  status TEXT DEFAULT 'running',
-  input TEXT DEFAULT '',
-  output TEXT DEFAULT '',
-  detail TEXT DEFAULT '',
-  error TEXT DEFAULT '',
-  duration_ms INTEGER DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_agent_task ON agent_run(task_id);
 CREATE TABLE IF NOT EXISTS model_provider (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -378,7 +364,7 @@ CREATE INDEX IF NOT EXISTS idx_submission_event_submission ON submission_status_
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunk_fts USING fts5(
   chunk_id UNINDEXED,
   content,
-  tokenize='unicode61'
+  tokenize='trigram'
 );
 -- FTS5 同步触发器（INSERT/DELETE/UPDATE）
 CREATE TRIGGER IF NOT EXISTS knowledge_chunk_fts_ai AFTER INSERT ON knowledge_chunk BEGIN
@@ -505,6 +491,49 @@ ensureColumn('reference', 'notes', "TEXT DEFAULT ''");
 ensureColumn('project', 'preface', "TEXT DEFAULT ''");
 // 差距 #1：自定义大纲模板（JSON 字符串数组）；旧库补齐默认 '[]'
 ensureColumn('project', 'templates', "TEXT DEFAULT '[]'");
+
+// ---------- 迁移：knowledge_chunk_fts 从 unicode61 升级到 trigram ----------
+// 原因：unicode61 不切分 CJK（整段中文是一个 token），中文短语检索永远命中不到；
+// trigram 支持 >=3 字符子串匹配（含 CJK），配合 buildTrigramQuery 的 3-gram OR 展开。
+{
+  const row = sqlite
+    .prepare(`
+      SELECT sql FROM sqlite_master WHERE type='table' AND name='knowledge_chunk_fts'
+    `)
+    .get() as { sql?: string } | undefined;
+  if (row?.sql && /unicode61/.test(row.sql)) {
+    const reindex = () => {
+      sqlite.exec(`
+        DROP TRIGGER IF EXISTS knowledge_chunk_fts_ai;
+        DROP TRIGGER IF EXISTS knowledge_chunk_fts_ad;
+        DROP TRIGGER IF EXISTS knowledge_chunk_fts_au;
+        DROP TABLE IF EXISTS knowledge_chunk_fts;
+        CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
+          chunk_id UNINDEXED,
+          content,
+          tokenize='trigram'
+        );
+        INSERT INTO knowledge_chunk_fts(chunk_id, content) SELECT id, content FROM knowledge_chunk;
+        CREATE TRIGGER knowledge_chunk_fts_ai AFTER INSERT ON knowledge_chunk BEGIN
+          INSERT INTO knowledge_chunk_fts(chunk_id, content) VALUES (new.id, new.content);
+        END;
+        CREATE TRIGGER knowledge_chunk_fts_ad AFTER DELETE ON knowledge_chunk BEGIN
+          DELETE FROM knowledge_chunk_fts WHERE chunk_id = old.id;
+        END;
+        CREATE TRIGGER knowledge_chunk_fts_au AFTER UPDATE ON knowledge_chunk BEGIN
+          UPDATE knowledge_chunk_fts SET content = new.content WHERE chunk_id = old.id;
+        END;
+      `);
+    };
+    try {
+      reindex();
+      const n = (sqlite.prepare('SELECT COUNT(*) AS c FROM knowledge_chunk_fts').get() as { c: number }).c;
+      console.log(`[DB] 迁移: knowledge_chunk_fts 已切换到 trigram tokenizer（重建索引 ${n} 块）`);
+    } catch (e: any) {
+      console.warn(`[DB] FTS trigram 迁移失败（保留 unicode61）: ${e?.message || e}`);
+    }
+  }
+}
 
 /** 期刊库种子：内置国内主流期刊（仅写领域定位等事实描述；ISSN/IF/分区等不确定指标一律 NULL，禁止编造） */
 const seedJournals = [

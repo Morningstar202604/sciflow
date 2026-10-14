@@ -1,19 +1,36 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, Eye, FileText, Pencil } from 'lucide-react';
+import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import type { Doc } from '../../types';
-import { Badge, Card, Textarea } from '../../components/ui';
+import { Badge, Card } from '../../components/ui';
 
 /**
  * WritingEditor — 中间编辑/预览主区。
- * 包含：文档标题栏、⌘S 已保存 badge、版本号、编辑/分栏/预览模式切换按钮、
- *       textarea 编辑态、split 右半预览 / 纯预览态子组件透传插槽。
+ * 编辑器：CodeMirror 6（@uiw/react-codemirror + markdown 模式），替代裸 Textarea：
+ * 语法高亮 / 行号 / 折行 / 括号配对；keep 的 DOM 契约见下方 handle。
  *
  * 行为说明：
  *  - 标题 blur 回调给父组件（父组件持 doc/docs state，update API 后 refresh 列表）
  *  - 模式切换回调给父组件（editorMode 位于父级）
- *  - textarea DOM 通过 ref 暴露 id="sciflow-editor"，供父组件 getEditorTa() 做光标定位
- *    （插入引用锚点 / 实验结论等跨组件光标操作）
+ *  - 光标插入契约：父组件（WritingPage）经由 `getWritingEditorHandle()` 取
+ *    `{ getCursor, setCursor }` 做引用锚点/实验结论的跨组件光标定位。
  */
+
+export interface WritingEditorHandle {
+  /** 当前光标（选区起点）；编辑器未挂载返回 null */
+  getCursor(): number | null;
+  /** 聚焦并把光标放到指定位置 */
+  setCursor(pos: number): void;
+}
+
+let handle: WritingEditorHandle | null = null;
+
+/** 供 WritingPage 等父级组件获取编辑器句柄（挂载后可用，卸载即失效） */
+export function getWritingEditorHandle(): WritingEditorHandle | null {
+  return handle;
+}
+
 export function WritingEditor({
   doc,
   content,
@@ -35,11 +52,34 @@ export function WritingEditor({
   /** 预览区 JSX 插槽（WritingPreview 由父组件组装后传入） */
   renderPreview: React.ReactNode;
 }) {
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const cmRef = useRef<ReactCodeMirrorRef>(null);
+  // 暗色跟随（App 在 <html> 上切换 .dark 类）
+  const [dark, setDark] = useState(() => typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
 
-  // 暴露 DOM id 供父组件 getEditorTa() 定位
   useEffect(() => {
-    if (taRef.current) taRef.current.id = 'sciflow-editor';
+    const el = document.documentElement;
+    const obs = new MutationObserver(() => setDark(el.classList.contains('dark')));
+    obs.observe(el, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
+
+  useEffect(() => {
+    handle = {
+      getCursor: () => {
+        const view = cmRef.current?.view;
+        if (!view) return null;
+        return view.state.selection.main.head;
+      },
+      setCursor: (pos: number) => {
+        const view = cmRef.current?.view;
+        if (!view) return;
+        view.focus();
+        view.dispatch({ selection: { anchor: pos } });
+      },
+    };
+    return () => {
+      handle = null;
+    };
   }, []);
 
   return (
@@ -72,15 +112,24 @@ export function WritingEditor({
           ))}
         </div>
       </div>
-      <div className={`flex-1 min-h-0 ${editorMode === 'split' ? 'flex' : ''}`}>
+      <div className={`flex-1 min-h-0 flex ${editorMode === 'split' ? 'flex-row' : 'flex-col'}`}>
         {editorMode !== 'preview' && (
-          <Textarea
-            ref={taRef}
-            className={`flex-1 border-0 rounded-none focus:ring-0 focus:border-0 p-4 text-[13.5px] leading-relaxed ${editorMode === 'split' ? 'w-1/2 border-r border-slate-100 dark:border-slate-800' : 'w-full'}`}
-            value={content}
-            onChange={(e) => onChangeContent(e.target.value)}
-            placeholder="在这里撰写论文正文（支持 Markdown）…可使用右侧 AI 工具：大纲生成、章节起草、润色、翻译、降重"
-          />
+          <div
+            id="sciflow-editor"
+            className={`flex-1 min-w-0 h-full overflow-hidden text-[13.5px] ${editorMode === 'split' ? 'w-1/2 border-r border-slate-100 dark:border-slate-800' : 'w-full'}`}
+          >
+            <CodeMirror
+              ref={cmRef}
+              value={content}
+              onChange={onChangeContent}
+              height="100%"
+              theme={dark ? 'dark' : 'light'}
+              extensions={[markdown({ base: markdownLanguage })]}
+              placeholder="在这里撰写论文正文（支持 Markdown）…可使用右侧 AI 工具：大纲生成、章节起草、润色、翻译、降重"
+              basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true, autocompletion: false }}
+              style={{ height: '100%' }}
+            />
+          </div>
         )}
         {editorMode !== 'edit' && renderPreview}
       </div>

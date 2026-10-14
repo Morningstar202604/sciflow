@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+/* streamdown（流式 Markdown 渲染）的 utility 类扫描 */
+@source "../node_modules/streamdown/dist/*.js";
 
 /* 手动切换暗色模式（Tailwind v4：.dark 类驱动 dark: 变体） */
 @custom-variant dark (&:where(.dark, .dark *));

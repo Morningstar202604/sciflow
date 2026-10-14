@@ -118,7 +118,7 @@ NotebookLM 式本地知识库：上传资料 → 分块 → BM25+向量混合检
 | DELETE | `/api/knowledge/:id` | 删除资料（连同分块） |
 
 ### pipeline —— 全自动流水线状态机（`/api/pipeline`）
-Supervisor 多智能体编排的状态机 + 断点续跑。
+顺序流水线状态机（主题验证→文献→大纲→人工确认→起草→质量门→润色→引用）+ 断点续跑。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -127,9 +127,8 @@ Supervisor 多智能体编排的状态机 + 断点续跑。
 | GET | `/api/pipeline/:id` | 流水线详情（含步骤状态） |
 | POST | `/api/pipeline/:id/confirm-outline` | 大纲人工确认点继续 |
 | DELETE | `/api/pipeline/:id` | 取消流水线 |
-| GET | `/api/pipeline/:id/agents` | 子智能体执行轨迹（状态/耗时/摘要） |
 
-> `orchestrator/` 目录不含 controller，是被 pipeline 内部调用的 Supervisor 编排服务（Planner/Research/Writer/Reviewer/Polisher）。
+> 多智能体编排（`graph/`，LangGraph）按 ARCHITECTURE.md §5 P2 交付。
 
 ### research —— 研究设计 / 模拟评审 / 审稿意见（`/api/research`）
 

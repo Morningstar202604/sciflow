@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# CI 不构建桌面端：跳过 Electron 二进制下载（约 100MB/次），只装依赖做类型与单测
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
 jobs:
   build-and-typecheck:
     runs-on: ubuntu-latest
@@ -29,6 +33,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Typecheck server
         run: pnpm --filter @sciflow/server typecheck
 
@@ -37,6 +44,9 @@ jobs:
 
       - name: Unit tests (server)
         run: pnpm --filter @sciflow/server test
+
+      - name: Unit tests (web)
+        run: pnpm --filter @sciflow/web test
 
       - name: Build server
         run: pnpm --filter @sciflow/server build
@@ -53,3 +63,99 @@ jobs:
             exit 1
           fi
           echo "✓ .env 未被跟踪"
+
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build server
+        run: pnpm --filter @sciflow/server build
+
+      - name: Start server (AI_MOCK=1) and wait for health
+        run: |
+          AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow-ci.db PORT=3000 node apps/server/dist/main.js > /tmp/sciflow-ci.log 2>&1 &
+          echo $! > /tmp/sciflow-ci.pid
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:3000/api/health > /dev/null; then echo "server up"; exit 0; fi
+            sleep 1
+          done
+          echo "::error::server failed to become healthy"; tail -50 /tmp/sciflow-ci.log; exit 1
+
+      - name: Full regression (mock gateway)
+        run: SCIFLOW_BASE=http://127.0.0.1:3000 AI_MOCK=1 python3 scripts/full_regression.py
+
+      - name: Stop server
+        if: always()
+        run: kill "$(cat /tmp/sciflow-ci.pid)" || true
+
+  e2e-and-evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build server + web
+        run: pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
+        env:
+          CI: false
+
+      - name: Start server (AI_MOCK=1)
+        run: |
+          AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow-e2e.db PORT=3000 node apps/server/dist/main.js > /tmp/sciflow-e2e.log 2>&1 &
+          echo $! > /tmp/sciflow-e2e.pid
+          for i in $(seq 1 40); do curl -sf http://127.0.0.1:3000/api/health > /dev/null && exit 0; sleep 1; done
+          echo "::error::server failed to start"; tail -50 /tmp/sciflow-e2e.log; exit 1
+
+      - name: Start mock HTTP gateway (for promptfoo)
+        run: |
+          node apps/server/scripts/mock-openai-http.mjs > /tmp/sciflow-mock-http.log 2>&1 &
+          echo $! > /tmp/sciflow-mock-http.pid
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:5099/v1/models > /dev/null && exit 0; sleep 0.5; done
+          echo "::error::mock http gateway failed to start"; tail -50 /tmp/sciflow-mock-http.log; exit 1
+
+      - name: Prompt evals (promptfoo, offline via mock HTTP gateway)
+        run: pnpm exec promptfoo eval -c evals/promptfooconfig.yaml --no-cache
+
+      - name: Start web dev server
+        run: |
+          nohup pnpm --filter @sciflow/web exec vite --host 127.0.0.1 --strictPort > /tmp/sciflow-web.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:5173/ > /dev/null && exit 0; sleep 1; done
+          echo "::error::web dev server failed to start"; tail -50 /tmp/sciflow-web.log; exit 1
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright smoke
+        run: npx playwright test --reporter=list
+        env:
+          E2E_BASE: http://127.0.0.1:5173
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kill "$(cat /tmp/sciflow-e2e.pid)" 2>/dev/null || true
+          kill "$(cat /tmp/sciflow-mock-http.pid)" 2>/dev/null || true

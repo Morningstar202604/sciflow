@@ -1,4 +1,5 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Project, Reference, EvidenceResult, ExtractedPaper, DeepDiveResult, GapResult, PaperComparisonResult, ReferenceGraph, ExtractionField, ExtractionTableResult, ScreeningItem } from '../types';
 import { Card, errMsg } from '../components/ui';
 import { api } from '../api/client';
@@ -31,8 +32,6 @@ export function LiteraturePage({ project }: { project: Project }) {
   const [extFields, setExtFields] = useState<ExtractionField[]>([]);
   const [extTable, setExtTable] = useState<ExtractionTableResult | null>(null);
   const [showExtraction, setShowExtraction] = useState(false);
-  const [graph, setGraph] = useState<ReferenceGraph | null>(null);
-  const [graphLoading, setGraphLoading] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [bibText, setBibText] = useState('');
   const [importing, setImporting] = useState(false);
@@ -45,17 +44,17 @@ export function LiteraturePage({ project }: { project: Project }) {
     api.references.screenList(project.id).then(setScreenItems).catch(() => setScreenItems([]));
   }, [project.id]);
 
-  useEffect(() => {
-    if (tool === 'graph' && !graph) {
-      setGraphLoading(true);
-      api.references
-        .graph(project.id)
-        .then(setGraph)
-        .catch((e: unknown) => setError(errMsg(e)))
-        .finally(() => setGraphLoading(false));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tool, project.id]);
+  // 引用网络（React Query）：切到图谱页时拉取；子组件写回走 setQueryData（保持局部演进能力）
+  const qc = useQueryClient();
+  const graphQuery = useQuery({
+    queryKey: ['ref-graph', project.id],
+    queryFn: () => api.references.graph(project.id),
+    enabled: tool === 'graph',
+  });
+  const graph: ReferenceGraph | null = graphQuery.data ?? null;
+  const graphLoading = graphQuery.isFetching;
+  const setGraph = (g: ReferenceGraph | null) => qc.setQueryData(['ref-graph', project.id], g);
+  const setGraphLoading = (_: boolean) => undefined;
 
   const runSummary = async () => {
     setBusy('summary');

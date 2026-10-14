@@ -1,35 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import pLimit from 'p-limit';
+import { Command } from '@langchain/langgraph';
 import { db } from '../db/database';
-import { pipelineTasks, documents, references, polishRecords, reflexionLogs, memoryLogs, pipelineConfigs, agentRuns } from '../db/schema';
+import { pipelineTasks, documents, pipelineConfigs } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
 import { parseJson, parseStringList } from '../common/json-guard';
 import { KnowledgeService } from '../knowledge/knowledge.service';
-import {
-  PipelineStep as DagPipelineStep,
-  AWAITING_CONFIRMATION,
-  StepNotification,
-  executeDAG,
-} from './pipeline-steps';
-import type {
-  PipelineContext,
-  PipelineTaskRow,
-  Outline,
-  QualityReport,
-  ResearchPlan,
-  ResearchTraceEntry,
-} from './pipeline-steps';
 import { CitationRenderer } from './citation-renderer';
-
-const STEP_REGISTRY: Record<string, string> = { 'topic-verify': '主题验证', 'literature': '文献调研', 'outline': '大纲生成', 'drafting': '分章起草', 'quality-gate': '质量门评分', 'polish': '润色定稿', 'citation-format': '引用格式化', 'complete': '完成' };
-
-export interface PipelineStepState {
-  key: string; label: string;
-  status: 'pending' | 'running' | 'awaiting_confirmation' | 'done' | 'scored' | 'retry' | 'failed' | 'skipped';
-  output?: string; retryCount: number;
-}
+import { AgentTraceService } from '../agent/agent-trace.service';
+import { buildPipelineGraph, type PipelineGraphDeps, type StepStatusWire } from './pipeline.graph';
+import type { Outline, PipelineTaskRow, ResearchPlan } from './pipeline-state';
 
 const STEPS: { key: string; label: string }[] = [
   { key: 'topic-verify', label: '主题验证' },
@@ -41,23 +24,97 @@ const STEPS: { key: string; label: string }[] = [
   { key: 'complete', label: '完成' },
 ];
 
-const MAX_RETRY = 2;
-const QUALITY_THRESHOLD = 80;
 const ZERO_HIT_NOTICE = '研究阶段未在本地文献库/知识库检索到相关条目，已依赖模型知识完成起草；建议到「文献调研」页添加相关文献（粘贴 DOI/导入 BibTeX）、检查关键词拼写，或在知识库上传资料后重新运行。';
+
+export interface PipelineStepState {
+  key: string; label: string;
+  status: StepStatusWire;
+  output?: string; retryCount: number;
+}
 
 interface ResearchMeta { lib: { title: string; score: number }[]; kn: PaperHit[]; }
 
+/**
+ * 流水线服务（LangGraph 编排门面）：
+ * - 编排/断点续跑/人工确认全部由 `pipeline.graph.ts` 的图承担（checkpointer = SQLite）。
+ * - 本类保留：公开 API（controller/cli 契约不变）、状态投影（pipeline_task.steps JSON 契约不变）、
+ *   领域辅助（跨库检索增强、引用池构建、并行分章起草）。
+ */
 @Injectable()
-export class PipelineService {
+export class PipelineService implements OnModuleInit {
   private readonly logger = new Logger(PipelineService.name);
   private readonly citationRenderer = new CitationRenderer(db);
-  private running = new Set<string>();
+  private graph!: ReturnType<typeof buildPipelineGraph>;
+  private readonly draftingLimit = pLimit(Math.max(1, Number(process.env.AI_DRAFT_CONCURRENCY || 3)));
+
+  /** taskId → agent_execution runId（每次图调用一次执行记录，断点续跑开新记录） */
+  private readonly traceRuns = new Map<string, string>();
 
   constructor(
     private readonly ai: AiService,
     private readonly references: ReferencesService,
     private readonly knowledge: KnowledgeService,
+    private readonly trace: AgentTraceService,
   ) {}
+
+  onModuleInit() {
+    const deps: PipelineGraphDeps = {
+      ai: {
+        summarizeLiterature: (t, p) => this.ai.summarizeLiterature(t, p),
+        writeOutline: (t, s) => this.ai.writeOutline(t, s),
+        planResearch: (t) =>
+          this.ai.writeSearchPlan(t).catch((e: any) => {
+            this.logger.warn(`检索规划失败（回退主题词）: ${e?.message || e}`);
+            return { keywords: [t] };
+          }),
+        reviewPaper: (t, c) => this.ai.reviewPaper(t, c),
+        polish: (t) => this.ai.polish(t),
+        extractEpisodic: (p, t, o, s) => this.ai.extractEpisodic(p, t, o, s),
+        generateFigures: (t, o, c) => this.ai.generateFigures(t, o, c),
+      },
+      runDrafting: (title, outline, refsPrompt, styleHint, reflexion, onProgress) =>
+        this.runDrafting(title, outline, refsPrompt, styleHint, reflexion, onProgress),
+      buildRefsPrompt: (projectId) => this.referencesForPrompt(projectId),
+      renderCitations: (projectId, docId, content, meta) => {
+        const refPool = this.refsForDraft(projectId);
+        const libScore = new Map(meta.lib.map((l) => [l.title, l.score]));
+        return this.citationRenderer.render(docId, content, refPool, [], [], libScore, meta.kn);
+      },
+      crossEnrich: async (projectId, topic, plan) => {
+        // 多语关键词逐条检索本地文献库（LIKE），按 id 去重合并后做匹配度打分
+        const queries = [topic, ...(plan.searchStrategy?.keywords || [])].filter(Boolean).slice(0, 6);
+        const seen = new Map<string, PaperHit>();
+        for (const q of queries) {
+          try {
+            for (const h of this.references.search(String(q), 20, projectId)) {
+              const key = h.id || `${h.title}:${h.year ?? ''}`;
+              if (!seen.has(key)) seen.set(key, h);
+            }
+          } catch (e: any) {
+            this.logger.warn(`文献库检索失败 [${q}]: ${e?.message || e}`);
+          }
+        }
+        const enriched = await this.crossEnrichResearch(projectId, topic, plan, [...seen.values()]);
+        if (enriched.libraryHits.length > 0) this.references.importPipelineHits(projectId, enriched.libraryHits);
+        const refs = this.references.list(projectId);
+        const summary = refs.length
+          ? await this.ai.summarizeLiterature(topic, refs.slice(0, 10).map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}）`).join('\n'))
+          : '（未检索到文献，将按通用学术结构起草）';
+        const totalFound = enriched.libraryHits.length + enriched.knowledgeHits.length;
+        return {
+          libraryHits: enriched.libraryHits,
+          knowledgeHits: enriched.knowledgeHits,
+          notice: enriched.notice,
+          meta: enriched.meta,
+          summary: `检索到 ${totalFound} 条（文献 ${enriched.libraryHits.length} / 知识 ${enriched.knowledgeHits.length}）\n${summary.slice(0, 500)}`,
+        };
+      },
+      notify: (taskId, key, status, output, retryCount) => this.notify(taskId, key, status, output, retryCount),
+      stepEnabled: (key) => this.stepEnabled(key),
+      logger: this.logger,
+    };
+    this.graph = buildPipelineGraph(deps);
+  }
 
   // ─── 公开 API（controller 调用） ──────────────────────────────
   create(projectId: string, topic: string) {
@@ -71,7 +128,7 @@ export class PipelineService {
       retryCount: 0, lastError: '', createdAt: now, updatedAt: now,
     };
     db.insert(pipelineTasks).values(task).run();
-    void this.runPreConfirmation(task.id);
+    void this.invokeGraph(task.id, { taskId: task.id, task: this.getTaskRow(task.id) });
     return this.get(task.id);
   }
 
@@ -91,9 +148,15 @@ export class PipelineService {
     return { ok: true };
   }
 
-  agentRuns(id: string) {
-    this.get(id);
-    return db.select().from(agentRuns).where(eq(agentRuns.taskId, id)).orderBy(agentRuns.createdAt).all();
+  async confirmOutline(taskId: string, editedOutline?: { title: string; sections: { title: string; subsections: string[] }[] }) {
+    const task = this.get(taskId);
+    if (task.status !== 'awaiting_confirmation') throw new BadRequestException('当前不在大纲确认节点');
+    const outlineStep = task.steps.find((s) => s.key === 'outline');
+    const outline = editedOutline || parseJson<Outline>(outlineStep?.output, { title: task.topic, sections: [] });
+    await this.notify(taskId, 'outline', 'done', JSON.stringify(outline));
+    this.setStatus(taskId, 'running', 'quality-gate');
+    void this.invokeGraph(taskId, new Command({ resume: { edited: outline } }));
+    return this.get(taskId);
   }
 
   resumeInterrupted() {
@@ -114,8 +177,8 @@ export class PipelineService {
           continue;
         }
         db.update(pipelineTasks).set({ steps: JSON.stringify(steps), status: 'running', currentStep: 'quality-gate', lastError: '', updatedAt: Date.now() }).where(eq(pipelineTasks.id, t.id)).run();
-        this.logger.log(`[checkpoint] 任务 ${t.id} 断点续跑（从 drafting 恢复）`);
-        void this.runPostConfirmation(t.id, t.documentId);
+        this.logger.log(`[checkpoint] 任务 ${t.id} 断点续跑（LangGraph checkpoint 恢复）`);
+        void this.invokeGraph(t.id, null);
       } else {
         this.logger.warn(`[checkpoint] 任务 ${t.id} 中断于前半段（无产物文档），标记 interrupted`);
         this.setStatus(t.id, 'interrupted', '', '服务重启中断，前半段任务请删除后重新启动');
@@ -124,22 +187,38 @@ export class PipelineService {
     return rows.length;
   }
 
-  async confirmOutline(taskId: string, editedOutline?: { title: string; sections: { title: string; subsections: string[] }[] }) {
-    const task = this.get(taskId);
-    if (task.status !== 'awaiting_confirmation') throw new BadRequestException('当前不在大纲确认节点');
-    const steps = task.steps;
-    const outlineStep = steps.find((s) => s.key === 'outline')!;
-    const outline = editedOutline || parseJson<Outline>(outlineStep.output, { title: task.topic, sections: [] });
-    const now = Date.now();
-    const doc = { id: randomUUID(), projectId: task.projectId, title: outline.title || task.topic, content: '', outline: JSON.stringify(outline), version: 1, versions: '[]', status: 'draft', createdAt: now, updatedAt: now };
-    db.insert(documents).values(doc).run();
-    db.update(pipelineTasks).set({ documentId: doc.id, updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
-    this.setStatus(taskId, 'running', 'quality-gate');
-    void this.runPostConfirmation(taskId, doc.id);
-    return this.get(taskId);
+  // ─── 图调用（统一错误处理与终态投影） ──────────────────────────
+  private async invokeGraph(taskId: string, input: { taskId: string; task: PipelineTaskRow } | Command | null) {
+    const resume = input instanceof Command;
+    let runId: string | undefined;
+    try {
+      const task = this.getTaskRow(taskId);
+      runId = this.trace.startRun({ projectId: task.projectId, source: resume ? 'pipeline-resume' : 'pipeline', input: task.topic, model: this.ai.config.model });
+      this.traceRuns.set(taskId, runId);
+      const cfg = { configurable: { thread_id: taskId } };
+      const result = await this.graph.invoke(input as never, cfg as never);
+      const interrupts = (result as { __interrupt__?: unknown[] } | undefined)?.__interrupt__;
+      if (interrupts && interrupts.length > 0) {
+        this.setStatus(taskId, 'awaiting_confirmation', 'outline');
+        this.trace.finishRun(runId, { status: 'done', outputSummary: '大纲待人工确认（interrupt 挂起）' });
+      } else {
+        this.setStatus(taskId, 'completed', 'complete');
+        this.trace.finishRun(runId, { status: 'done', outputSummary: '流水线完成' });
+      }
+    } catch (e: any) {
+      this.logger.error(`流水线 ${taskId} 执行失败: ${e.message}`);
+      const steps = this.loadSteps(taskId);
+      const cur = steps.find((s) => s.status === 'running' || s.status === 'awaiting_confirmation');
+      if (cur) cur.status = 'failed';
+      this.saveSteps(taskId, steps);
+      this.setStatus(taskId, 'failed', cur?.key || '', e.message || String(e));
+      if (runId) this.trace.finishRun(runId, { status: 'error', error: e.message || String(e) });
+    } finally {
+      this.traceRuns.delete(taskId);
+    }
   }
 
-  // ─── 状态机 ────────────────────────────────────────────────────
+  // ─── 状态机（pipeline_task.steps JSON 投影，前端契约不变） ──────
   private loadSteps(id: string): PipelineStepState[] {
     const row = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, id)).get();
     return parseJson<PipelineStepState[]>(row?.steps, []);
@@ -153,257 +232,31 @@ export class PipelineService {
     db.update(pipelineTasks).set({ status, currentStep: currentStep || undefined, lastError: lastError || '', updatedAt: Date.now() }).where(eq(pipelineTasks.id, id)).run();
   }
 
-
   private stepEnabled(key: string): boolean {
     try { const r = db.select().from(pipelineConfigs).where(eq(pipelineConfigs.stepKey, key)).get(); return !r || (r.enabled ?? 1) === 1; }
     catch { return true; }
   }
 
-  private async notify(taskId: string, steps: PipelineStepState[], step: DagPipelineStep, n: StepNotification) {
-    const s = steps.find((x) => x.key === step.key);
+  private async notify(taskId: string, key: string, status: StepStatusWire, output?: string, retryCount?: number) {
+    const steps = this.loadSteps(taskId);
+    const s = steps.find((x) => x.key === key);
     if (!s) return;
-    if (n.status === 'awaiting_confirmation') { s.status = 'awaiting_confirmation'; if ('output' in n && n.output) s.output = n.output; this.saveSteps(taskId, steps); this.setStatus(taskId, 'awaiting_confirmation', step.key); return; }
-    if (n.status === 'running') s.status = 'running';
-    else if (n.status === 'done') { s.status = 'done'; if ('output' in n && n.output) s.output = n.output; }
-    else if (n.status === 'skipped') { s.status = 'skipped'; if ('output' in n && n.output) s.output = n.output; }
-    else if (n.status === 'failed') { s.status = 'failed'; s.output = ('error' in n ? n.error : 'failed'); }
-    if (n.status === 'running') this.setStatus(taskId, 'running', step.key);
+    s.status = status;
+    if (output !== undefined) s.output = output;
+    if (retryCount !== undefined) s.retryCount = retryCount;
     this.saveSteps(taskId, steps);
-  }
-
-  // ─── Pre-Confirmation 步骤注册表（主题验证 + 文献 + 大纲）────────
-  private buildPreConfirmationSteps(taskId: string): DagPipelineStep[] {
-    const self = this;
-    const SR = STEP_REGISTRY;
-    return [
-      { key: 'topic-verify', label: SR['topic-verify'],
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.getTaskRow(taskId);
-          return { verifiedTopic: task.topic, plan: { searchStrategy: { keywords: [task.topic] } } };
-        },
-      },
-      { key: 'literature', label: SR['literature'],
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          if (!self.stepEnabled('literature')) return { researchNotice: '用户已禁用文献调研' };
-          const task = self.getTaskRow(taskId);
-          const hits = self.references.search(task.topic, 20).map((h) => ({ ...h, origin: 'library' as const }));
-          const trace: ResearchTraceEntry[] = [{ step: 'references.search', query: task.topic, count: hits.length }];
-          const enriched = await self.crossEnrichResearch(task.projectId, task.topic, ctx.plan ?? { searchStrategy: { keywords: [] } }, hits);
-          db.update(pipelineTasks).set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
-          if (enriched.libraryHits.length > 0) self.references.importPipelineHits(task.projectId, enriched.libraryHits);
-          const refs = self.references.list(task.projectId);
-          const summary = refs.length ? await self.ai.summarizeLiterature(task.topic, refs.slice(0, 10).map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}）`).join('\n')) : '（未检索到文献，将按通用学术结构起草）';
-          const totalFound = enriched.libraryHits.length + enriched.knowledgeHits.length;
-          return { researchTrace: trace, enrichedLibHits: enriched.libraryHits, enrichedKnHits: enriched.knowledgeHits, researchNotice: enriched.notice ?? undefined, literatureSummary: `检索到 ${totalFound} 条（文献 ${enriched.libraryHits.length} / 知识 ${enriched.knowledgeHits.length}）\n${summary.slice(0, 500)}` };
-        },
-      },
-      { key: 'outline', label: SR['outline'],
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          if (!self.stepEnabled('outline')) {
-            const outline = await self.ai.writeOutline(ctx.verifiedTopic!, ctx.literatureSummary || '');
-            return { outline };
-          }
-          const outline = await self.ai.writeOutline(ctx.verifiedTopic!, ctx.literatureSummary || '');
-          const err: any = new Error('awaiting_confirmation');
-          err.cause = AWAITING_CONFIRMATION;
-          (err as any)._outline = outline;
-          throw err;
-        },
-      },
-    ];
-  }
-
-  // ─── Post-Confirmation 步骤注册表（起草 + 质量门 + 回炉 + 润色 + 引用 + 完成）──
-  private buildPostConfirmationSteps(taskId: string): DagPipelineStep[] {
-    const self = this;
-    return [
-      {
-        key: 'quality-gate', label: '分章起草+质量门+回炉',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.getTaskRow(taskId);
-          const doc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get()!;
-          const outline = parseJson<Outline>(doc.outline, { title: task.topic, sections: [] });
-          const researchMeta = self.parseResearchMeta(task.researchMeta);
-          const researchNotice = task.researchNotice?.trim() || undefined;
-          const libScore = new Map(researchMeta.lib.map((l) => [l.title, l.score]));
-          let retry = 0;
-          const maxRetry = MAX_RETRY;
-          let report: QualityReport | undefined;
-          let best: { score: number; content: string; feedback: string } = { score: -1, content: '', feedback: '' };
-
-          while (true) {
-            await self.advance(taskId, 'quality-gate', 'running', retry > 0 ? `第 ${retry} 次回炉起草` : undefined);
-            const reflexion = self.reflexionNote(taskId);
-            const procedural = self.proceduralMemory(task.projectId);
-            const styleHint = procedural ? `\n写作风格参考（来自记忆库）：${procedural}` : '';
-            const refPool = self.refsForDraft(task.projectId);
-            if (retry === 0) self.snapshotBeforeOverwrite(ctx.documentId!, '流水线起草前自动快照');
-            const draftContent = await self.runDrafting(doc.title, outline, self.referencesForPrompt(task.projectId, refPool), styleHint, reflexion);
-            let prevFigures = '';
-            if (retry > 0) { const prev = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get(); const m = (prev?.content || '').match(/## 图表[\s\S]*?$/); if (m) prevFigures = `\n\n---\n\n${m[0]}`; }
-            db.update(documents).set({ content: draftContent, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-            const rendered = self.citationRenderer.render(ctx.documentId!, draftContent, refPool, [], [], libScore, researchMeta.kn);
-            let finalContent = rendered + prevFigures;
-            if (retry === 0 && self.stepEnabled('figures')) {
-              try { const figs = await self.ai.generateFigures(task.topic, JSON.stringify(outline), rendered); if (figs.length > 0) { const figBlock = figs.map((f) => `### ${f.title}\n\n> ${f.caption}\n\n\n\`\`\`mermaid\n${f.mermaid}\n\`\`\``).join('\n\n'); finalContent = `${rendered}\n\n---\n\n## 图表\n\n${figBlock}`; } }
-              catch (e: any) { self.logger.warn(`自动配图失败: ${e.message}`); }
-            }
-            db.update(documents).set({ content: finalContent, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-            await self.advance(taskId, 'quality-gate', draftStatus(retry));
-
-            if (!self.stepEnabled('quality-gate')) { report = { totalScore: 85, feedback: '质量门已禁用，跳过评分' }; break; }
-            const latestDoc = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get()!;
-            const reviewResult = await self.ai.reviewPaper(doc.title, latestDoc.content ?? '');
-            report = { totalScore: reviewResult.totalScore, feedback: reviewResult.feedback };
-            const scored = Number(report.totalScore);
-            if (scored > best.score) best = { score: scored, content: latestDoc.content ?? '', feedback: report.feedback };
-            await self.advance(taskId, 'quality-gate', 'scored', `总分 ${report.totalScore}/100`);
-            if (report.totalScore < QUALITY_THRESHOLD && retry < maxRetry) {
-              retry += 1;
-              db.insert(reflexionLogs).values({ id: randomUUID(), taskId, round: retry, note: report.feedback, instructions: JSON.stringify([]), createdAt: Date.now() }).run();
-              const q = self.loadSteps(taskId);
-              const qs = q.find((s) => s.key === 'quality-gate')!;
-              qs.status = 'retry'; qs.retryCount = retry; qs.output = `第 ${retry} 次回炉（评分 ${report.totalScore} < ${QUALITY_THRESHOLD}）`;
-              self.saveSteps(taskId, q);
-              continue;
-            }
-            break;
-          }
-          // 末轮 ≠ 最好轮：把最高分轮次的正文与评分落库，后续润色与交付基于它
-          if (best.score >= 0 && best.content && (report?.totalScore ?? 0) < best.score) {
-            db.update(documents).set({ content: best.content, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-            self.logger.log(`[质量门] 采用最高分轮次 ${best.score} 分（末轮 ${report?.totalScore ?? '-'} 分）`);
-            report = { totalScore: best.score, feedback: best.feedback };
-          }
-          return { report, researchNotice };
-        },
-      },
-      {
-        key: 'polish', label: '润色定稿',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.getTaskRow(taskId);
-          const finalDoc = db.select().from(documents).where(eq(documents.id, task.documentId!)).get()!;
-          const content = finalDoc.content ?? '';
-          const refIdx = content.indexOf('\n\n## 参考文献');
-          const figIdx = content.indexOf('\n\n## 图表');
-          const cuts = [refIdx, figIdx].filter((i) => i >= 0);
-          const cut = cuts.length ? Math.min(...cuts) : -1;
-          const bodyPart = cut >= 0 ? content.slice(0, cut) : content;
-          const tailPart = cut >= 0 ? content.slice(cut) : '';
-          const polished = await self.ai.polish(bodyPart);
-          db.insert(polishRecords).values({ id: randomUUID(), documentId: task.documentId!, type: 'polish', original: polished.original, polished: polished.polished, reason: polished.reason, createdAt: Date.now() }).run();
-          const polishedText = String(polished.polished ?? '');
-          const jsonLike = (polishedText.includes('"original"') && polishedText.includes('"polished"')) || polishedText.includes('```json') || (polishedText.trim().startsWith('{') && (polishedText.includes('"reason"') || polishedText.includes('"original"') || polishedText.includes('"polished"') || polishedText.includes('"content"')));
-          const fallbackText = (jsonLike ? finalDoc.content : polishedText) + tailPart;
-          db.update(documents).set({ content: fallbackText, status: 'polished', updatedAt: Date.now() }).where(eq(documents.id, task.documentId!)).run();
-          return {};
-        },
-      },
-      {
-        key: 'citation-format', label: '引用格式化',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.getTaskRow(taskId);
-          db.update(documents).set({ status: 'formatted', updatedAt: Date.now() }).where(eq(documents.id, task.documentId!)).run();
-          return {};
-        },
-      },
-      {
-        key: 'complete', label: '完成',
-        run: async (ctx: PipelineContext): Promise<Partial<PipelineContext>> => {
-          const task = self.getTaskRow(taskId);
-          db.update(documents).set({ status: 'final', updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-          if (ctx.researchNotice) {
-            const cur = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
-            const body = cur?.content ?? '';
-            if (!body.includes('研究阶段未在本地文献库')) {
-              db.update(documents).set({ content: body + `\n\n---\n\n## 研究说明\n\n> ${ctx.researchNotice}\n`, updatedAt: Date.now() }).where(eq(documents.id, ctx.documentId!)).run();
-            }
-          }
-          try {
-            const finalMem = db.select().from(documents).where(eq(documents.id, ctx.documentId!)).get();
-            const mem = await self.ai.extractEpisodic(task.topic, finalMem?.title || task.topic, finalMem?.outline || '[]', ctx.report?.totalScore ?? 80);
-            if (mem.content) { db.insert(memoryLogs).values({ id: randomUUID(), type: 'episodic', projectId: task.projectId, content: mem.content, keywords: JSON.stringify(mem.keywords), createdAt: Date.now() }).run(); }
-          } catch (e: any) { self.logger.warn(`情景记忆沉淀失败: ${e.message}`); }
-          self.setStatus(taskId, 'completed', 'complete');
-          return {};
-        },
-      },
-    ];
-  }
-
-  // ─── DAG 运行器 ────────────────────────────────────────────────
-  private async runPreConfirmation(taskId: string) {
-    if (this.running.has(taskId)) return;
-    this.running.add(taskId);
-    try {
-      const taskRow = this.getTaskRow(taskId);
-      const steps = this.buildPreConfirmationSteps(taskId);
-      const ctx: PipelineContext = { task: taskRow, qualityRetryCount: 0 };
-      try {
-        const result = await executeDAG(steps, ctx,
-          async (step, n) => { const s = this.loadSteps(taskId); await this.notify(taskId, s, step, n); },
-          (msg) => this.logger.warn(msg));
-        // 全部完成 = outline 被禁用，自动创建 document 并切到后段
-        if (result.outline) {
-          const doc = await this.createDocumentAndProceed(taskId, result.outline);
-          if (doc) {
-            // 必须先释放前段互斥锁，后段 runPostConfirmation 才能正常进入
-            this.running.delete(taskId);
-            void this.runPostConfirmation(taskId, doc);
-          }
-        }
-      } catch (err: any) {
-        if (err?.cause === AWAITING_CONFIRMATION) return;
-        throw err;
-      }
-    } catch (e: any) {
-      this.logger.error(`流水线 ${taskId} 前段执行失败: ${e.message}`);
-      const steps = this.loadSteps(taskId);
-      const cur = steps.find((s) => s.status === 'running');
-      if (cur) cur.status = 'failed';
-      this.saveSteps(taskId, steps);
-      this.setStatus(taskId, 'failed', cur?.key || '', e.message || String(e));
-    } finally {
-      this.running.delete(taskId);
-    }
-  }
-
-  private async createDocumentAndProceed(taskId: string, outline: Outline): Promise<string | null> {
-    const task = this.getTaskRow(taskId);
-    if (task.documentId) return null;
-    const now = Date.now();
-    const doc = { id: randomUUID(), projectId: task.projectId, title: outline.title || task.topic, content: '', outline: JSON.stringify(outline), version: 1, versions: '[]', status: 'draft', createdAt: now, updatedAt: now };
-    db.insert(documents).values(doc).run();
-    db.update(pipelineTasks).set({ documentId: doc.id, updatedAt: Date.now() }).where(eq(pipelineTasks.id, taskId)).run();
-    return doc.id;
-  }
-
-  private async runPostConfirmation(taskId: string, documentId: string) {
-    if (this.running.has(taskId)) return;
-    this.running.add(taskId);
-    try {
-      const taskRow = this.getTaskRow(taskId);
-      const steps = this.buildPostConfirmationSteps(taskId);
-      const stepsState = this.loadSteps(taskId);
-      // 后段第一步（outline 之后的步骤）之前的全部标记 done（前段已完成）
-      for (const s of stepsState) {
-        if (s.key === 'quality-gate') break;
-        if (s.status === 'pending' || s.status === 'awaiting_confirmation') s.status = 'done';
-      }
-      this.saveSteps(taskId, stepsState);
-      const ctx: PipelineContext = { task: taskRow, documentId, qualityRetryCount: 0 };
-      await executeDAG(steps, ctx,
-        async (step, n) => { const s = this.loadSteps(taskId); await this.notify(taskId, s, step, n); },
-        (msg) => this.logger.warn(msg));
-    } catch (e: any) {
-      this.logger.error(`流水线 ${taskId} 后段执行失败: ${e.message}`);
-      const steps = this.loadSteps(taskId);
-      const cur = steps.find((s) => s.status === 'running');
-      if (cur) cur.status = 'failed';
-      this.saveSteps(taskId, steps);
-      this.setStatus(taskId, 'failed', cur?.key || '', e.message || String(e));
-    } finally {
-      this.running.delete(taskId);
+    if (status === 'running') this.setStatus(taskId, 'running', key);
+    else if (status === 'awaiting_confirmation') this.setStatus(taskId, 'awaiting_confirmation', key);
+    // Agent 执行轨迹（agent_execution/agent_step）：每个步骤起止各记一条
+    const runId = this.traceRuns.get(taskId);
+    if (runId) {
+      this.trace.addStep(runId, {
+        kind: 'tool',
+        title: `${key} · ${status}`,
+        output: output || '',
+        toolName: key,
+        status: status === 'failed' ? 'error' : 'ok',
+      });
     }
   }
 
@@ -456,18 +309,38 @@ export class PipelineService {
     return { libraryHits: lib, knowledgeHits: kn, notice: total === 0 ? ZERO_HIT_NOTICE : null, meta: { lib: lib.map((h) => ({ title: h.title, score: h.matchScore ?? 0 })), kn } };
   }
 
-  private parseResearchMeta(raw: string | null | undefined): ResearchMeta {
-    const o = parseJson<ResearchMeta>(raw, { lib: [], kn: [] });
-    return { lib: Array.isArray(o.lib) ? o.lib : [], kn: Array.isArray(o.kn) ? o.kn : [] };
+  // ─── 起草（并行：p-limit，AI_DRAFT_CONCURRENCY 可配，默认 3；onProgress 逐节进度） ────
+  private async runDrafting(
+    title: string,
+    outline: Outline,
+    referencesPrompt: string,
+    styleHint: string,
+    reflexion: string,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<string> {
+    void title;
+    const sections = outline?.sections || [];
+    const outlineJson = JSON.stringify(outline);
+    const ctx = `${referencesPrompt}\n\n${styleHint}\n\n${reflexion}`.trim();
+    let done = 0;
+    const parts = await Promise.all(
+      sections.map((sec, i) =>
+        this.draftingLimit(async () => {
+          const sectionTitle = typeof sec === 'string' ? sec : sec.title;
+          const content = await this.ai.draftSection(sectionTitle, outlineJson, ctx);
+          done += 1;
+          onProgress?.(done, sections.length);
+          return { i, text: `## ${sectionTitle}\n\n${content}` };
+        }),
+      ),
+    );
+    return parts.sort((a, b) => a.i - b.i).map((p) => p.text).join('\n\n');
   }
-
-  private static readonly DOMAIN_KW = ['graph neural', 'gnn', 'molecular', 'molecule', 'drug', 'protein', 'ligand', 'chemical', 'pharmaco', 'biomed', 'bioinform', 'deep learning', 'machine learning', 'neural network', 'geometric', 'equivariant', 'graph', 'neural', 'chem', '图神经', '分子', '药物', '蛋白', '几何', '深度学习', '消息传递', '药'];
 
   private refsForDraft(projectId: string) {
     const all = this.references.list(projectId);
     const meta = all.filter((r) => { const a = parseStringList(r.authors); return a.length > 0 && !!r.year; });
-    const rel = meta.filter((r) => { const t = (r.title || '').toLowerCase(); const ab = (r.abstract || '').toLowerCase(); return PipelineService.DOMAIN_KW.some((k) => t.includes(k) || ab.includes(k)); });
-    return (rel.length >= 6 ? rel : meta).sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0)).slice(0, 20);
+    return meta.sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0)).slice(0, 20);
   }
 
   private referencesForPrompt(projectId: string, refs?: ReturnType<PipelineService['refsForDraft']>): string {
@@ -475,70 +348,10 @@ export class PipelineService {
     return pool.map((r, i) => `[Ref:${i + 1}] ${r.title}（${r.authors}，${r.year || 'n.d.'}，${r.venue}${r.doi ? `，DOI:${r.doi}` : ''}）`).join('\n');
   }
 
-  private reflexionNote(taskId: string): string {
-    const rows = db.select().from(reflexionLogs).where(eq(reflexionLogs.taskId, taskId)).orderBy(reflexionLogs.createdAt).all();
-    if (rows.length === 0) return '';
-    const last = rows[rows.length - 1];
-    let instructions: string[] = [];
-    instructions = parseStringList(last.instructions);
-    return `${last.note}${instructions.length ? '\n具体指令：' + instructions.join('；') : ''}`;
-  }
-
-  private reflexionLogs(taskId: string): string[] {
-    return db.select().from(reflexionLogs).where(eq(reflexionLogs.taskId, taskId)).orderBy(reflexionLogs.createdAt).all().map((r) => `第${r.round}轮：${r.note}`);
-  }
-
-  private proceduralMemory(projectId: string): string {
-    const rows = db.select().from(memoryLogs).where(and(eq(memoryLogs.type, 'procedural'), eq(memoryLogs.projectId, projectId))).orderBy(memoryLogs.createdAt).all();
-    return rows.slice(-1).map((r) => r.content).join('');
-  }
-
-  /** 覆盖式写入前保存快照：自动流水线永不静默吃掉用户正文（版本历史上限 20） */
-  private snapshotBeforeOverwrite(docId: string, reason: string): void {
-    const doc = db.select().from(documents).where(eq(documents.id, docId)).get();
-    const body = doc?.content ?? '';
-    if (!body.trim()) return;
-    const versions = parseJson<{ version: number; content: string; updatedAt: number; commitMessage?: string }[]>(doc?.versions ?? '[]', []);
-    const latest = versions[versions.length - 1];
-    if (latest && latest.content === body) return;
-    versions.push({ version: doc?.version ?? 1, content: body, updatedAt: Date.now(), commitMessage: `${reason} · ${new Date().toLocaleString('zh-CN')}` });
-    db.update(documents).set({ versions: JSON.stringify(versions.slice(-20)), updatedAt: doc?.updatedAt ?? Date.now() }).where(eq(documents.id, docId)).run();
-  }
-
-  /** 分章起草：遍历大纲各节，逐节调用 ai.draftSection 生成内容 */
-  private async runDrafting(title: string, outline: Outline, referencesPrompt: string, styleHint: string, reflexion: string): Promise<string> {
-    const sections = outline?.sections || [];
-    const outlineJson = JSON.stringify(outline);
-    const parts: string[] = [];
-    for (const sec of sections) {
-      const sectionTitle = typeof sec === 'string' ? sec : sec.title;
-      const ctx = `${referencesPrompt}\n\n${styleHint}\n\n${reflexion}`.trim();
-      const content = await this.ai.draftSection(sectionTitle, outlineJson, ctx);
-      parts.push(`## ${sectionTitle}\n\n${content}`);
-    }
-    return parts.join('\n\n');
-  }
-
-  /** Fetch typed PipelineTaskRow (without parsed steps array, for DAG context) */
+  /** Fetch typed PipelineTaskRow (without parsed steps array) */
   private getTaskRow(id: string): PipelineTaskRow {
     const row = db.select().from(pipelineTasks).where(eq(pipelineTasks.id, id)).get();
     if (!row) throw new NotFoundException('流水线任务不存在');
     return row;
   }
-
-  /** 内部持久化辅助：DAG notify 之外的细粒度阶段状态写入 */
-  private advance(taskId: string, key: string, status: PipelineStepState['status'], output?: string) {
-    const steps = this.loadSteps(taskId);
-    const step = steps.find((s) => s.key === key);
-    if (!step) return;
-    step.status = status;
-    if (output !== undefined) step.output = output;
-    this.saveSteps(taskId, steps);
-    if (status === 'running') this.setStatus(taskId, 'running', key);
-  }
-}
-
-/** 将 retry 次数映射到 quality-gate 状态 */
-function draftStatus(retry: number): 'done' | 'running' | 'scored' {
-  return retry > 0 ? 'running' : 'done';
 }

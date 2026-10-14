@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Brain, History, Lightbulb, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { MemoryItem } from '../types';
@@ -10,11 +11,8 @@ import { ChartEmpty, Donut, LineChart } from '../components/charts';
  * - 程序记忆 procedural：写作风格指令，起草时自动注入（可自行维护）
  */
 export function MemoryPage() {
-  const [items, setItems] = useState<MemoryItem[]>([]);
-  const [allItems, setAllItems] = useState<MemoryItem[]>([]);
   const [type, setType] = useState<'episodic' | 'procedural' | ''>('');
   const [q, setQ] = useState('');
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [newContent, setNewContent] = useState('');
@@ -22,31 +20,18 @@ export function MemoryPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<MemoryItem | null>(null);
 
-  /** 拉取全量记忆用于概览统计（不随筛选变化） */
-  const loadOverview = useCallback(async () => {
-    try {
-      setAllItems(await api.memory.list('', ''));
-    } catch {
-      /* 概览统计失败不阻断列表 */
-    }
-  }, []);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const list = await api.memory.list(type, q);
-      setItems(list);
-    } catch (e: unknown) {
-      setError(errMsg(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [type, q]);
-
-  useEffect(() => {
-    refresh();
-    loadOverview();
-  }, [refresh, loadOverview]);
+  // 记忆列表 + 概览（React Query；筛选变化即换 queryKey）
+  const qc = useQueryClient();
+  const itemsQuery = useQuery({ queryKey: ['memory', type, q], queryFn: () => api.memory.list(type, q) });
+  const overviewQuery = useQuery({ queryKey: ['memory-all'], queryFn: () => api.memory.list('', ''), retry: 0 });
+  const items: MemoryItem[] = itemsQuery.data ?? [];
+  const allItems: MemoryItem[] = overviewQuery.data ?? [];
+  const loading = itemsQuery.isLoading;
+  const listError = itemsQuery.error ? errMsg(itemsQuery.error) : '';
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['memory'] });
+    void qc.invalidateQueries({ queryKey: ['memory-all'] });
+  };
 
   const addMemory = async () => {
     if (!newContent.trim()) return;
@@ -62,7 +47,6 @@ export function MemoryPage() {
       setNewKeywords('');
       setShowAdd(false);
       refresh();
-      loadOverview();
     } catch (e: unknown) {
       setError(errMsg(e));
     } finally {
@@ -80,7 +64,6 @@ export function MemoryPage() {
       await api.memory.remove(deleting.id);
       setDeleting(null);
       refresh();
-      loadOverview();
     } catch (e: unknown) {
       setError(errMsg(e));
       setDeleting(null);
@@ -115,7 +98,7 @@ export function MemoryPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <ErrorBox message={error} />
+      <ErrorBox message={error || listError} />
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200 font-semibold">
