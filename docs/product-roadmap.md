@@ -13,7 +13,7 @@ sciflow 是一个**本地优先、单机部署**的 AI 科研助手：NestJS 11 
 贯穿全部决策的设计原则（来自用户原话方向与各报告反复守住的红线）：
 
 - **本地优先 / 单机**：SQLite 单文件开箱即跑；用户自己的 API key、自己的邮件、自己的文献，全部落本地，不上传、不建多租户。
-- **轻量快速、反对臃肿**：前端 `dist` 守住约 2.2MB 量级，首屏 JS 已从 2.4MB 压到 821KB；echarts 改按需懒加载、可视化一律自绘 SVG；不为单个功能引入 100MB 级运行时或国外云 bundler。
+- **轻量快速、反对臃肿**：页面级代码分割（图表/编辑器/图谱各自独立 chunk，进页面才加载），首屏只装壳与工作台；不按需引入 100MB 级运行时或国外云 bundle 服务。
 - **国内模型 / 国内合规适配**：只走国内 OpenAI 兼容协议；已**主动移除国外在线学术源**（OpenAlex / arXiv / Semantic Scholar / CrossRef），零外部网络依赖；投稿场景面向知网腾云 / 玛格泰克 / 勤云等国内采编系统现实。
 - **凡是编辑部/外部不会精确给你的，不假装能自动拿到**：不做登录态爬虫、不做后台轮询、不做邮箱授权守护进程；凡是用户手里已有的（邮件、截图文字），用本地国产模型帮他省整理的力气。
 - **威胁模型是"LLM 生成的 buggy 代码卡死自己"，不是外部恶意租户**：因此安全边界是资源上限（超时 / 内存 / 临时目录），不是 microVM / 容器。
@@ -44,9 +44,9 @@ sciflow 是一个**本地优先、单机部署**的 AI 科研助手：NestJS 11 
 
 ## 3. 已落地功能清单（三轮改造汇总）
 
-- **可视化体系**：7 维质量雷达（echarts 按需 + `React.lazy` 懒加载，443KB chunk 进页面才下载）、Supervisor 多 Agent 按角色分组的编排时间线、大厂式左导航分组、teal 统一色板替换 AI 紫；首屏 JS 由 2.4MB 压到 821KB，主包 84KB。
+- **可视化体系**：7 维质量雷达（Recharts，页面级 `React.lazy` 懒加载，图表 chunk 进页面才下载）、流水线各节点按角色分组的编排时间线、大厂式左导航分组、teal 统一色板替换 AI 紫；页面级代码分割，首屏不加载图表与图谱包。
 - **交互范式**：SSE 流式 + 打字机渲染（fetch+ReadableStream 批量 flush）；取消 / 重试 / 继续生成（AbortController）；follow-up 建议追问按钮；对话内 slash 命令；核心快捷键（⌘↵ 发送 / Esc 停止 / ↑ 编辑上一条）；折叠式 reasoning 展示；引用来源卡片（`<sup>` 上标 + 悬停气泡）。
-- **真科研功能**：Supervisor 编排 5 类子 Agent（Planner / Research×3 并行 ReAct / Writer / Reviewer / Polisher）全流水线；7 维质量门 <80 触发 Reflexion 自动回炉；Agentic RAG 边写边查；结构化输出 zod 校验 + checkpoint 断点续跑。
+- **真科研功能**：LangGraph 编排全自动流水线（主题验证 → 文献调研 → 大纲人工确认 → 并行分章起草 → 7 维质量门 → 润色 → 引用格式化）；质量门 <80 触发 Reflexion 自动回炉（≤3 轮取最高分）；Agentic RAG 边写边查；结构化输出 zod 校验 + SqliteSaver checkpoint 断点续跑。
 - **投稿跟踪**：国内采编系统无公开 API 的现实下，落地"L1 手动台账 / L2 粘贴邮件 AI 解析 / L3 周期推断"三层方案，13 态状态机 + 状态历史流水表，不做爬虫、不引入外部 key。
 - **引用网络**：citation 表 + 引用池净化 + `[作者 年份]` 与文末 GB/T 7714 参考文献列表自动渲染，成文后引用真实可追溯。
 - **实验沙箱**：选定后端 spawn 本机 `python3`（前端 0 新体积、后端 0 新依赖），临时目录 + 默认 10s 超时杀进程组 + stdout/图截断上限，写作页内嵌可运行代码块、可保存为实验记录档案。
@@ -131,11 +131,11 @@ sciflow 是一个**本地优先、单机部署**的 AI 科研助手：NestJS 11 
 |---|---|---|
 | 全量回归 | `scripts/full_regression.py`（v5，覆盖全部 66 个路由，含 guardrail 拒参 / RAG 混合检索 / usage 成本统计专项） | **PASS 85 / FAIL 2**（2 项均为外部 AI 网关限流类环境项，脚本自动降级跳过，不影响代码正确性结论） |
 | 类型检查 | server / web 双端 `tsc --noEmit`（CI 强制 ×2） | 全绿 |
-| 单元测试 | server `pnpm --filter server test`（vitest，引用格式化等核心纯逻辑） | 全绿 |
+| 单元测试 | server `pnpm --filter server test`（16 条）+ web `pnpm --filter web test`（15 条，含 msw 网络层拦截） | 全绿 |
 | 构建 | 前后端 `build`（CI ×2） | 全绿 |
-| 依赖安全 | `pnpm audit` | 0 漏洞 |
-| 体积红线 | 首屏 JS 821KB、主包 84KB、echarts 懒加载 chunk 443KB；前端 `dist` 约 2.2MB | 守住，新增功能不引入重型运行时 |
-| 本地 mock AI 网关 | `AI_MOCK=1` 起后端后跑 `full_regression.py`（见 README「本地 mock AI 网关」） | **mock 模式 PASS / FAIL 0**：无 Key 本机即可端到端跑通流水线；无 `AI_MOCK` 时回归保持 2 个 AI 未配置环境项（settings/check 503、pipeline 创建 400）不变 |
+| 依赖安全 | `pnpm audit --registry=https://registry.npmjs.org --prod` | **0 已知漏洞**（生产依赖；安全补丁经 pnpm overrides 钉版，见 pnpm-workspace.yaml） |
+| 体积红线 | 图表/编辑器/图谱分别独立 chunk（懒加载）；首屏不加载图表与图谱包 | 守住，新增功能不引入重型运行时 |
+| 本地 mock AI 网关 | `AI_MOCK=1` 起后端后跑 `full_regression.py`（见 README「本地 mock AI 网关」） | **mock 模式 PASS 161 / FAIL 0 / KNOWN 0**：无 Key 本机即可端到端跑通流水线；外部工具（promptfoo）用 `apps/server/scripts/mock-openai-http.mjs` 暴露 127.0.0.1:5099 |
 
 > 后续每轮改造完成后，须以同一套基线（typecheck ×2 + vitest + build ×2 + `full_regression.py`）回归全绿作为合并门槛；AI 网关限流类失败仍按环境项处理并显式标注，不得静默吞掉。
 

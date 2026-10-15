@@ -45,7 +45,7 @@
 | `api/client.ts` | 唯一的 fetch 封装 + 全部 API 方法（`api.projects.*` / `api.documents.*` …） |
 | `types.ts` | 全量 TS 类型 |
 | `components/ui.tsx` | Button/Input/Modal/Spinner/ErrorBox/Toast 等基础组件 |
-| `components/charts.tsx` | **手写 SVG 图表**（雷达图、引用网络、历史对比等，无 ECharts） |
+| `components/charts.tsx` | **Recharts 封装**（雷达图、柱线饼图、历史对比）；引用网络用 `pages/literature/ForceGraph.tsx`（sigma.js + graphology，WebGL） |
 | `pages/` | 页面组件：`DashboardPage` `WritingPage` `LiteraturePage` `KnowledgePage` `PipelinePage` `QualityPage` `ExperimentsPage` `MemoryPage` `ChatPage` `SubmissionPage` `SettingsPage` |
 | `pages/` 辅助件 | `ChatPanel` `DocExporter` `VersionDiffModal` `CiteReorderButton` |
 
@@ -55,9 +55,9 @@
 
 | 端 | 选型 | 备注 |
 | --- | --- | --- |
-| 后端 | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· zod · 原生 fetch | 不引入 ORM 重型生态；AI 走 OpenAI 兼容协议 |
-| 前端 | React 19 · Vite 6 · Tailwind CSS v4 · react-markdown + KaTeX · lucide-react | 图表全部手写 SVG |
-| 工程 | pnpm workspace · vitest 5 · GitHub Actions（Node 22）· Python 3 回归脚本 | CI 强制 typecheck×2 / vitest / build×2 / 密钥校验 |
+| 后端 | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· zod · Vercel AI SDK · LangGraph · MCP 官方 SDK | AI 走 OpenAI 兼容协议；编排只在 `pipeline/pipeline.graph.ts` |
+| 前端 | React 19 · Vite 6 · Tailwind CSS v4 · TanStack Query/Table · Recharts · sigma.js + graphology · CodeMirror 6 · react-markdown + KaTeX | 图表一律走 `components/charts.tsx` 或既有图谱组件 |
+| 工程 | pnpm workspace · vitest 2.x（server 16 / web 15）· Playwright · promptfoo · GitHub Actions（Node 22）· Python 3 回归脚本（161 项） | CI 三 job：类型/单测/构建 · 全量回归 · E2E+评测 |
 | 数据 | SQLite 单文件（WAL、外键开、busy_timeout 5000ms） | 启动时 schema 自检自动建表/补列，幂等 |
 
 ## 3. 如何新增一个后端模块（5 步）
@@ -92,8 +92,9 @@
 pnpm --filter @sciflow/server typecheck
 pnpm --filter @sciflow/web typecheck
 
-# 2. 单元测试（vitest 5，引用格式化等核心纯逻辑）
+# 2. 单元测试（vitest；引用格式化等核心纯逻辑）
 pnpm --filter @sciflow/server test
+pnpm --filter @sciflow/web test
 
 # 3. 构建（双端）
 pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
@@ -106,13 +107,13 @@ AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_regression.db PORT=3000 \
 SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 python3 scripts/full_regression.py
 ```
 
-- 回归基线（本机实测）：mock 网关 PASS 162 / FAIL 0；真实网关路径（未配 Key）PASS 143，其中 2 项为预期的「AI 未配置」语义（`settings/check`→503、创建流水线→400）。
+- 回归基线（本机实测）：mock 网关 **PASS 161 / FAIL 0 / KNOWN 0**（KNOWN 机制保留，当前空集）。
 - mock 模式跑端到端流水线时务必把 `AI_RPM_CAP` 调大（如 120），否则默认令牌桶会等待导致超时。
 
 ## 6. 代码风格红线
 
-1. **零新增重型依赖**：不为图表面、不为表单、不为校验随意引大包。校验用 zod，图表手写 SVG（参考 `components/charts.tsx`），基础组件优先在 `components/ui.tsx` 里手写。
-2. **图表一律手写 SVG**：不引入 ECharts / D3 / Recharts 等重型图库（这是 README 明确卖点）。
+1. **零新增重型依赖**：不为图表面、不为表单、不为校验随意引大包。校验用 zod，基础组件优先在 `components/ui.tsx`；图片表用 `components/charts.tsx`（Recharts），表格用 TanStack Table——先查 `ARCHITECTURE.md` §2/§7 有没有现成件。
+2. **禁止页面内手写图表/表逻辑**：图表一律扩 `components/charts.tsx`，图谱用 sigma.js 组件，排序筛选用 TanStack Table（§7 守则）。
 3. **不引入国外 API / 外部云**：AI 只通过 OpenAI 兼容协议对接**用户自己的 Key**（默认国内厂商端点）；检索、分词、向量化全部本地；不上传用户数据到第三方。
 4. **安全基线**：后端默认只绑 `127.0.0.1`；新增对外能力不要擅自改监听地址；错误响应不回显堆栈（全局异常过滤器已兜底）；`.env` / 真实 Key 不进镜像、不进版本库。
 5. **单用户本地定位**：不建多租户、不做账号体系；新功能的数据落本地 SQLite，沿用现有表结构与 `db/database.ts` 的自检迁移机制。

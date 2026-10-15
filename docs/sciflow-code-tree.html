@@ -152,21 +152,27 @@
         </details>
 
         <details class="group" open>
-          <summary>orchestrator · Supervisor 多 Agent 编排 <span class="cnt">2 文件 · ≈0.45k 行</span></summary>
+          <summary>pipeline · LangGraph 多 Agent 编排 <span class="cnt">3 文件 · ≈1.6k 行</span></summary>
           <div class="group-body">
             <details class="file core" open>
-              <summary><span class="ln">436</span>orchestrator/orchestrator.service.ts<span class="role r-core">编排引擎</span></summary>
+              <summary><span class="ln">—</span>pipeline/pipeline.graph.ts<span class="role r-core">编排图</span></summary>
               <ul class="notes">
-                <li><b>作用</b>：Supervisor 调度 5 类子 Agent 完成流水线：Planner 规划 → 3 路并行 Research（ReAct）→ Writer（Agentic RAG 边写边查）→ Reviewer（7 维评审）→ Polisher（润色）。</li>
-                <li><b>观测</b>：每个子 Agent 执行单元写 agent_run 表（agentType/input/output/error/durationMs）。</li>
+                <li><b>作用</b>：LangGraph 状态图实现全自动流水线：主题验证 → 文献调研 → 大纲生成 → <b>interrupt 人工确认</b> → 并行分章起草（p-limit）→ 7 维质量门（Reflexion 回炉，≤3 轮，取最高分轮次）→ 润色 → 引用格式化。</li>
+                <li><b>观测</b>：每个节点写入 Agent 执行轨迹（agent_execution / agent_step），含输入输出、Token 与时耗。</li>
+                <li><b>可断点</b>：SqliteSaver checkpointer 持久化状态，服务重启后从草稿阶段幂等续跑。</li>
                 <li><b>记忆</b>：完成后抽取情景记忆沉淀到 memory_log。</li>
-                <li><b>可断点</b>：步骤输出以 JSON 存回 pipeline_task，失败可续跑。</li>
               </ul>
             </details>
             <details class="file mod" open>
-              <summary><span class="ln">12</span>orchestrator/orchestrator.module.ts<span class="role r-mod">编排模块</span></summary>
+              <summary><span class="ln">—</span>pipeline/pipeline.service.ts<span class="role r-core">门面服务</span></summary>
               <ul class="notes">
-                <li><b>作用</b>：导入 Ai/Literature/Quality 模块，导出编排服务。</li>
+                <li><b>作用</b>：对外保持 controller / CLI / steps JSON 契约不变；内部驱动 LangGraph 图、并发起草与进度通知。</li>
+              </ul>
+            </details>
+            <details class="file mod" open>
+              <summary><span class="ln">—</span>pipeline/pipeline-state.ts<span class="role r-mod">状态定义</span></summary>
+              <ul class="notes">
+                <li><b>作用</b>：图状态通道与节点契约（含 interrupt 载荷与质量门计数）。</li>
               </ul>
             </details>
           </div>
@@ -654,7 +660,7 @@
             <details class="file mod" open>
               <summary><span class="ln">291</span>types.ts<span class="role r-mod">全局类型定义</span></summary>
               <ul class="notes">
-                <li><b>要点</b>：全部后端实体的 TS 接口（Project/Doc/Reference/CitationRow/QualityReport/PipelineTask/AgentRun/KnowledgeDoc/MemoryItem…）与 AI 结果类型（DeepDiveResult/GapResult/EvidenceResult/ResearchDesignResult…）。</li>
+                <li><b>要点</b>：全部后端实体的 TS 接口（Project/Doc/Reference/CitationRow/QualityReport/PipelineTask/AgentExecution/KnowledgeDoc/MemoryItem…）与 AI 结果类型（DeepDiveResult/GapResult/EvidenceResult/ResearchDesignResult…）。</li>
               </ul>
             </details>
             <details class="file core" open>
@@ -876,7 +882,7 @@
 
   </div>
 
-  <div class="foot">SciFlow · 全项目 97 个实质文件逐行通读结论：数据流 项目→文档→引用→文献、流水线任务→Agent 轨迹→反思日志→记忆 全部闭环；后端核心 = ai.service（AI 网关）+ pipeline（状态机）+ orchestrator（编排）；前端核心 = App 外壳 + WritingPage + SettingsPage；无第三方重量级前端框架，全部原生 React + Tailwind。点击任何分组/文件标题可折叠。</div>
+  <div class="foot">SciFlow · 全项目 97 个实质文件逐行通读结论：数据流 项目→文档→引用→文献、流水线任务→Agent 轨迹→反思日志→记忆 全部闭环；后端核心 = ai/（AI SDK 模型层）+ pipeline/pipeline.graph.ts（LangGraph 编排）；前端核心 = App 外壳 + WritingPage + SettingsPage；前端 = React 19 + TanStack Query/Table + Recharts/sigma.js + Tailwind v4。点击任何分组/文件标题可折叠。</div>
 </div>
 </body>
 </html>

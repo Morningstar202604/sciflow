@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A520%20(CI%2022)-339933.svg)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-11.7.0-f69220.svg)](package.json)
-[![version](https://img.shields.io/badge/version-0.4.0-black.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.4.1-black.svg)](CHANGELOG.md)
 
 > **🌐 Language / 语言：[English](README.en.md) · [中文](README.md)**
 

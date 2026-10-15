@@ -4,11 +4,21 @@ services:
       context: .
       target: server
     ports:
-      - "3000:3000"
+      # 宿主侧仅绑回环：零鉴权 API 不暴露到局域网（需要局域网访问请显式改为 3000:3000 并启用 AUTH_MODE=jwt）
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./apps/server/data:/app/apps/server/data   # SQLite 数据持久化
     environment:
       - PORT=3000
+      # 容器内必须监听全部网卡，否则 127.0.0.1 只绑在容器回环、宿主 -p 映射连不上。
+      # 配套安全闸：非回环绑定要求 AUTH_MODE=jwt（或显式 ALLOW_INSECURE_BIND=1 承担风险）。
+      - HOST=${HOST:-0.0.0.0}
+      - AUTH_MODE=${AUTH_MODE:-none}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - JWT_EXPIRES=${JWT_EXPIRES:-7d}
+      # 开发/内网自用默认放行非回环绑定（等价于旧行为：容器可直连）。
+      # 对外暴露时请设 AUTH_MODE=jwt + JWT_SECRET，并移除下行。
+      - ALLOW_INSECURE_BIND=${ALLOW_INSECURE_BIND:-1}
       # ⚠️ 必填：替换为你的 AI 网关地址与密钥（默认豆包·火山方舟；也可用 DeepSeek / 通义 / 智谱 / Kimi 等国内 OpenAI 兼容接口）
       - AI_BASE_URL=${AI_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
       - AI_API_KEY=${AI_API_KEY:?请在 .env 中设置 AI_API_KEY}
@@ -17,6 +27,12 @@ services:
       - AI_MODEL_STRONG=${AI_MODEL_STRONG:-}
       - AI_RPM_CAP=${AI_RPM_CAP:-8}
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:8080}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   web:
@@ -26,5 +42,6 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     restart: unless-stopped

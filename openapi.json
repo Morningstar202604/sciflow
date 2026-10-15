@@ -2760,7 +2760,7 @@
   "info": {
     "title": "SciFlow API",
     "description": "本地优先科研工作台（单用户）",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "contact": {}
   },
   "tags": [],

@@ -13,6 +13,9 @@ allowBuilds:
   # 遥测类 postinstall：显式拒绝执行（不联网、无副作用）
   autoevals: false
   '@scarf/scarf': false
+  # electron-builder 26 引入的 Windows 安装器辅助包；仅打包 Squirrel 目标时用到，
+  # 本项目出 NSIS 安装包，不需要其构建脚本
+  electron-winstaller: false
 
 minimumReleaseAgeExclude:
   - '@typescript-eslint/eslint-plugin@8.71.2'
@@ -30,6 +33,48 @@ minimumReleaseAgeExclude:
 
 overrides:
   esbuild: ^0.25.0
+  # ---- 安全补丁钉版（pnpm audit / Dependabot 告警，2026-10-15）----
+  # 关键原则：按 **受影响范围** 定点钉版，绝不做跨 major 的全局替换。
+  # 同一包存在互不兼容的 major 消费者时（js-yaml v4/v5、tar v6/v7、
+  # postcss-selector-parser v6/v7），全局替换会把正常依赖打坏
+  # （实测：js-yaml 全局升 5.x 直接让 @redocly/openapi-core 崩溃、openapi:gen 失败）。
+  #
+  # js-yaml：公告仅影响 v5.0.0–5.4.0（v4.x 不受影响、必须留在 v4 供 redocly/builder 使用）
+  'js-yaml@>=5.0.0 <5.4.1': ^5.4.3
+  # tar：公告全部落在 7.5.x（v6.2.1 不受影响，且 @electron/rebuild/node-gyp@9 需要 v6）
+  'tar@>=7.5.0 <7.5.22': ^7.5.22
+
+  # @electron/get：electron-builder 26.x 调用 ElectronDownloadCacheMode（v3.1.0 起才导出；
+  # v3.0.0 没有该符号，而 electron 41 自带 v5 也不导出该 CJS 名）。锁 3.1.x 供 app-builder-lib 使用，
+  # electron 自身的 v5 需求不受影响。
+  '@electron/get@>=3.0.0 <3.1.0': ^3.1.0
+  # semver：公告 <5.7.2（5.x 线无更高补丁版可用时按上游最新 5.7 线处理）仅钉 5.x 受影响区间；
+  # 该链路只出现在桌面打包期（app-builder-lib > tiny-async-pool）。
+  'semver@>=5.0.0 <5.7.2': ^5.7.2
+  # source-map-js：公告 <1.2.2，无 major 分裂，可直接钉
+  source-map-js: ^1.2.2
+  # shell-quote：公告 >=1.8.4 <1.11.0，concurrently 用 1.9.0，同 major 内可钉
+  shell-quote: ^1.12.0
+  # basic-ftp：公告 <=6.2.0，修复版 6.2.1 只存在于 v6 线；实际消费者 get-uri@8 声明 ^5.3.1。
+  # 实测两次证实：任何把 v5 拉进 6.x 的钉法都会连带打坏同树的 @electron/get 缓存枚举
+  # （electron-builder 报 "Cannot read properties of undefined (reading 'ReadWrite')"）。
+  # 故**不钉版**，登记为 devDependency 链残留（见 SECURITY.md）——该链路仅 promptfoo 代理探测用到。
+  # postcss-selector-parser：公告 <7.1.6 覆盖 v6 线；上游 @tailwindcss/typography 固定 "6.0.10"，
+  # 全局升 7.x 以 web build + 页面渲染实测验证（若破样式则回退并登记残留）
+  postcss-selector-parser: ^7.1.6
+  # diff：公告 >=6.0.0 <8.0.3（唯一消费者是本项目自身声明的 ^8.0.4）
+  'diff@>=6.0.0 <8.0.3': ^8.0.4
+  # katex：公告 <0.18.2，但 rehype-katex@7 / micromark-extension-math@3 声明 ^0.16.0，
+  # 而 0.16 线最新发布即为 0.16.47（无更高补丁版）→ 该链路的 low 级告警无可用修复版，
+  # 已登记 SECURITY.md「已知残留风险」。项目自身依赖已为 ^0.18.9（满足补丁要求），
+  # 不在此处钉版，以免把 rehype 链路强行拉到不兼容 major。
+  # simple-git 系列：node-llama-cpp 声明 ^3.36.0，此处强制升到已修复的 4.x
+  # （本项目仅用其 embedding 推理，不触及 git 克隆路径；升级后以构建+回归验证）
+  simple-git: ^4.0.2
+  '@simple-git/argv-parser': ^2.0.1
+  # extract-zip：公告给出 >=2.0.2，但 npm 上 2.0.1 已是最新发布版（无可升级目标），
+  # electron 自身依赖 ^2.0.1；待上游发版后再钉（当前风险=构建期解压路径，非运行时代码路径）
+  # node-forge / sprintf-js：公告修复版尚未发布，见 SECURITY.md「已知残留风险」
 
 # 显式声明「忽略构建脚本」（pnpm 10+ 机制）
 ignoredBuiltDependencies:

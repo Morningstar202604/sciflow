@@ -1,0 +1,10 @@
+# 生成物与静态站点：不参与 prettier 统一格式化
+# - docs/*.html 为独立静态页面（含大量内联样式与手写结构），prettier 的 HTML 解析器
+#   在 <details>/<summary> 深度嵌套下会误报 "Opening tag not terminated"（结构本身经
+#   html.parser 校验为平衡）；保持原样，避免为工具让路而重排整页。
+# - openapi.json 由 NestJS Swagger 生成，重排无意义且会与 openapi:gen 产物冲突。
+docs/index.html
+docs/sciflow-code-tree.html
+docs/website.html
+openapi.json
+apps/web/src/api/openapi.d.ts

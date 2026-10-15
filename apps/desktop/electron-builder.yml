@@ -13,9 +13,16 @@ files:
   - dist-electron/**/*
   - package.json
 
+# 注意（踩坑记录，勿回退）：
+# electron-builder 的 extraResources 过滤器里有硬编码规则
+#   文件 app-builder-lib/out/util/filter.js → createFilter()
+#     if (relative === "node_modules") return false;   // 永远排除**根级** node_modules
+# 结果：当 from 目录自身就是 bundle 根（resources/server）时，其 node_modules（pnpm deploy 产出的
+# 全部生产依赖）会被静默丢弃 —— 实测 0.4.0→0.4.1 安装包从 1.42GB 掉到 100MB，应用启动即崩。
+# 规避方式：把 bundle 放进二级目录（resources/bundle/server），使相对路径不为 "node_modules"。
 extraResources:
-  - from: resources/server
-    to: server
+  - from: resources/bundle
+    to: bundle
   - from: resources/web
     to: web
 

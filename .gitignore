@@ -58,5 +58,9 @@ test-results/
 playwright-report/
 .promptfoo/
 
+# 陈旧的 npm 锁文件（本项目用 pnpm，绝不允许并存）
+package-lock.json
+npm-shrinkwrap.json
+
 # OpenAPI 生成中间库
 openapi.tmp.db*

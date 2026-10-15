@@ -2,6 +2,23 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.4.1] - 2026-10-15
+
+依赖安全批次（全量告警 103→3）+ 修复两处发布级缺陷（桌面打包丢依赖 / 容器编排起不来）+ 门面文档一致性。
+
+### Fixed
+- **桌面打包致命回归**：electron-builder `extraResources` 过滤器硬编码排除根级 `node_modules`，导致安装包静默缺失全部生产依赖（1.42GB→100MB），应用启动即崩。修复：bundle 改放二级目录 `resources/bundle/server`（`electron-builder.yml` + `server-manager.ts` 入口路径 + `prepare-server.mjs` 布局同步）；实跑验证打包产物内起后端 → `/api/health` 200、111 路由全注册、better-sqlite3 原生模块可用。
+- **容器编排两版都起不来**：`docker-compose.yml` 未设 `HOST` → 容器内绑 `127.0.0.1`，宿主 `-p 3000:3000` 连不通（补 `HOST=0.0.0.0` 且宿主侧仅发布回环）；`docker-compose.prod.yml` 因 `HOST=0.0.0.0` + `AUTH_MODE=none` 被启动安全闸拒绝（显式 `ALLOW_INSECURE_BIND` 并注明不发布 3000 端口）。
+- **`pnpm openapi:gen` Windows 失败**：`spawnSync` 经 shell 执行含空格路径的 node 可执行文件会失败（报 `exit null`）→ node 直连 exec、pnpm 走 shell。
+- **Dockerfile**：`pnpm@9` → `11.7.0`（与仓库 packageManager 及锁文件格式一致）；补齐 `apps/desktop/package.json` 以通过 frozen-lockfile 校验。
+- **依赖安全**：`pnpm audit` 告警 103 → 3（生产依赖仅 1 low）。含 electron 38.8.6 → **41.10.7**（关闭 5 条 high：沙箱继承、`<webview>` Node 集成、协议处理器、拖拽）、`simple-git`/`@simple-git/argv-parser`（2 critical + 3 high）、`tar`、`shell-quote`、`vite`、`vitest`/`@vitest/mocker`/`tinypool`、`diff`、`js-yaml`、`source-map-js`、`postcss-selector-parser`、`semver`、`electron-builder`/`app-builder-lib`/`builder-util-runtime`。无法修复的 3 条（修复版未发布）登记于 `SECURITY.md`。
+- **overrides 纪律**：安全钉版一律按受影响范围定点，禁止跨 major 全局替换（实测全局升 js-yaml 打坏 `@redocly/openapi-core` 致 `openapi:gen` 崩溃；全局升 basic-ftp 打坏 `@electron/get` 缓存枚举致 electron-builder 崩溃）。
+
+### Changed
+- **仓库卫生**：删除两份陈旧 `package-lock.json`（声明 0.1.0、依赖口径与当前版本完全不符）并在 `.gitignore` 拦截；移除零引用的 `pdf-parse`；移除根目录交付报告与重复的 `docs/website.html`；新增 `.github/dependabot.yml`（每周检查 + 安全更新单独分组）与 `.prettierignore`。
+- **门面与文档一致性**：`docs/index.html`（GitHub Pages 实际服务页）清除 Supervisor / 手写 SVG / 四平台 等过时口径，补 badhope 仓库入口；`docs/sciflow-code-tree.html` 删除幽灵 `orchestrator/` 模块、改为真实 `pipeline/` 编排说明；`docs/development.md`、`CONTRIBUTING.md`、`docs/product-roadmap.md` 图表与计数口径改正（vitest 版本、回归基线、体积红线）。
+- 版本统一 `0.4.1`（root / server / web / desktop / CLI / OpenAPI）。
+
 ## [0.4.0] - 2026-10-15
 
 平台级重构（去手搓化 × 成熟件换装）+ 真实模型端到端验收 + 五平台镜像发布。
@@ -158,14 +175,14 @@
 
 ### Added
 - 投稿状态跟踪（投稿→under review→修回→录用/拒稿→转投串联）、修回截止日倒计时。
-- 力导向引用网络图（手写 SVG，可交互）。
+- 力导向引用网络图（手写 SVG，可交互）。*（0.4.0 起已换为 sigma.js + graphology，WebGL 渲染）*
 - 实验沙箱（隔离 spawn Python，降级引导）。
 - 知识库与文献双向打通、可搜索绑定 + 来源卡片。
 
 ## [0.1.4] - 2026-09
 
 ### Added
-- 全页面可视化体系落地，补齐真科研环境高级功能与主流智能体交互范式（Supervisor 分组时间线、⌘K 命令面板、暗色模式）。
+- 全页面可视化体系落地，补齐真科研环境高级功能与主流智能体交互范式（编排分组时间线、⌘K 命令面板、暗色模式）。*（0.4.0 起编排由 LangGraph 承担，不再有独立 Supervisor/orchestrator 模块）*
 - 基于树状图的模块合并与横向扩展。
 
 ### Changed

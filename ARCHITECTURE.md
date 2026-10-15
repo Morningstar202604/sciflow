@@ -214,7 +214,8 @@ apps/server/src/
 | 富文本/Markdown 编辑器 | @uiw/react-codemirror | 禁止裸 Textarea 充当编辑器 |
 | 单测 API mock | msw | — |
 
-| 桌面打包原生模块 / 依赖 ESM 形态 | 原生模块交给 `apps/desktop/scripts/prepare-server.mjs` 自动按 Electron ABI 重编（幂等 ABI 戳）；Electron 基线 **≥38**（内嵌 Node 22，`require(ESM)` 原生支持）；CI 环境下载 electron 用 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` | Electron 33 冒烟实测三连炸（ESM/ABI）教训；新增 ESM-only 依赖前对照本行 |
+| 桌面打包原生模块 / 依赖 ESM 形态 | 原生模块交给 `apps/desktop/scripts/prepare-server.mjs` 自动按 Electron ABI 重编（幂等 ABI 戳）；Electron 基线 **≥41.10.7**（内嵌 Node 24；安全公告 5 条 high 的修复线）；CI/本机下载 electron 用 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`；`@electron/get` 必须留 3.1.x（electron-builder 26.x 需要 v3.1 才导出的 `ElectronDownloadCacheMode`，见 §2 overrides） | Electron 33 冒烟实测三连炸（ESM/ABI）教训；新增 ESM-only 依赖前对照本行 |
+| 桌面 `extraResources` 拷贝目录 | 后端 bundle 必须放在**二级目录**（`resources/bundle/server`），禁止让 `node_modules` 处于 `from` 目录的根级 | electron-builder 过滤器硬编码 `if (relative === "node_modules") return false`（app-builder-lib/out/util/filter.js），根级 node_modules 会被**静默丢弃** → 安装包从 1.42GB 掉到 100MB、应用启动即崩（0.4.1 实测踩中并修复） |
 
 **判断规则**：新代码若含 `JSON.parse` 于模型输出、`new RegExp` 解析协议、手写 `for` 循环分页/排序、手拼 SSE `data:` 行——先停下查本表。
 
@@ -272,6 +273,17 @@ apps/server/src/
 - ✅ TanStack Table v8（**钉 ^8.21.3**：v9 为新 major API 未稳）重写抽取矩阵（动态列=文献+字段、表头点击排序）
 - ✅ 路线图 #17 大纲模板（综述/IMRaD/基金三模板，本地 JSON 注入，零 AI 零依赖）
 - ✅ Electron desktop:dist 构建验证（见构建日志；better-sqlite3 v12 原生模块在 Electron 重编）
+
+### 0.4.1 依赖安全与发布质量批次（2026-10-15 续作）
+
+- ✅ **依赖安全：全量告警 103 → 3**（生产依赖仅 1 low=katex）。处置：electron 38.8.6→**41.10.7**（关 5 条 high）、simple-git→4.0.2 / argv-parser→2.0.1、tar→7.5.22、shell-quote→1.12.0、vite→6.4.3、vitest/@vitest/mocker→4.1.11、diff→8.0.4、js-yaml（5.x 线）、source-map-js、postcss-selector-parser、semver、electron-builder→26.15.3；`pnpm audit --registry=https://registry.npmjs.org --prod` 为目标命令。
+- ✅ **overrides 纪律**：全部**按受影响范围定点钉版**，禁止跨 major 全局替换——实测全局升 js-yaml 打坏 `@redocly/openapi-core`（`openapi:gen` 崩）、全局升 basic-ftp 打坏 `@electron/get` 缓存枚举（electron-builder 崩）。
+- ✅ **残留 3 条已登记** `SECURITY.md`（node-forge/sprintf-js 修复版未发布；katex 0.16 线无补丁且 rehype 链路锁 ^0.16）。
+- ✅ **桌面打包致命回归修复**：electron-builder `extraResources` 静默丢弃根级 `node_modules`（bundle 1.42GB→100MB）；改为二级目录 `resources/bundle/server` + `server-manager.ts` 入口路径同步 + `prepare-server.mjs` 布局调整；**实跑验证**：打包产物内 `ELECTRON_RUN_AS_NODE` 起后端 → `/api/health` 200、111 路由全注册。
+- ✅ **容器编排缺陷修复**：`docker-compose.yml` 缺 `HOST` 导致容器内绑回环（宿主 `-p` 不通）→ 补 `HOST=0.0.0.0` + 宿主侧仅发布 `127.0.0.1:3000`；`docker-compose.prod.yml` 因 `HOST=0.0.0.0`+`AUTH_MODE=none` 会被启动闸拒绝 → 显式 `ALLOW_INSECURE_BIND`（并注明不发布 3000 端口）；Dockerfile `pnpm@9`→`11.7.0` 并补 desktop package.json（锁文件一致性）。
+- ✅ **仓库卫生**：删除两份陈旧 `package-lock.json`（声明 0.1.0、依赖口径与 0.4.x 全不符）+ `.gitignore` 拦截；删除零引用的 `pdf-parse`；移除根目录交付报告与重复的 `docs/website.html`；新增 `.github/dependabot.yml`（每周 + 安全组优先）与 `.prettierignore`。
+- ✅ **门面与文档一致性**：`docs/index.html`（Pages 实际服务页）清除 Supervisor/手写 SVG/四平台等过时口径并补 badhope 仓入口；`docs/sciflow-code-tree.html` 删除幽灵 `orchestrator/` 模块改为真实 `pipeline/` 说明；`development.md`/`CONTRIBUTING.md`/`product-roadmap.md` 图表与计数口径改正；CHANGELOG 历史条目加"已被 0.4.0 取代"注记。
+- ✅ **openapi:gen 跨平台修复**：Windows 下 `spawnSync` 经 shell 执行含空格路径（如 `Program Files` 下的 node.exe）失败 → 改为 node 直连 exec + pnpm 走 shell；产物 111 paths / version 0.4.1。
 
 **已知准入项（非债）**：TanStack Table × React Compiler 互操作 lint warning ×1（库级官方已知，跳过组件记忆化，无运行时影响；CI 门禁为 0 error）。
 

@@ -23,7 +23,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { SpawnSyncOptions, spawnSync } from 'node:child_process';
 
-const CLI_VERSION = '0.4.0';
+const CLI_VERSION = '0.4.1';
 
 /** 单次同步 HTTP 请求（复用已启动的本地服务，避免 CLI 自身启 server） */
 function localApi(path: string, opts?: { method?: string; body?: unknown }): any {

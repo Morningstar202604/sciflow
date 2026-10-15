@@ -237,11 +237,11 @@ footer a:hover{color:var(--brand2)}
   <div class="wrap">
     <span class="eyebrow">Local-First AI Research Workbench · 单用户本地科研智能体工作台</span>
     <h1>把科研全流程<br><span class="grad-text">交给本地多智能体</span></h1>
-    <p class="tag">SciFlow 是本地优先、单机部署的科研全流程 AI 助手：输入一个研究主题，由 Supervisor 编排器调度专业子智能体，完成文献调研 → 写作 → 质量门 → 投稿辅助的完整生命周期，文献与 Key 全部落本地 SQLite。</p>
+    <p class="tag">SciFlow 是本地优先、单机部署的科研全流程 AI 助手：输入一个研究主题，由 LangGraph 编排的多智能体流水线接管，完成文献调研 → 写作 → 质量门 → 投稿辅助的完整生命周期，文献与 Key 全部落本地 SQLite。</p>
     <div class="badges">
       <span class="badge">🗄️ <b>本地优先</b> SQLite 单文件</span>
-      <span class="badge">🤖 <b>7 智能体</b> 自动流水线</span>
-      <span class="badge">📊 <b>零依赖</b> 手写 SVG 可视化</span>
+      <span class="badge">🤖 <b>多智能体</b> 自动流水线</span>
+      <span class="badge">📊 <b>Recharts + sigma.js</b> 可视化</span>
       <span class="badge">🔌 <b>OpenAI 兼容</b> 自配模型 Key</span>
     </div>
     <div class="cta-row">
@@ -284,7 +284,7 @@ footer a:hover{color:var(--brand2)}
       <div class="card">
         <div class="ic">🤖</div>
         <h3>多智能体流水线</h3>
-        <p>Supervisor 编排 7 类子智能体：Planner → 并行 Research → Writer → Reviewer → Polisher → 引用回填。</p>
+        <p>LangGraph 编排全自动流水线：主题验证 → 文献调研 → 大纲（人工确认）→ 并行分章起草 → 7 维质量门 → 润色 → 引用格式化。</p>
         <ul><li>Reflexion 自动回炉</li><li>Checkpoint 断点续跑</li><li>fast / strong 模型路由</li></ul>
       </div>
 
@@ -312,7 +312,7 @@ footer a:hover{color:var(--brand2)}
       <div class="card">
         <div class="ic">📊</div>
         <h3>可视化体系</h3>
-        <p>拒绝重型图表库，全部为零依赖手写 SVG，首屏 JS 从 2.4MB 压到 821KB。</p>
+        <p>Recharts 负责统计图表、sigma.js + graphology（WebGL）负责引用网络；页面按需懒加载，图表包不进首屏。</p>
         <ul><li>编码矩阵</li><li>引用网络</li><li>质量雷达</li><li>记忆思维导图</li></ul>
       </div>
 
@@ -341,7 +341,7 @@ footer a:hover{color:var(--brand2)}
           <span class="pill grad">React 19 + Vite 6</span>
           <span class="pill">Tailwind v4</span>
           <span class="pill">react-markdown + KaTeX</span>
-          <span class="pill">手写 SVG 图表</span>
+          <span class="pill">Recharts · sigma.js</span>
         </div>
       </div>
       <div class="arch-arrow">⇅ &nbsp;REST / SSE 流式</div>
@@ -446,10 +446,14 @@ AI_RPM_CAP=<span class="s">8</span></pre>
 <section id="docs">
   <div class="wrap">
     <div class="sec-head">
-      <h2 class="sec-title">四平台<span class="grad-text">开源仓库</span></h2>
-      <p class="sec-sub">四仓由 CI 级验证保障（typecheck ×2 · vitest · build ×2 · 密钥校验），全部公开可克隆。</p>
+      <h2 class="sec-title">多平台<span class="grad-text">开源仓库</span></h2>
+      <p class="sec-sub">GitHub 三仓运行同一套 CI（lint · typecheck ×2 · vitest ×2 · build ×2 · mock 全量回归 161 项 · promptfoo 契约评估 · Playwright 冒烟）；GitCode / Gitee 同步同一发布树（Gitee 当前为私有镜像）。</p>
     </div>
     <div class="repo-grid">
+      <a class="repo" href="https://github.com/badhope/sciflow" target="_blank" rel="noopener">
+        <span class="ric">🐙</span>
+        <span><div class="rn">GitHub · badhope</div><div class="ru">github.com/badhope/sciflow</div></span>
+      </a>
       <a class="repo" href="https://gitcode.com/badhope/sciflow" target="_blank" rel="noopener">
         <span class="ric">⚡</span>
         <span><div class="rn">GitCode</div><div class="ru">gitcode.com/badhope/sciflow</div></span>

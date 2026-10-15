@@ -37,7 +37,7 @@ pnpm dev                                       # 后端 :3000 + 前端 :5173 同
 pnpm --filter @sciflow/server typecheck
 pnpm --filter @sciflow/web typecheck
 
-# 2. 单元测试（vitest 5；注意不要让 vitest 扫到 dist/）
+# 2. 单元测试（vitest；注意不要让 vitest 扫到 dist/）
 pnpm --filter @sciflow/server test
 
 # 3. 双端构建
@@ -61,7 +61,7 @@ CI（`.github/workflows/ci.yml`）会在每个 PR 上重复执行：install → 
 ## 代码风格与原则
 
 - **TypeScript strict**：禁止 `any` 泛滥；AI 结构化输出一律走 zod schema 校验，坏 JSON 要有兜底。
-- **前端**：Tailwind CSS v4；图表一律手写 SVG（`components/charts.tsx`），**不新增 ECharts/D3 等重型图表库**。
+- **前端**：Tailwind CSS v4；图表走 `components/charts.tsx`（Recharts），图谱走 sigma.js 组件，表格用 TanStack Table；**不在页面内手写图表/表逻辑**（见 `ARCHITECTURE.md` §7）。
 - **零新增重型依赖原则**：每加一个运行时依赖，先问能否用标准库/现有依赖实现——本项目刻意保持轻量（mock 网关仅用 `node:http`，中文分词为零依赖 Bigram）。
 - **安全红线**：
   - 不得把真实 API Key / token / 密码写进任何源码、测试或文档（占位符用 `sk-your-api-key-here`）。

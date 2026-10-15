@@ -38,6 +38,11 @@ services:
       - AUTH_MODE=${AUTH_MODE:-none}
       - JWT_SECRET=${JWT_SECRET:-}
       - JWT_EXPIRES=${JWT_EXPIRES:-7d}
+      # 启动安全闸配套：容器内 HOST=0.0.0.0 属"非回环"，闸门要求 AUTH_MODE=jwt。
+      # 本编排不向宿主发布 3000 端口（唯一入口 = web 容器 nginx :8080 → 容器网络内 server:3000），
+      # 因此显式放行是有意为之。若你额外发布了 3000 端口，请改用 AUTH_MODE=jwt + JWT_SECRET
+      # 并删除本行。
+      - ALLOW_INSECURE_BIND=${ALLOW_INSECURE_BIND:-1}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s

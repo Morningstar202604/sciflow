@@ -3,8 +3,13 @@
  * SciFlow 桌面端 · 打包资源准备
  *
  * 产出到 apps/desktop/resources/（electron-builder extraResources 引用）：
- *   resources/server/   自包含后端 bundle（pnpm deploy 产出：dist + 生产 node_modules，原生模块可用）
- *   resources/web/      前端静态产物（apps/web/dist）
+ *   resources/bundle/server/  自包含后端 bundle（pnpm deploy 产出：dist + 生产 node_modules，原生模块可用）
+ *   resources/web/            前端静态产物（apps/web/dist）
+ *
+ * 为什么多一层 resources/bundle/：electron-builder 的 extraResources 过滤器硬编码
+ * `if (relative === "node_modules") return false`（app-builder-lib/out/util/filter.js），
+ * 会把 from 目录根级的 node_modules 静默丢弃 —— 实测导致 0.4.1 安装包缺少全部生产依赖（1.42GB→100MB）。
+ * 放进二级目录后相对路径不再是 "node_modules"，复制正常。
  *
  * 前置：已执行 pnpm --filter @sciflow/server build 与 pnpm --filter @sciflow/web build
  */
@@ -18,7 +23,8 @@ const here = path.dirname(fileURLToPath(import.meta.url)); // apps/desktop/scrip
 const desktopDir = path.resolve(here, '..'); // apps/desktop
 const repoRoot = path.resolve(desktopDir, '..', '..'); // 仓库根
 const resourcesDir = path.join(desktopDir, 'resources');
-const serverBundleDir = path.join(resourcesDir, 'server');
+const bundleRoot = path.join(resourcesDir, 'bundle');
+const serverBundleDir = path.join(bundleRoot, 'server');
 const webDir = path.join(resourcesDir, 'web');
 
 const step = (msg) => console.log(`\x1b[36m[prepare]\x1b[0m ${msg}`);
@@ -50,6 +56,7 @@ async function main() {
 
   // ---------- 1. server bundle：pnpm deploy（pnpm 官方部署机制） ----------
   step('生成自包含 server bundle（pnpm deploy --prod）…');
+  cleanDir(bundleRoot);
   cleanDir(serverBundleDir);
   execSync(`pnpm --filter @sciflow/server deploy --legacy --prod "${serverBundleDir}"`, {
     cwd: repoRoot,

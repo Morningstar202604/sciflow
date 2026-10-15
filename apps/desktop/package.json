@@ -1,6 +1,6 @@
 {
   "name": "@sciflow/desktop",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "SciFlow 桌面端（Electron 封装：内嵌 NestJS 后端 + 本地 SQLite，离线可用）",
   "main": "dist-electron/main.js",
@@ -21,9 +21,9 @@
     "electron-updater": "^6.3.9"
   },
   "devDependencies": {
-    "@types/node": "^22.20.4",
-    "electron": "^38.8.6",
-    "electron-builder": "^25.1.8",
+    "@types/node": "^24.9.0",
+    "electron": "^41.10.7",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.9.3"
   }
 }

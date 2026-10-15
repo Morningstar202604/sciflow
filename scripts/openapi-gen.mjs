@@ -14,13 +14,30 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const isWin = process.platform === 'win32';
 
-function run(cmd, args, opts = {}) {
-  // Windows 下 pnpm 是 .cmd，必须走 shell；参数均为静态无空格，拼接安全（避免 DEP0190）
-  const r = isWin
-    ? spawnSync([cmd, ...args].join(' '), { stdio: 'inherit', shell: true, ...opts })
-    : spawnSync(cmd, args, { stdio: 'inherit', ...opts });
+/**
+ * 跨平台执行。
+ * - node 自身用绝对路径直接 exec（Windows 下若走 shell，`C:\Program Files\...` 的空格会被切碎，
+ *   spawnSync 会以 status=null 返回，报出无法定位的 "exit null"）。
+ * - 包管理器脚本（pnpm）在 Windows 需经 shell 才能解析 .cmd，但其调用一律不带含空格参数。
+ */
+export function runNode(args, opts = {}) {
+  const r = spawnSync(process.execPath, args, { stdio: 'inherit', ...opts });
   if (r.status !== 0) {
-    console.error(`[openapi-gen] 失败：${cmd} ${args.join(' ')}（exit ${r.status}）`);
+    console.error(
+      `[openapi-gen] 失败：node ${args.join(' ')}（status=${r.status} signal=${r.signal || '-'}${
+        r.error ? ` error=${r.error.message}` : ''
+      }）`,
+    );
+    process.exit(r.status ?? 1);
+  }
+}
+
+function runPnpm(args, opts = {}) {
+  const r = isWin
+    ? spawnSync(['pnpm', ...args].join(' '), { stdio: 'inherit', shell: true, ...opts })
+    : spawnSync('pnpm', args, { stdio: 'inherit', ...opts });
+  if (r.status !== 0) {
+    console.error(`[openapi-gen] 失败：pnpm ${args.join(' ')}（status=${r.status}）`);
     process.exit(r.status ?? 1);
   }
 }
@@ -34,12 +51,11 @@ if (!existsSync(dumpScript)) {
 // 导出用临时库路径，避免碰真实 data/sciflow.db
 const tmp = mkdtempSync(join(tmpdir(), 'sciflow-openapi-'));
 try {
-  run(process.execPath, [dumpScript, 'openapi.json'], {
+  runNode([dumpScript, 'openapi.json'], {
     cwd: root,
     env: { ...process.env, DATABASE_PATH: join(tmp, 'openapi.db') },
-    shell: false,
   });
-  run('pnpm', ['--filter', '@sciflow/web', 'exec', 'openapi-typescript', '../../openapi.json', '-o', 'src/api/openapi.d.ts'], { cwd: root });
+  runPnpm(['--filter', '@sciflow/web', 'exec', 'openapi-typescript', '../../openapi.json', '-o', 'src/api/openapi.d.ts'], { cwd: root });
   console.log('[openapi-gen] 完成：openapi.json + apps/web/src/api/openapi.d.ts');
 } finally {
   rmSync(tmp, { recursive: true, force: true });
