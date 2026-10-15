@@ -12,7 +12,7 @@
 
 > **Repository mirrors (synced across 5 platforms)**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> All five mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (161 checks) · promptfoo prompt-contract evals · Playwright smoke — fully public and cloneable.
+> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (161 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree, while the Gitee mirror is currently private.
 
 SciFlow is a **local-first, single-machine** AI research assistant: give it a research topic and it runs the whole academic lifecycle — **literature survey → research planning → outline generation (human confirmation) → section-wise drafting (Agentic RAG, search-while-writing) → 7-dimension quality gate (auto Reflexion rewrite below threshold) → polishing → citation formatting → submission assistance** — while accumulating process assets in a NotebookLM-style RAG knowledge base and a visual workbench.
 
