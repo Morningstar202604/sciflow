@@ -30,7 +30,7 @@
     "@nestjs/throttler": "^6.4.0",
     "ai": "^7.0.137",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "~12.11.1",
+    "better-sqlite3": "~13.0.3",
     "commander": "^15.0.0",
     "docx": "^9.7.2",
     "dotenv": "^16.4.5",
