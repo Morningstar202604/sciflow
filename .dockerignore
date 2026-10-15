@@ -1,0 +1,49 @@
+# ============================================================
+# Docker 构建上下文排除清单
+#
+# 为什么必须有：Dockerfile 里 `COPY apps/server apps/server` 会把宿主机的
+# node_modules 一并拷进镜像，覆盖容器内刚装好的 Linux 依赖树（Windows 宿主的
+# pnpm junction 在 Linux 下不可解析 → tsc 等 bin 全部缺失，构建必崩）；
+# 同时会把本地 data/*.db 与 .env 打进镜像（密钥泄露面）。
+# ============================================================
+
+# 依赖与构建产物一律不进上下文（容器内自行安装/构建）
+**/node_modules
+**/dist
+**/dist-electron
+**/*.tsbuildinfo
+
+# 密钥与本地数据（严禁入镜像）
+**/.env
+**/.env.*
+!**/.env.example
+**/data
+**/*.db
+**/*.db-journal
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+secrets/
+
+# 桌面端打包产物（体积巨大，容器不需要）
+apps/desktop/resources
+apps/desktop/release
+apps/desktop/build
+
+# 仓库元数据与工具产物
+.git
+.gitignore
+.github
+.aqg
+.v2c
+.zwork
+out
+release
+test-results
+playwright-report
+.promptfoo
+coverage
+logs
+*.log
+docs/screenshots

@@ -215,6 +215,8 @@ apps/server/src/
 | 单测 API mock | msw | — |
 
 | 桌面打包原生模块 / 依赖 ESM 形态 | 原生模块交给 `apps/desktop/scripts/prepare-server.mjs` 自动按 Electron ABI 重编（幂等 ABI 戳）；Electron 基线 **≥41.10.7**（内嵌 Node 24；安全公告 5 条 high 的修复线）；CI/本机下载 electron 用 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`；`@electron/get` 必须留 3.1.x（electron-builder 26.x 需要 v3.1 才导出的 `ElectronDownloadCacheMode`，见 §2 overrides） | Electron 33 冒烟实测三连炸（ESM/ABI）教训；新增 ESM-only 依赖前对照本行 |
+| 容器基础镜像 / 构建上下文 | 基础镜像必须用 **glibc**（`node:22-slim`），禁用 alpine(musl)——better-sqlite3/node-llama-cpp/sqlite-vec 无 musl 预编译包；仓库根必须维护 `.dockerignore`（排除 node_modules/dist/.env/data），否则 `COPY apps/server` 会用宿主机依赖树覆盖容器内安装结果（实测 tsc bin 消失 → MODULE_NOT_FOUND），并把密钥/数据打进镜像 | 2026-10-15 实测三处真因：musl 编译失败 / 无 dockerignore 污染 / filter 与锁文件一致性 |
+| 图表组件高度语义 | `HBar` 的 `barHeight` = **单柱厚度**，整图高度按条目数自适应（显式 `height` 优先）；禁止再把它当容器高度用（曾致 8 处图表被压成 5px 且触发 Recharts 重复 key） | `apps/web/src/components/charts.tsx` 注释 + `charts.test.tsx` 回归护栏 |
 | 桌面 `extraResources` 拷贝目录 | 后端 bundle 必须放在**二级目录**（`resources/bundle/server`），禁止让 `node_modules` 处于 `from` 目录的根级 | electron-builder 过滤器硬编码 `if (relative === "node_modules") return false`（app-builder-lib/out/util/filter.js），根级 node_modules 会被**静默丢弃** → 安装包从 1.42GB 掉到 100MB、应用启动即崩（0.4.1 实测踩中并修复） |
 
 **判断规则**：新代码若含 `JSON.parse` 于模型输出、`new RegExp` 解析协议、手写 `for` 循环分页/排序、手拼 SSE `data:` 行——先停下查本表。
@@ -284,6 +286,14 @@ apps/server/src/
 - ✅ **仓库卫生**：删除两份陈旧 `package-lock.json`（声明 0.1.0、依赖口径与 0.4.x 全不符）+ `.gitignore` 拦截；删除零引用的 `pdf-parse`；移除根目录交付报告与重复的 `docs/website.html`；新增 `.github/dependabot.yml`（每周 + 安全组优先）与 `.prettierignore`。
 - ✅ **门面与文档一致性**：`docs/index.html`（Pages 实际服务页）清除 Supervisor/手写 SVG/四平台等过时口径并补 badhope 仓入口；`docs/sciflow-code-tree.html` 删除幽灵 `orchestrator/` 模块改为真实 `pipeline/` 说明；`development.md`/`CONTRIBUTING.md`/`product-roadmap.md` 图表与计数口径改正；CHANGELOG 历史条目加"已被 0.4.0 取代"注记。
 - ✅ **openapi:gen 跨平台修复**：Windows 下 `spawnSync` 经 shell 执行含空格路径（如 `Program Files` 下的 node.exe）失败 → 改为 node 直连 exec + pnpm 走 shell；产物 111 paths / version 0.4.1。
+
+### 0.4.2 容器化与前端缺陷批次（2026-10-15 续作二世）
+
+- ✅ **Docker 三处真因修复**：glibc 基础镜像（musl 下原生模块无法安装）+ 新增 `.dockerignore`（宿主机 node_modules 覆盖容器依赖树 → tsc 消失；兼防 .env/data 入镜像）+ filter/锁文件一致性。**实跑验证**：build/server/web 三 target 全部构建成功；server 容器 `/api/health` 200、111 路由注册。
+- ✅ **HBar 柱高语义修复**（8 处图表受益）：`barHeight` 由"整图高度"改为"单柱厚度"，高度按条目数自适应，补 `domain=[0,max]`；红绿验证回归测试 ×2（jsonText/HBar）。
+- ✅ **jsonText 双形态兼容**：`/api/quality/latest` 返回已解析对象，旧实现 `raw.trim()` 崩溃 → 兼容对象/字符串；`QualityReport.scores` 类型同步。
+- ✅ **截图刷新**：7 张当前界面实拍（含对话工作台默认视图）+ `scripts/capture-screenshots.mjs` 可复跑采集脚本；README 双语预览区更新。
+- ✅ **五端元数据对齐**：GitHub 三仓 18 topics + homepage；Gitee 转公开 + 描述/主页；GitCode 描述/主页。
 
 **已知准入项（非债）**：TanStack Table × React Compiler 互操作 lint warning ×1（库级官方已知，跳过组件记忆化，无运行时影响；CI 门禁为 0 error）。
 

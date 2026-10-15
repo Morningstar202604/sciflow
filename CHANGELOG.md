@@ -2,6 +2,20 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.4.2] - 2026-10-15
+
+容器化与前端两处真实缺陷修复 + 界面截图刷新 + 仓库元数据治理。
+
+### Fixed
+- **Docker 构建从根上不可用（三处真因，逐一实测修复）**：① 基础镜像原是 alpine(musl)，better-sqlite3 等原生模块无预编译包、容器内缺工具链，`pnpm install` 直接失败 → 改为 glibc 的 `node:22-slim` + 编译工具链兜底；② 缺 `.dockerignore`，`COPY apps/server` 把宿主机 node_modules 拷进镜像覆盖容器内依赖树（tsc 等 bin 全部消失，`MODULE_NOT_FOUND`）→ 新增 `.dockerignore`（node_modules/dist/.env/data/桌面产物等一律不入上下文，兼防密钥入镜像）；③ 按 filter 只装 server/web 与 workspace 锁文件校验一致性对齐。
+- **`HBar` 柱高语义错误（影响 8 处图表）**：实现把 `barHeight` 当整图高度（`resolvedHeight = height ?? barHeight ?? 240`），调用方传 5/6/7 时图表被压成 5px 高、柱条全部折叠到同一像素行，Recharts 因此报 "two children with the same key"；同时 `max` prop 被静默忽略。修复：`barHeight` 改为单柱厚度语义、高度按条目数自适应（显式 `height` 仍优先）、补 `domain=[0,max]`。新增 7 条回归测试（含 red-green 验证）。
+- **`jsonText` 遇到已解析对象崩溃**：`/api/quality/latest` 等接口 `parseJson` 后再返回（与 DB 原样字符串形态并存），旧实现直接 `raw.trim()` → `TypeError: raw.trim is not a function`，写作页质量区渲染中断。修复：兼容对象/字符串双形态；`QualityReport.scores` 类型同步为联合类型。回归测试覆盖。
+
+### Changed
+- **界面截图全面刷新（docs/screenshots/）**：旧图（10-09）为对话工作台重构前界面；本次用 mock 后端实跑一条完整流水线后重拍 7 张真实界面（对话工作台为默认视图、流水线、写作、质量、文献库、知识库、项目总览），并提供可复跑的采集脚本 `scripts/capture-screenshots.mjs`；中英文 README 预览区同步更新。
+- **Docker 部署验证落地**：`docker build --target build/server/web` 三个 target 全部实测通过；server 镜像起容器 → `/api/health` 200（health 输出含 db/ai 状态），日志显示 111 路由注册与 EmbeddingService 就绪。
+- **五端仓库元数据对齐**：GitHub 三仓补齐 18 个 topics 与 homepage；Gitee 转公开并补中英文描述/主页；GitCode 补描述/主页；README 镜像区措辞随之更新（不再有"Gitee 为私有"声明）。
+
 ## [0.4.1] - 2026-10-15
 
 依赖安全批次（全量告警 103→3）+ 修复两处发布级缺陷（桌面打包丢依赖 / 容器编排起不来）+ 门面文档一致性。

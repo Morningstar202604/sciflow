@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A520%20(CI%2022)-339933.svg)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-11.7.0-f69220.svg)](package.json)
-[![version](https://img.shields.io/badge/version-0.4.1-black.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.4.2-black.svg)](CHANGELOG.md)
 
 > **🌐 语言 / Language：[中文](README.md) · [English](README.en.md)**
 
 > **仓库镜像（五平台同步）**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> GitHub 三仓运行同一套 CI：lint · typecheck ×2 · vitest ×2 · build ×2 · mock 全量回归（161 项）· promptfoo 契约评估 · Playwright 冒烟；GitCode 与 Gitee 同步同一发布树，Gitee 当前为私有镜像。
+> GitHub 三仓运行同一套 CI：lint · typecheck ×2 · vitest ×2 · build ×2 · mock 全量回归（161 项）· promptfoo 契约评估 · Playwright 冒烟；GitCode 与 Gitee 同步同一发布树。
 
 SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一个研究主题，自动完成 **文献调研 → 研究规划 → 大纲（人工确认）→ 分章起草（边写边查的 Agentic RAG）→ 质量门评分（不达标自动 Reflexion 回炉）→ 润色 → 引用格式化 → 投稿辅助** 的科研全生命周期，并以 NotebookLM 式 RAG 知识库 + 可视化工作台沉淀过程资产。
 
@@ -21,13 +21,17 @@ SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一�
 
 ## 📸 界面预览
 
-| 工作台 · 项目总览 | 全自动流水线 · 多智能体编排 |
+| 对话工作台 · 首屏默认视图 | 全自动流水线 · 多智能体编排 |
 | --- | --- |
-| ![工作台](docs/screenshots/dash.png) | ![流水线](docs/screenshots/pipeline.png) |
+| ![对话工作台](docs/screenshots/workspace.png) | ![流水线](docs/screenshots/pipeline.png) |
 
-| 论文写作 · AI 助手 + 公式渲染 | 质量评分 · 7 维雷达 + 改进建议 |
+| 论文写作 · 大纲 + AI 助手 + 公式渲染 | 质量评分 · 7 维雷达 + 改进建议 |
 | --- | --- |
 | ![论文写作](docs/screenshots/writing.png) | ![质量评分](docs/screenshots/quality.png) |
+
+| 文献库 · 筛选与编码矩阵 | 知识库 RAG · 引用问答 |
+| --- | --- |
+| ![文献库](docs/screenshots/literature.png) | ![知识库](docs/screenshots/knowledge.png) |
 
 > 截图来自真实运行界面（本地部署 · 内置 AI 网关实测）。
 
@@ -210,7 +214,7 @@ SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
 | [`docs/product-roadmap.md`](docs/product-roadmap.md) | 产品路线图：现状能力矩阵、设计原则、差距与缺口 |
 | [`docs/index.html`](docs/index.html) | 项目官网（静态单页，浏览器直开；GitHub Pages 首页） |
 | [`docs/sciflow-code-tree.html`](docs/sciflow-code-tree.html) | 全仓代码树可视化（浏览器打开） |
-| [`docs/screenshots/`](docs/screenshots/) | 工作台 / 流水线 / 写作 / 质量评分实机截图 |
+| [`docs/screenshots/`](docs/screenshots/) | 对话工作台 / 流水线 / 写作 / 质量 / 文献库 / 知识库 实机截图 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境、提交规范、PR 流程 |
 | [`SECURITY.md`](SECURITY.md) | 安全设计要点与漏洞披露方式 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录 |

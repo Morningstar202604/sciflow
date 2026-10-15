@@ -1,7 +1,12 @@
 # ============ 构建阶段：全量安装 + 双端编译 ============
-FROM node:22-alpine AS build
+# 基础镜像用 glibc 的 slim 而非 alpine(musl)：better-sqlite3 / node-llama-cpp / sqlite-vec
+# 都依赖 glibc 预编译二进制；musl 下 better-sqlite3 无预编译包且容器内缺少编译工具链，
+# 实测 pnpm install 直接失败（gyp ERR: not ok）。slim 下走预编译，无需长编译。
+FROM node:22-slim AS build
 # 版本与仓库 packageManager 保持一致（此前写 pnpm@9，与 lockfile 混用会产生解析歧义）
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+# 原生模块兜底编译工具链（预编译不可用时回退源码编译）
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 # 桌面端（Electron）不参与容器构建：跳过其二进制下载，避免无谓的 ~100MB 拉取
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 WORKDIR /app
@@ -17,7 +22,8 @@ COPY apps/web apps/web
 RUN pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
 
 # ============ 后端运行时 ============
-FROM node:22-alpine AS server
+# 与构建阶段同为 glibc（原生模块二进制按 glibc 编译/下载，不可跨 libc 混用）
+FROM node:22-slim AS server
 WORKDIR /app
 COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/server/node_modules ./apps/server/node_modules

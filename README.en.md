@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A520%20(CI%2022)-339933.svg)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-11.7.0-f69220.svg)](package.json)
-[![version](https://img.shields.io/badge/version-0.4.1-black.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.4.2-black.svg)](CHANGELOG.md)
 
 > **🌐 Language / 语言：[English](README.en.md) · [中文](README.md)**
 
 > **Repository mirrors (synced across 5 platforms)**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (161 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree, while the Gitee mirror is currently private.
+> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (161 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree.
 
 SciFlow is a **local-first, single-machine** AI research assistant: give it a research topic and it runs the whole academic lifecycle — **literature survey → research planning → outline generation (human confirmation) → section-wise drafting (Agentic RAG, search-while-writing) → 7-dimension quality gate (auto Reflexion rewrite below threshold) → polishing → citation formatting → submission assistance** — while accumulating process assets in a NotebookLM-style RAG knowledge base and a visual workbench.
 
@@ -21,13 +21,17 @@ SciFlow is a **local-first, single-machine** AI research assistant: give it a re
 
 ## 📸 Screenshots
 
-| Workspace · Project Overview | Pipeline · Agent Orchestration |
+| Chat Workspace · default view | Pipeline · Agent Orchestration |
 | --- | --- |
-| ![Workspace](docs/screenshots/dash.png) | ![Pipeline](docs/screenshots/pipeline.png) |
+| ![Chat workspace](docs/screenshots/workspace.png) | ![Pipeline](docs/screenshots/pipeline.png) |
 
-| Writing · AI Assistant + Math Rendering | Quality · 7-Dimension Radar + Feedback |
+| Writing · Outline + AI assistant + math | Quality · 7-Dimension Radar + Feedback |
 | --- | --- |
 | ![Writing](docs/screenshots/writing.png) | ![Quality](docs/screenshots/quality.png) |
+
+| Literature Library · screening & coding matrix | Knowledge Base RAG · grounded Q&A |
+| --- | --- |
+| ![Literature](docs/screenshots/literature.png) | ![Knowledge](docs/screenshots/knowledge.png) |
 
 > Screenshots come from the real running UI (local deployment, verified against the built-in AI gateway).
 
@@ -209,7 +213,7 @@ Regression baseline (fresh database + mock gateway, see `scripts/full_regression
 | [`docs/product-roadmap.md`](docs/product-roadmap.md) | Product roadmap: capability matrix, design principles, gaps |
 | [`docs/index.html`](docs/index.html) | Project homepage (static single page, opens in a browser) |
 | [`docs/sciflow-code-tree.html`](docs/sciflow-code-tree.html) | Full-repo code tree visualization |
-| [`docs/screenshots/`](docs/screenshots/) | Real screenshots (workspace / pipeline / writing / quality) |
+| [`docs/screenshots/`](docs/screenshots/) | Real screenshots (workspace / pipeline / writing / quality / literature / knowledge) |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Dev environment, commit conventions, PR flow |
 | [`SECURITY.md`](SECURITY.md) | Security design notes and vulnerability disclosure |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |

@@ -108,28 +108,43 @@ export function Donut({ data, segments, size = 160, thickness = 24, centerLabel,
 
 /* ── HBar (BarChart) ────────────────────────────────────────────────── */
 export interface HBarDataPoint { name?: string; label?: string; value: number; color?: string; max?: number; sub?: string; hint?: string; }
-export interface HBarProps { data?: HBarDataPoint[]; items?: HBarDataPoint[]; height?: number; barHeight?: number; max?: number; formatValue?: (v: number) => string; sub?: (d: HBarDataPoint) => string; hint?: string; showValue?: boolean; }
+export interface HBarProps {
+  data?: HBarDataPoint[];
+  items?: HBarDataPoint[];
+  /** 图表整体高度（不传则按条目数自适应） */
+  height?: number;
+  /** 单条柱的厚度（px）。注意语义：不是整图高度——此前实现把它当整图高度，
+   *  导致调用方传 5/6/7 时图表被压成 5px，柱条全部折叠在同一像素行（Recharts 因此报重复 key） */
+  barHeight?: number;
+  max?: number;
+  formatValue?: (v: number) => string;
+  sub?: (d: HBarDataPoint) => string;
+  hint?: string;
+  showValue?: boolean;
+}
 
 function normalizeHBarData(input: HBarDataPoint[] | undefined): HBarDataPoint[] {
   return (input || []).map((d) => ({ name: d.name || d.label || '', value: d.value, color: d.color }));
 }
 
-export function HBar({ data, items, height, barHeight, formatValue, sub, hint, showValue }: HBarProps) {
+export function HBar({ data, items, height, barHeight, max, formatValue, sub, hint, showValue }: HBarProps) {
   const chartData = normalizeHBarData(data || items);
-  const resolvedHeight = height ?? barHeight ?? 240;
   if (!chartData.length) return <ChartEmpty message="No bars to show" />;
+  // 高度语义：显式 height 优先；否则按「每柱厚度 + 行距」× 条目数自适应，留出坐标轴与标签空间
+  const perBar = barHeight ?? 18;
+  const resolvedHeight = height ?? Math.max(chartData.length * (perBar + 10) + 16, 56);
   return (
     <div>
       <ResponsiveContainer width="100%" height={resolvedHeight}>
-        <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 4 }} barCategoryGap={10}>
+        <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 4 }} barCategoryGap={6}>
           <CartesianGrid stroke={GC} horizontal={false} />
-          <XAxis type="number" tick={{ fill: TC, fontSize: 11 }} tickFormatter={formatValue ?? ((v: number) => `${v}`)} axisLine={false} tickLine={false} />
+          <XAxis type="number" tick={{ fill: TC, fontSize: 11 }} tickFormatter={formatValue ?? ((v: number) => `${v}`)} axisLine={false} tickLine={false} domain={[0, max ?? 'dataMax']} />
           <YAxis type="category" dataKey="name" tick={{ fill: TC, fontSize: 11 }} axisLine={false} tickLine={false} width={80} />
           <Tooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} contentStyle={TOOLTIP}
                    formatter={(v: number) => [formatValue ? formatValue(v) : v, "Value"]}
                    labelFormatter={(n: string) => { const pt = chartData.find((d) => d.name === n); return pt && sub ? sub(pt) : n; }} />
-          <Bar dataKey="value" radius={[0, 6, 6, 0]} isAnimationActive>
-            {chartData.map((e, i) => <Cell key={e.name} fill={e.color ?? P[i % P.length]} />)}
+          <Bar dataKey="value" barSize={perBar} radius={[0, 4, 4, 0]} isAnimationActive>
+            {chartData.map((e, i) => <Cell key={`${e.name}-${i}`} fill={e.color ?? P[i % P.length]} />)}
           </Bar>
         </BarChart>
       </ResponsiveContainer>

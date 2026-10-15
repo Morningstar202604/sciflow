@@ -106,7 +106,8 @@ export interface QualityReport {
   id: string;
   documentId: string;
   totalScore: number;
-  scores: string;
+  /** 原始 JSON 字符串（/api/quality 列表）或已解析对象（/api/quality/latest 等）——取值统一走 jsonText */
+  scores: string | Record<string, number>;
   feedback: string;
   createdAt: number;
 }

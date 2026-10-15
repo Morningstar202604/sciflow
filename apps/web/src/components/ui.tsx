@@ -280,8 +280,15 @@ export function ConfirmDialog({
   );
 }
 
-export function jsonText<T>(raw: string | null | undefined, fallback: T): T {
-  if (!raw || !raw.trim()) return fallback;
+/**
+ * 宽松 JSON 取值：入参存在两种形态——DB 原样回传的 JSON 字符串，
+ * 以及部分接口（如 /api/quality/latest）已 parseJson 过的对象。
+ * 两者都要能取，否则对象入参会命中 `raw.trim is not a function` 运行时崩溃。
+ */
+export function jsonText<T>(raw: unknown, fallback: T): T {
+  if (raw == null) return fallback;
+  if (typeof raw !== 'string') return raw as T;
+  if (!raw.trim()) return fallback;
   try {
     return JSON.parse(raw) as T;
   } catch {
