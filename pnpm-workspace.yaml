@@ -55,15 +55,16 @@ overrides:
   source-map-js: ^1.2.2
   # shell-quote：公告 >=1.8.4 <1.11.0，concurrently 用 1.9.0，同 major 内可钉
   shell-quote: ^1.12.0
-  # basic-ftp：公告 <=6.2.0，修复版 6.2.1 只存在于 v6 线；实际消费者 get-uri@8 声明 ^5.3.1。
-  # 实测两次证实：任何把 v5 拉进 6.x 的钉法都会连带打坏同树的 @electron/get 缓存枚举
-  # （electron-builder 报 "Cannot read properties of undefined (reading 'ReadWrite')"）。
-  # 故**不钉版**，登记为 devDependency 链残留（见 SECURITY.md）——该链路仅 promptfoo 代理探测用到。
+  # basic-ftp：公告 <=6.2.0，修复版 ≥6.2.1 仅在 v6 线；消费者 get-uri@8 声明 ^5.3.1。
+  # 早前把崩溃误归因于它（真因是 @electron/get 需 3.1.x，已单独钉版）；重新核验依赖树确认
+  # basic-ftp 只经 promptfoo(devDep) → proxy-agent → get-uri 引入，与 electron-builder 链路无关。
+  # 现强制 v6 线，并以 promptfoo 实跑 + 打包实跑双重验证。
   # postcss-selector-parser：公告 <7.1.6 覆盖 v6 线；上游 @tailwindcss/typography 固定 "6.0.10"，
   # 全局升 7.x 以 web build + 页面渲染实测验证（若破样式则回退并登记残留）
   postcss-selector-parser: ^7.1.6
   # diff：公告 >=6.0.0 <8.0.3（唯一消费者是本项目自身声明的 ^8.0.4）
   'diff@>=6.0.0 <8.0.3': ^8.0.4
+  basic-ftp: ^6.2.1
   # katex：公告 <0.18.2，但 rehype-katex@7 / micromark-extension-math@3 声明 ^0.16.0，
   # 而 0.16 线最新发布即为 0.16.47（无更高补丁版）→ 该链路的 low 级告警无可用修复版，
   # 已登记 SECURITY.md「已知残留风险」。项目自身依赖已为 ^0.18.9（满足补丁要求），
