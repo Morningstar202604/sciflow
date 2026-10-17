@@ -15,6 +15,8 @@ interface UsageSummary {
   total: UsageRow;
   byCaller: UsageRow[];
   byDay: { day: string; calls: number; total_tokens: number }[];
+  byModel: { model: string; calls: number; total_tokens: number }[];
+  budgetTokens: number;
 }
 
 /** LLM 用量分析：汇总 + 按调用方分组 + 按天分布（成本追踪仪表盘数据源） */
@@ -53,7 +55,18 @@ export class UsageService {
            FROM llm_call_log GROUP BY day ORDER BY day DESC LIMIT 14`,
         )
         .all() as { day: string; calls: number; total_tokens: number }[];
+      const byModel = sqlite
+        .prepare(
+          `SELECT model, COUNT(*) AS calls, COALESCE(SUM(total_tokens),0) AS total_tokens
+           FROM llm_call_log GROUP BY model ORDER BY total_tokens DESC LIMIT 6`,
+        )
+        .all() as { model: string; calls: number; total_tokens: number }[];
+      // B-2.2 预算上限透出（app_setting pipeline_token_budget，0=不限）
+      const budgetRow = sqlite.prepare(`SELECT value FROM app_setting WHERE key='pipeline_token_budget'`).get() as { value?: string } | undefined;
+      const budgetTokens = budgetRow ? Number(budgetRow.value) || 0 : 300_000;
       return {
+        byModel,
+        budgetTokens,
         total: total || { caller: 'all', calls: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, avg_latency_ms: 0, success_rate: 100 },
         byCaller,
         byDay,
@@ -65,6 +78,8 @@ export class UsageService {
         total: { caller: 'all', calls: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, avg_latency_ms: 0, success_rate: 100 },
         byCaller: [],
         byDay: [],
+        byModel: [],
+        budgetTokens: 300_000,
       };
     }
   }

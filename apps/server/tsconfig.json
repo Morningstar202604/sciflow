@@ -14,6 +14,7 @@
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    "rootDir": "../..",
     /* msw 走 exports 子路径（node10 解析读不到 map）；TS 层显式桥接，运行时仍由 Node exports 解析 */
     "paths": {
       "@sciflow/core/*": ["../../packages/core/src/*"],

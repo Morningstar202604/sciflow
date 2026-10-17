@@ -104,7 +104,7 @@ sciflow-desktop/
 ### 关键设计
 
 1. **双模式架构**：桌面端默认走"本地模式"（内嵌后端进程 + SQLite），也支持切换到"云端模式"（连接远程 API Server）
-2. **后端内嵌**：Electron 主进程 `spawn` Node.js 子进程跑 `apps/server/dist/main.js`，窗口加载前端页面
+2. **后端内嵌**：Electron 主进程 `spawn` Node.js 子进程跑 `apps/server/dist/apps/server/src/main.js`，窗口加载前端页面
 3. **数据隔离**：每个用户实例独立 SQLite 文件（`~/.sciflow/data/sciflow.db`），互不干扰
 4. **自动更新**：electron-updater + GitHub Releases / 自建更新源
 5. **离线优先**：本地模式完全离线可用（AI 需要用户自配 Key，其他功能零网络依赖）

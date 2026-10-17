@@ -3,9 +3,9 @@
   "version": "0.4.2",
   "private": true,
   "scripts": {
-    "dev": "node --watch dist/main.js",
+    "dev": "node --watch dist/apps/server/src/main.js",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/main.js",
+    "start": "node dist/apps/server/src/main.js",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit -p tsconfig.json",

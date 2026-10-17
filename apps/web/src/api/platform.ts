@@ -56,6 +56,8 @@ export const platform = {
         total: { calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; avg_latency_ms: number; success_rate: number };
         byCaller: { caller: string; calls: number; total_tokens: number; success_rate: number }[];
         byDay: { day: string; calls: number; total_tokens: number }[];
+        byModel: { model: string; calls: number; total_tokens: number }[];
+        budgetTokens: number;
       }>('/api/usage/summary'),
   },
   mcp: {

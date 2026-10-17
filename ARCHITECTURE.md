@@ -5,6 +5,23 @@
 >
 > **本 §7「禁止重复造轮子守则」对所有后续开发会话生效**：动手前先查 §2.6 地图——能用成熟件的必须用，不允许在任务中途自造已有成熟替代的基建。
 
+---
+
+## §2.9 模块化布局（M3，2026-10-18）
+
+**分层定案**：`packages/` = 核心能力层，`apps/server/src` = 接口层（controller/module/websearch/settings 等）。
+
+```
+packages/core/       纯工具（json-guard · authors · fingerprint）——零依赖
+packages/db/         数据层（schema · database · secret-crypto）——SQLite/drizzle/sqlite-vec
+packages/ai/         AI 层（ai-transport · ai.service · prompts · mock-gateway）——AI SDK/Nest 装饰器
+packages/retrieval/  检索层（knowledge.service · embedding.service）——依赖 core/db/ai
+```
+
+**过渡机制**：apps/server/src 原 10 个位置为 re-export 桶，调用方 import 零改动；tsconfig include 收录 packages 源码统一编译（装饰器元数据/sqlite-vec/原生模块等特案依赖此模式，贯穿不变）。
+
+**依赖红线（ESLint 强制）**：① packages 禁止反向依赖 apps/server；② 接口层只经桶或包出口使用能力，禁深路径绕过。真 workspace 拆包（独立构建/发布）触发条件：出现跨应用复用需求时再做，此前统一编译模式不动。
+
 ## 0. 现状基线（S0 考古结论）
 
 - 意图：本地优先、单机部署的科研 AI 全生命周期工作台（文献→规划→大纲→分章起草→质量门→润色→引用→投稿）。

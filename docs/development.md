@@ -102,7 +102,7 @@ pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
 # 4. 全量回归（覆盖全部路由 + 一条流水线端到端产物断言）
 #    先以 mock 模式起后端：
 AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_regression.db PORT=3000 \
-  node apps/server/dist/main.js
+  node apps/server/dist/apps/server/src/main.js
 #    另一终端：
 SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 python3 scripts/full_regression.py
 ```

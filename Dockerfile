@@ -31,7 +31,7 @@ COPY --from=build /app/node_modules ./node_modules
 WORKDIR /app/apps/server
 EXPOSE 3000
 # AI 配置经环境变量注入（AI_BASE_URL / AI_API_KEY / AI_MODEL），勿把 .env 打进镜像
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/apps/server/src/main.js"]
 
 # ============ 前端运行时（nginx 静态 + /api 反代） ============
 FROM nginx:alpine AS web

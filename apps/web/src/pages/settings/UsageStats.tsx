@@ -37,6 +37,7 @@ export function UsageStats() {
         <MetricCard label="总 Token" value={fmtK(usage.total.total_tokens)} accent="sky" />
         <MetricCard label="成功率" value={`${usage.total.success_rate}%`} accent="emerald" />
         <MetricCard label="平均延迟" value={`${usage.total.avg_latency_ms}ms`} accent="amber" />
+        <MetricCard label="任务预算上限" value={usage.budgetTokens > 0 ? fmtK(usage.budgetTokens) : '不限'} accent="rose" />
       </div>
 
       {usage.byDay.length > 0 && (
@@ -73,6 +74,14 @@ export function UsageStats() {
             ]}
           />
         </div>
+        {usage.byModel.length > 0 && (
+          <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">按模型分布（fast/strong 档位核对）</div>
+            <HBar
+              data={usage.byModel.map((m) => ({ name: m.model, value: m.total_tokens }))}
+            />
+          </div>
+        )}
         {usage.byCaller.length > 0 && (
           <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">按任务类型分布</div>

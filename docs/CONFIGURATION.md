@@ -34,7 +34,7 @@ AI_MODEL=deepseek-chat                     # 你开通的模型名
 启动：
 
 ```bash
-pnpm install && pnpm dev        # 或 node apps/server/dist/cli.js health
+pnpm install && pnpm dev        # 或 node apps/server/dist/apps/server/src/cli.js health
 ```
 
 **验收**：浏览器开 `http://localhost:3000/api/docs`，`/api/health` 返回 200 即通。若 `settings/check` 返回 503，九成是 Key 填错或模型名不存在——先别看代码，去厂商控制台核对模型名（DeepSeek 叫 `deepseek-chat`，豆包叫 `doubao-seed-*`，名字对不上一切白搭）。

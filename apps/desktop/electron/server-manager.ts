@@ -33,12 +33,12 @@ export const logsDir = path.join(userDataDir, 'logs');
 function resolveServerEntry(): string {
   if (isDev) {
     // __dirname = apps/desktop/dist-electron → 上两级 = apps/ → server/dist/main.js
-    return path.join(__dirname, '..', '..', 'server', 'dist', 'main.js');
+    return path.join(__dirname, '..', '..', 'server', 'dist', 'apps', 'server', 'src', 'main.js');
   }
   // 打包后：extraResources 把 bundle 放到 resources/bundle/server。
   // 必须经二级目录（resources/bundle/...）——见 electron-builder.yml 的踩坑记录：
   // 根级 node_modules 会被 electron-builder 过滤器静默丢弃。
-  return path.join(process.resourcesPath, 'bundle', 'server', 'dist', 'main.js');
+  return path.join(process.resourcesPath, 'bundle', 'server', 'dist', 'apps', 'server', 'src', 'main.js');
 }
 
 /** 探测一个空闲回环端口（内核分配， listen(0)） */
