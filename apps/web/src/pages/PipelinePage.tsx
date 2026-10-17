@@ -6,6 +6,7 @@ import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } from '../types';
 import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Spinner, jsonText, errMsg } from '../components/ui';
+import { PipelineDag } from '../components/PipelineDag';
 import { ProgressRing, Sparkline } from '../components/charts';
 
 const STEP_LABELS: Record<string, string> = {
@@ -558,6 +559,11 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                     </div>
                   );
                 })()}
+
+                {/* F-2.1 DAG 实时图：状态着色 + 回炉回边 */}
+                <div className="mb-3 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2.5">
+                  <PipelineDag steps={active.steps} currentStep={active.currentStep} />
+                </div>
 
                 {active.lastError && <div className="text-xs text-rose-600 dark:text-rose-300 bg-rose-50 dark:bg-rose-900/20 rounded p-2 mb-3">{active.lastError}</div>}
 

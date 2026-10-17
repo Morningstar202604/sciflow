@@ -646,3 +646,14 @@ export interface CitationAudit {
   score: number;
   issues: string[];
 }
+
+/** B-5.2 网搜 provider 配置（/api/web/config；key 掩码回显，保存时传新值） */
+export interface WebSearchConfig {
+  provider: 'duckduckgo' | 'searxng' | 'tavily' | 'serper' | 'brave';
+  searxngUrl?: string;
+  tavilyKey?: string;
+  serperKey?: string;
+  braveKey?: string;
+  chatFallback?: boolean;
+  available?: { duckduckgo: boolean; searxng: boolean; tavily: boolean; serper: boolean; brave: boolean };
+}

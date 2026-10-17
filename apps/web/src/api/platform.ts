@@ -1,4 +1,4 @@
-import type {
+import type { WebSearchConfig,
   AppSettings,
   Experiment,
   Journal,
@@ -49,6 +49,11 @@ export const platform = {
     saveMcpServer: (p: { id?: string; name: string; url: string }) =>
       request<{ ok: boolean; id: string }>(`/api/settings/mcp-servers`, { method: 'POST', body: JSON.stringify(p) }),
     removeMcpServer: (id: string) => request<{ ok: boolean }>(`/api/settings/mcp-servers/${id}`, { method: 'DELETE' }),
+  },
+  webSearchConfig: {
+    get: () => request<WebSearchConfig>('/api/web/config'),
+    save: (p: Partial<WebSearchConfig>) => request<{ ok: boolean; config?: WebSearchConfig; error?: string }>('/api/web/config', { method: 'PUT', body: JSON.stringify(p) }),
+    search: (q: string) => request<{ results: { title: string; url: string; snippet: string }[] }>('/api/web/search', { method: 'POST', body: JSON.stringify({ q }) }),
   },
   usage: {
     summary: () =>

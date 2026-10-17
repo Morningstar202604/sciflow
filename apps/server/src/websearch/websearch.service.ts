@@ -104,6 +104,7 @@ export class WebSearchService {
       tavilyKey: mask(c.tavilyKey),
       serperKey: mask(c.serperKey),
       braveKey: mask(c.braveKey),
+      chatFallback: this.isChatSearchEnabled(),
       available: {
         duckduckgo: true,
         searxng: !!c.searxngUrl,
@@ -114,7 +115,10 @@ export class WebSearchService {
     };
   }
 
-  saveConfig(body: Partial<{ provider: string; searxngUrl: string; tavilyKey: string; serperKey: string; braveKey: string }>) {
+  saveConfig(body: Partial<{ provider: string; searxngUrl: string; tavilyKey: string; serperKey: string; braveKey: string; chatFallback: boolean }>) {
+    if (body.chatFallback !== undefined) {
+      this.writeSetting('websearch_in_chat', body.chatFallback ? 'on' : 'off');
+    }
     if (body.provider !== undefined) {
       if (!isProviderName(body.provider)) throw new Error(`未知 provider: ${body.provider}`);
       this.writeSetting(SETTING_KEYS.provider, body.provider);

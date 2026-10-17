@@ -7,6 +7,7 @@ import { Badge, Button, Card, CollapsibleCard, ErrorBox, Input, Modal, SectionTi
 import { HBar } from '../components/charts';
 import { SettingsProvider, useSettings } from './settings/settings-context';
 import { ProviderManager } from './settings/ProviderManager';
+import { WebSearchSettings } from './settings/WebSearchSettings';
 import { UsageStats } from './settings/UsageStats';
 import { McpToolList } from './settings/McpToolList';
 
@@ -360,6 +361,9 @@ function SettingsLayout() {
 
       {/* Model Routing + Provider Manager */}
       <ProviderManager settings={state.settings} />
+
+      {/* F-3.4 联网搜索：provider 切换 + chat 兜底开关 */}
+      <WebSearchSettings />
 
       {/* 环境自检 */}
       <Card className="p-5 mb-4">
