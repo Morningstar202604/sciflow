@@ -1,4 +1,4 @@
-import type {
+import type { CitationAudit,
   CitationRow,
   CiteStyle,
   DashboardOverview,
@@ -26,6 +26,7 @@ export const writing = {
   documents: {
     list: (projectId: string) => request<Doc[]>(`/api/documents?projectId=${projectId}`),
     get: (id: string) => request<Doc>(`/api/documents/${id}`),
+    citationAudit: (id: string) => request<CitationAudit>(`/api/documents/${id}/citation-audit`),
     create: (projectId: string, title: string) =>
       request<Doc>('/api/documents', { method: 'POST', body: JSON.stringify({ projectId, title }) }),
     update: (id: string, patch: Partial<Doc>) =>

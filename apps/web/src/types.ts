@@ -634,3 +634,15 @@ export interface DashboardOverview {
   docCount: number;
   refCount: number;
 }
+
+/** B-4.3 引用体检结果（/api/documents/:id/citation-audit） */
+export interface CitationAudit {
+  anchorTotal: number;
+  maxAnchor: number;
+  citationRows: number;
+  verifiedCount: number;
+  noDoi: number;
+  ghost: number;
+  score: number;
+  issues: string[];
+}

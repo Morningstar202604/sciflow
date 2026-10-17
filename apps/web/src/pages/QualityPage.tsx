@@ -1,7 +1,7 @@
 import { useEffect, useState, useContext } from 'react';
 import { Gauge, Loader2, Sparkles, ListChecks } from 'lucide-react';
 import { api } from '../api/client';
-import type { Doc, Project, QualityReport } from '../types';
+import type { Doc, Project, QualityReport, CitationAudit } from '../types';
 import { Badge, Button, Card, Empty, ErrorBox, Select, jsonText, errMsg } from '../components/ui';
 import { ToastContext } from '../App';
 import { HBar, LineChart, ProgressRing } from '../components/charts';
@@ -63,7 +63,22 @@ export function QualityPage({ project }: { project: Project }) {
   const [selectedHist, setSelectedHist] = useState<(QualityReport & { scoresObj: Record<string, number> }) | null>(null);
   /** 差距#7：把改进建议拆为可勾选待办（写入 review_comment）的导出态 */
   const [exporting, setExporting] = useState(false);
+  /** B-4.3 引用体检：锚点×落库交叉审计结果 */
+  const [audit, setAudit] = useState<CitationAudit | null>(null);
+  const [auditing, setAuditing] = useState(false);
   const toast = useContext(ToastContext);
+
+  const runAudit = async () => {
+    if (!docId) return;
+    setAuditing(true);
+    try {
+      setAudit(await api.documents.citationAudit(docId));
+    } catch (e) {
+      toast('error', errMsg(e));
+    } finally {
+      setAuditing(false);
+    }
+  };
 
   useEffect(() => {
     api.documents.list(project.id).then((d) => {
@@ -136,11 +151,32 @@ export function QualityPage({ project }: { project: Project }) {
           <Button onClick={doReview} disabled={scoring || !docId} aria-busy={scoring}>
             {scoring ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Sparkles size={15} aria-hidden="true" />} {scoring ? '评分中…' : '开始评分'}
           </Button>
+          <Button onClick={runAudit} disabled={auditing || !docId} aria-busy={auditing} variant="outline">
+            {auditing ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <ListChecks size={15} aria-hidden="true" />} {auditing ? '体检中…' : '引用体检'}
+          </Button>
         </div>
         <div className="text-xs text-slate-400 dark:text-slate-500 mt-2">
           七维：文献充分性 · 逻辑一致性 · 引用规范 · 语言质量 · 创新性 · 图表 · 格式（0-100，总分取均值），结果持久化可历史对比
         </div>
       </Card>
+      {audit && (
+        <Card className="p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <ListChecks size={16} aria-hidden="true" />
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">引用体检</span>
+            <Badge tone={audit.score >= 80 ? 'green' : audit.score >= 50 ? 'amber' : 'red'}>{audit.score}/100</Badge>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mb-2">
+            <div className="p-2 rounded-md bg-slate-50 dark:bg-slate-900">锚点 {audit.anchorTotal}</div>
+            <div className="p-2 rounded-md bg-slate-50 dark:bg-slate-900">落库 {audit.citationRows}</div>
+            <div className="p-2 rounded-md bg-slate-50 dark:bg-slate-900 text-rose-600 dark:text-rose-400">幽灵 {audit.ghost}</div>
+            <div className="p-2 rounded-md bg-slate-50 dark:bg-slate-900 text-amber-600 dark:text-amber-400">无 DOI {audit.noDoi}</div>
+          </div>
+          <ul className="text-xs space-y-1">
+            {audit.issues.map((it: string, i: number) => <li key={i} className="text-slate-600 dark:text-slate-300">· {it}</li>)}
+          </ul>
+        </Card>
+      )}
 
       {current ? (
         <div className="grid lg:grid-cols-2 gap-4">

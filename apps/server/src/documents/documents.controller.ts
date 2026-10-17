@@ -15,6 +15,12 @@ export class DocumentsController {
     return this.documents.get(id);
   }
 
+  /** B-4.3 引用体检：锚点×落库交叉审计（幽灵引用/无 DOI 黄牌/绿牌） */
+  @Get(':id/citation-audit')
+  citationAudit(@Param('id') id: string) {
+    return this.documents.citationAudit(id);
+  }
+
   @Post()
   create(@Body() body: { projectId: string; title: string }) {
     return this.documents.create(body.projectId, body);

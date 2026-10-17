@@ -404,6 +404,54 @@ export class DocumentsService {
   }
 
   /** 导出 Word(.docx) 全文——交稿/投稿刚需（标题 + 大纲 + 正文 + 参考文献） */
+  /**
+   * B-4.3 引用体检：正文锚点 × citation 落库记录交叉审计（引用闭环第一版）。
+   * 红牌 = 编号超出落库引用数（幽灵引用）；黄牌 = 已绑定但无 DOI；
+   * score = 100 - 红牌×20 - 空表×60 - 黄牌×5（下限 0）。
+   */
+  citationAudit(documentId: string) {
+    const doc = db.select().from(documents).where(eq(documents.id, documentId)).get();
+    if (!doc) throw new NotFoundException('文档不存在');
+    const content = doc.content || '';
+    // 尾部块（参考文献/图表）不计锚点——与 pipeline.graph H8 切割口径一致
+    const tailRegex = /\n+#{1,3}\s*(参考文献|引用文献|图表|references)(?=[\s（(:：\-—]|$)[^\n]*/gi;
+    let cut = -1;
+    for (const m of content.matchAll(tailRegex)) {
+      const idx = m.index ?? -1;
+      if (idx >= 0 && (cut === -1 || idx < cut)) cut = idx;
+    }
+    const body = cut >= 0 ? content.slice(0, cut) : content;
+    const anchorNums = new Set<number>();
+    for (const m of body.matchAll(/\[(\d{1,3})\]/g)) {
+      const n = Number(m[1]);
+      if (n > 0) anchorNums.add(n);
+    }
+    const rows = db.select().from(citations).where(eq(citations.documentId, documentId)).all();
+    const maxAnchor = anchorNums.size > 0 ? Math.max(...anchorNums) : 0;
+    const ghost = maxAnchor > rows.length ? maxAnchor - rows.length : 0;
+    const noDoi = rows.filter((r) => {
+      if (r.verified) return false;
+      const ref = r.referenceId ? db.select().from(references).where(eq(references.id, r.referenceId)).get() : null;
+      return !ref?.doi;
+    }).length;
+    const issues: string[] = [];
+    if (ghost > 0) issues.push(`红牌：${ghost} 个锚点编号超出已落库引用（幽灵引用），请重跑引用渲染或检查文献库`);
+    if (rows.length === 0 && anchorNums.size > 0) issues.push('红牌：正文有锚点但 citation 表为空——文档未经引用渲染流程');
+    if (noDoi > 0) issues.push(`黄牌：${noDoi} 条已绑定引用无 DOI，可信度待核`);
+    if (issues.length === 0 && anchorNums.size > 0) issues.push('绿牌：全部锚点已绑定且具备 DOI 可信度');
+    const score = Math.max(0, 100 - ghost * 20 - (rows.length === 0 && anchorNums.size > 0 ? 60 : 0) - noDoi * 5);
+    return {
+      anchorTotal: anchorNums.size,
+      maxAnchor,
+      citationRows: rows.length,
+      verifiedCount: rows.filter((r) => r.verified).length,
+      noDoi,
+      ghost,
+      score,
+      issues,
+    };
+  }
+
   async exportDocx(id: string) {
     const doc = this.get(id);
     const outline = parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline, EMPTY_OUTLINE);

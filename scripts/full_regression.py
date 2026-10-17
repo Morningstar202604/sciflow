@@ -1009,6 +1009,24 @@ if p26id:
           _h0 is not None and _h0.get("referenceAuthors") == "Alice Smith, Wei Wang" and _h0.get("referenceYear") == 2021 and _h0.get("referenceTitle") == "TechDebt Binding Seed Study",
           f"st={st} keys={list(_h0.keys()) if _h0 else khits} authors={_h0.get('referenceAuthors') if _h0 else None} year={_h0.get('referenceYear') if _h0 else None}")
 
+    # 27.x B-4.3 引用体检：锚点×citation 落库交叉审计（幽灵引用/无DOI/绿牌）
+    # 自建带锚点文档（[1][2][3] 但 citation 表空 → 幽灵引用红牌场景，不依赖流水线）
+    # 契约：documents POST 只收 title（content 由 PATCH 写入），两步走
+    st, d27 = req("POST", "/api/documents", {"projectId": p26id, "title": "引用体检锚点文档"})
+    p26docid = d27.get("id") if st == 201 else None
+    st2, _p = req("PATCH", f"/api/documents/{p26docid}",
+                  {"content": "## 引言\n结论支撑[1]，另见[2]与[3]。\n\n## 方法\n方法描述。\n\n## 参考文献\n[1] A.\n[2] B.\n[3] C."}) if p26docid else (0, None)
+    check("27.0 建带锚点文档（POST+PATCH）", st == 201 and bool(p26docid) and st2 == 200, f"st={st} patch={st2}")
+    st, daudit = req("GET", f"/api/documents/{p26docid}/citation-audit")
+    check("27.1 citation-audit 返回 200 且 shape 完整",
+          st == 200 and isinstance(daudit, dict) and all(k in daudit for k in ("anchorTotal", "citationRows", "ghost", "noDoi", "score", "issues")),
+          f"st={st} body={str(daudit)[:160]}")
+    check("27.2 幽灵引用红牌：3 锚点 0 落库 → ghost=3 且 score 受罚",
+          daudit.get("anchorTotal") == 3 and daudit.get("citationRows") == 0 and daudit.get("ghost") == 3 and daudit.get("score", 100) <= 40,
+          f"body={str(daudit)[:200]}")
+    st, _na = req("GET", "/api/documents/non-exist-id-xyz/citation-audit")
+    check("27.3 不存在文档 citation-audit 返回 404", st == 404, f"st={st}")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL} / KNOWN(存量缺口) {KNOWN}")
 if KNOWN_FAILED:

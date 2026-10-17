@@ -263,11 +263,7 @@ export class KnowledgeService {
   // ---------- 检索升级：sqlite-vec ANN 向量检索（替代手搓 BM25 + TF 余弦混合） ----------
 
   /** 向量 ANN 检索（sqlite-vec vec0）：语义召回 TopK */
-  private async annSearch(projectId: string, questionEmbedding: Buffer | null, question: string, topK: number): Promise<any[]> {
-    if (!questionEmbedding) {
-      // 模型不可用，回退 FTS5 全文检索
-      return this.ftsSearch(projectId, question, topK);
-    }
+  private async annSearch(projectId: string, questionEmbedding: Buffer, topK: number): Promise<any[]> {
     try {
       const rows = sqlite
         .prepare(
@@ -284,8 +280,7 @@ export class KnowledgeService {
         .all(projectId, questionEmbedding, topK + 5) as any[]; // 多召回 5 条留给 rerank/去重
       return rows;
     } catch {
-      // vec0 不可用时回退到 FTS5 全文检索
-      return this.ftsSearch(projectId, question, topK);
+      return []; // vec0 不可用：返回空，由 search() 的 RRF 单路退化处理
     }
   }
 
@@ -365,11 +360,19 @@ export class KnowledgeService {
     if (docs.length === 0) return [];
     const refMap = this.referenceSummaryMap(docs);
 
-    // 向量语义召回
-    const qVec = await this.embedding.embed(question);
-    const hitRows = await this.annSearch(projectId, qVec, question, topK);
+    // B-3.2：ANN(语义) + FTS5(词面) 双路并行召回 → RRF 融合（k=60）。
+    // 单路失败自动退化为另一路；两路皆空回退 likeSearch 终极兜底。
+    const recallK = topK * 2 + 5; // 双路超召回，融合后裁回 topK
+    const [qVec, ftsRows] = await Promise.all([
+      this.embedding.embed(question).catch(() => null),
+      Promise.resolve().then(() => this.ftsSearch(projectId, question, recallK)).catch(() => [] as any[]),
+    ]);
+    const annRows = qVec ? await this.annSearch(projectId, qVec, recallK).catch(() => [] as any[]) : [];
+    const fused = KnowledgeService.rrfFuse(annRows, ftsRows);
+    const rows = fused.length > 0 ? fused : this.likeSearch(projectId, question, topK);
 
-    return hitRows
+    const topScore = rows[0]?.rrf || 1;
+    return rows
       .slice(0, topK)
       .map((row) => ({
         id: row.chunk_id,
@@ -378,17 +381,29 @@ export class KnowledgeService {
         content: row.content,
         context: row.context || null,
         seq: row.seq,
-        // ANN 距离有效时用 (1-distance)*100 换算百分制；FTS5 bm25() 值越小越相关，取反归一化
-        score: row.distance < 999
-          ? Math.max(0, Math.round((1 - row.distance) * 100))
-          : row.score != null
-            ? Math.max(0, Math.min(100, Math.round(100 / (1 + Math.abs(row.score)))))
-            : 15,
+        // RRF 归一百分制：榜首=100，其余按分数比例（融合序与语义/词面双信号一致）
+        score: Math.max(1, Math.round((row.rrf / topScore) * 100)),
         referenceId: row.reference_id || null,
         referenceTitle: row.reference_id ? (refMap.get(row.reference_id)?.title || null) : null,
         referenceAuthors: row.reference_id ? (refMap.get(row.reference_id)?.authors || null) : null,
         referenceYear: row.reference_id ? (refMap.get(row.reference_id)?.year || null) : null,
       }));
+  }
+
+  /** B-3.2：Reciprocal Rank Fusion——两路排名融合为统一分数（k=60，标准参数）。纯函数可单测。 */
+  static rrfFuse(a: any[], b: any[]): any[] {
+    const K = 60;
+    const byId = new Map<string, { row: any; rrf: number }>();
+    const add = (rows: any[]) =>
+      rows.forEach((r, i) => {
+        const id = String(r.chunk_id);
+        const cur = byId.get(id) || { row: r, rrf: 0 };
+        cur.rrf += 1 / (K + i + 1);
+        byId.set(id, cur);
+      });
+    add(a);
+    add(b);
+    return [...byId.values()].sort((x, y) => y.rrf - x.rrf).map((e) => ({ ...e.row, rrf: e.rrf }));
   }
 
   /** RAG 问答：检索 + LLM 基于资料回答（Contextual Retrieval：块前带文档上下文前缀） */
