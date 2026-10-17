@@ -146,7 +146,7 @@ export function QualityPage({ project }: { project: Project }) {
             className="w-full sm:w-64"
             options={[{ value: '', label: '选择文档…' }, ...docs.map((d) => ({ value: d.id, label: d.title }))]}
             value={docId}
-            onChange={setDocId}
+            onChange={(v: string) => { setDocId(v); setAudit(null); setReport(null); setSelectedHist(null); }}
           />
           <Button onClick={doReview} disabled={scoring || !docId} aria-busy={scoring}>
             {scoring ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Sparkles size={15} aria-hidden="true" />} {scoring ? '评分中…' : '开始评分'}

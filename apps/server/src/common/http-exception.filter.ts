@@ -55,6 +55,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     // 未捕获异常：堆栈仅落服务端日志，客户端拿不到任何内部细节
+    // 例外：ZodError（service 层入参校验失败）是客户端错误 → 400 + 首条 issue，不是 500
+    if (isZodError(exception)) {
+      const first = exception.issues[0];
+      const path = first?.path?.length ? `${first.path.join('.')}: ` : '';
+      this.logger.warn(`[Zod] 入参校验失败 ${path}${first?.message || ''}`);
+      response.status(HttpStatus.BAD_REQUEST).json({
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: truncate(`入参校验失败：${path}${first?.message || '字段类型或格式不符合要求'}`),
+        error: 'Bad Request',
+      });
+      return;
+    }
     this.logServerSide(exception);
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -74,6 +86,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
 function truncate(s: string): string {
   return s.length > MAX_MESSAGE_LEN ? s.slice(0, MAX_MESSAGE_LEN) : s;
+}
+
+/** 结构化识别 ZodError（避免直接 import zod 造成循环依赖：只认最小形状） */
+function isZodError(e: unknown): e is { issues: { path: (string | number | symbol)[]; message: string }[] } {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    'issues' in e &&
+    Array.isArray((e as { issues: unknown }).issues) &&
+    (e as { issues: unknown[] }).issues.length > 0 &&
+    typeof (e as { issues: Array<{ message?: unknown }> }).issues[0]?.message === 'string'
+  );
 }
 
 function errorNameFor(status: number): string {

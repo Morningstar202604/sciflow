@@ -5,7 +5,7 @@ import { Cite } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
 import '@citation-js/plugin-ris';
 import { z } from 'zod';
-import { db } from '../db/database';
+import { db, sqlite } from '../db/database';
 import { references, screeningQueue, extractionFields, extractionValues, documents, citations } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { buildCslEntries } from '../common/citation-csl';
@@ -73,6 +73,47 @@ export interface PaperHit {
 @Injectable()
 export class ReferencesService {
   constructor(private readonly ai: AiService) {}
+
+  /**
+   * B-5.2 DOI 核验（opt-in：用户逐条手动触发，非内置依赖、无启动链路调用）。
+   * 查 Crossref 公共 API（无需 Key）；成功 → verified=1 + 回填缺失元数据；失败 → 返回原因不抛断。
+   */
+  async verifyDoi(id: string) {
+    const ref = this.get(id);
+    const doi = (ref.doi || '').trim();
+    if (!doi) throw new BadRequestException('该文献没有 DOI，无法核验；请先补充 DOI 或改用 BibTeX 导入');
+    const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'SciFlow/0.4 (mailto:user@local)' } });
+      if (!res.ok) {
+        return { ok: false, status: res.status, reason: res.status === 404 ? 'Crossref 无此 DOI（DOI 本身可能是幻觉）' : `Crossref ${res.status}` };
+      }
+      const data = (await res.json()) as { message?: Record<string, unknown> };
+      const msg = data.message || {};
+      const issued = (msg.issued as { 'date-parts'?: number[][] } | undefined)?.['date-parts']?.[0]?.[0] ?? null;
+      const venue = Array.isArray(msg['container-title']) ? String(msg['container-title'][0] || '') : '';
+      const title = Array.isArray(msg.title) ? String(msg.title[0] || '') : '';
+      // 回填缺失字段（已有值不覆盖——用户手工数据优先）
+      db.update(references)
+        .set({
+          year: ref.year ?? (issued as number | null),
+          venue: ref.venue || venue,
+          title: ref.title || title,
+        })
+        .where(eq(references.id, id))
+        .run();
+      // citation 表同引用的 verified 同步（references 表无 verified 列，核验态落在 citation 侧）
+      sqlite.prepare('UPDATE citation SET verified=1 WHERE reference_id=?').run(id);
+      return { ok: true, doi, title: title || ref.title, year: issued, venue: venue || ref.venue, source: 'crossref' };
+    } catch (e: unknown) {
+      const reason = e instanceof Error && e.name === 'AbortError' ? 'Crossref 超时（8s）' : `网络失败：${e instanceof Error ? e.message : String(e)}`;
+      return { ok: false, reason };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   /** 本地文献库检索（标题/作者/摘要模糊匹配，已移除国外在线源，零外部网络依赖） */
   search(query: string, limit = 8, projectId?: string): PaperHit[] {

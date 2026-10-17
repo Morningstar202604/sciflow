@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Header } from '@nestjs/common';
+import { HttpCode, Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Header } from '@nestjs/common';
 import { ReferencesService, PaperHit } from './references.service';
 
 @Controller('references')
@@ -151,5 +151,12 @@ export class ReferencesController {
   @Post('evidence')
   evidence(@Body() body: { projectId: string; question: string }) {
     return this.references.evidence(body.projectId, body.question);
+  }
+
+  /** B-5.2 DOI 核验（opt-in 用户触发，Crossref 公共 API） */
+  @Post(':id/verify-doi')
+  @HttpCode(200)
+  async verifyDoi(@Param('id') id: string) {
+    return this.references.verifyDoi(id);
   }
 }

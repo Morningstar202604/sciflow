@@ -2,7 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { sqlite } from '../db/database';
-import { knowledgeDocs, knowledgeChunks, references } from '../db/schema';
+import { knowledgeDocs, knowledgeChunks, references, appSettings } from '../db/schema';
 import { eq, inArray, and, asc, sql } from 'drizzle-orm';
 import { AiService } from '../ai/ai.service';
 import { EmbeddingService } from './embedding.service';
@@ -369,9 +369,24 @@ export class KnowledgeService {
     ]);
     const annRows = qVec ? await this.annSearch(projectId, qVec, recallK).catch(() => [] as any[]) : [];
     const fused = KnowledgeService.rrfFuse(annRows, ftsRows);
-    const rows = fused.length > 0 ? fused : this.likeSearch(projectId, question, topK);
+    let rows = fused.length > 0 ? fused : this.likeSearch(projectId, question, topK);
 
-    const topScore = rows[0]?.rrf || 1;
+    // B-3.3：可选 LLM 重排（app_setting retrieval_rerank=on；默认 off）。失败静默保融合序。
+    if (fused.length > 0 && this.rerankEnabled()) {
+      try {
+        const candidates = fused.slice(0, 12).map((r) => ({ id: String(r.chunk_id), content: r.content }));
+        const scores = await this.ai.rerankChunks(question, candidates);
+        if (scores.size > 0) {
+          rows = fused
+            .map((r) => ({ ...r, _llm: scores.get(String(r.chunk_id)) ?? -1 }))
+            .sort((a, b) => (b._llm as number) - (a._llm as number));
+        }
+      } catch {
+        /* 重排失败：保 RRF 序 */
+      }
+    }
+
+    const topScore = rows[0]?.rrf || 1 / 61;
     return rows
       .slice(0, topK)
       .map((row) => ({
@@ -381,13 +396,23 @@ export class KnowledgeService {
         content: row.content,
         context: row.context || null,
         seq: row.seq,
-        // RRF 归一百分制：榜首=100，其余按分数比例（融合序与语义/词面双信号一致）
-        score: Math.max(1, Math.round((row.rrf / topScore) * 100)),
+        // RRF 归一百分制：榜首=100，其余按分数比例；LIKE 兜底行无 rrf，给保守分（1/61 归一后约 1 分档）
+        score: Math.max(1, Math.round(((row.rrf ?? 1 / 61) / topScore) * 100)),
+        ...(row._llm !== undefined ? { rerankScore: row._llm as number } : {}),
         referenceId: row.reference_id || null,
         referenceTitle: row.reference_id ? (refMap.get(row.reference_id)?.title || null) : null,
         referenceAuthors: row.reference_id ? (refMap.get(row.reference_id)?.authors || null) : null,
         referenceYear: row.reference_id ? (refMap.get(row.reference_id)?.year || null) : null,
       }));
+  }
+
+  /** B-3.3：LLM 重排开关（app_setting retrieval_rerank=on；env WEBSEARCH 同款优先级：DB > env > 默认 off） */
+  private rerankEnabled(): boolean {
+    try {
+      const row = db.select().from(appSettings).where(eq(appSettings.key, 'retrieval_rerank')).get();
+      if (row) return row.value === 'on';
+    } catch { /* 表未建 */ }
+    return process.env.RETRIEVAL_RERANK === 'on';
   }
 
   /** B-3.2：Reciprocal Rank Fusion——两路排名融合为统一分数（k=60，标准参数）。纯函数可单测。 */

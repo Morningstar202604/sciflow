@@ -397,6 +397,26 @@ export class AiService extends AiTransportService {
   }
 
   /** 研究缺口定位（zod 结构化校验） */
+  /**
+   * B-3.3 可选 LLM 重排：对融合检索的候选块按问题相关性打分（0-10）。
+   * 开关 app_setting retrieval_rerank（默认 off）——重排多一次 LLM 调用，仅高质量问答场景开启。
+   * 失败抛错由调用方静默降级（保 RRF 融合序）。
+   */
+  async rerankChunks(question: string, chunks: { id: string; content: string }[]): Promise<Map<string, number>> {
+    const schema = z.object({
+      scores: z.array(z.object({ id: z.string(), score: z.number().min(0).max(10) })).min(1),
+    });
+    const list = chunks
+      .map((c, i) => `[${i}] id=${c.id}\n${c.content.slice(0, 400)}`)
+      .join('\n---\n');
+    const raw = await this.complete(
+      [{ role: 'user', content: `给定用户问题与候选资料块，为每块的相关性打 0-10 分（0 无关，10 直接回答问题）。只输出 JSON：{"scores":[{"id":"...","score":N}]}\n\n问题：${question}\n\n候选块：\n${list}` }],
+      { temperature: 0.1, context: 'rerankChunks', maxTokens: 1024 },
+    );
+    const parsed = this.safeParse(raw, schema);
+    return new Map(parsed ? parsed.scores.map((x) => [x.id, x.score]) : []);
+  }
+
   async researchGap(topic: string, papers: string): Promise<{
     gaps: { gap: string; evidence: string; opportunity: string; feasibility: string }[];
     recommendedTopic: string;
