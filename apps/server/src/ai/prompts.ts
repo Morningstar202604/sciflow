@@ -390,5 +390,5 @@ export const GENERATE_FIGURES = (topic: string, outline: string, contentHead: st
     }
   ]
 }
-图表主题建议：① 技术演进路线（从消息传递 GNN 到几何深度学习，flowchart 纵向分阶段）；② 方法分类对比（不同模型家族对比，graph 或 erDiagram）；③ 流水线/框架总览（本研究综述的论述结构，flowchart）。
-要求：mermaid 语法必须正确、可被 mermaid 解析器渲染；不要使用特殊字符破坏语法；每个图至少 5 个节点。`;
+图表主题建议（按论文实际领域选择与适配，禁止照搬示例措辞）：① 研究脉络/技术演进路线（按时间或范式分阶段，flowchart 纵向布局）；② 方法/方案分类对比（不同流派或体系对比，graph 或 erDiagram）；③ 本文综述框架总览（论述结构或研究流程，flowchart）。
+要求：mermaid 语法必须正确、可被 mermaid 解析器渲染；不要使用特殊字符破坏语法；主题必须贴合论文自身领域与内容，不得引入论文未涉及的领域概念；每个图至少 5 个节点。`;

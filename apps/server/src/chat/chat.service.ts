@@ -46,6 +46,9 @@ interface ChatRuntimeOptions {
   signal?: AbortSignal;
 }
 
+/** RAG 注入到模型的每块片段上限（字符）。320 太短导致上下文贫瘠（审计 H3）；默认 800，可经环境变量调整 */
+const KNOWLEDGE_SNIPPET_CHARS = Math.max(200, Number(process.env.KNOWLEDGE_SNIPPET_CHARS || 800));
+
 /** Agent 化科研问答：回答前自动注入项目记忆 + 跨会话摘要 + 知识库 RAG 上下文 */
 @Injectable()
 export class ChatService {
@@ -95,7 +98,7 @@ export class ChatService {
         const hits = await this.knowledge.search(projectId, question, 3);
         hitsLen = hits.length;
         if (hits.length) {
-          parts.push(`知识库资料（回答可标注【来源:文档名】）：\n${hits.map((h) => `【来源:${h.docName}】${h.content.slice(0, 320)}`).join('\n')}`);
+          parts.push(`知识库资料（回答可标注【来源:文档名】）：\n${hits.map((h) => `【来源:${h.docName}】${h.content.slice(0, KNOWLEDGE_SNIPPET_CHARS)}`).join('\n')}`);
           // 同一文档多个片段只保留一条来源，取最高分块；该最高分块的 chunkText/chunkSeq/referenceId/referenceTitle 一并透传
           // （与 knowledge query 的 sources 字段对齐；docName/score 旧字段保留，新字段全部为附加）
           const byDoc = new Map<string, (typeof hits)[number]>();

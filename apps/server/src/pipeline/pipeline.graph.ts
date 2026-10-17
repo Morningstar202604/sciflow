@@ -49,8 +49,11 @@ export interface PipelineGraphDeps {
     extractEpisodic(p: string, t: string, o: string, s: number): Promise<{ content: string; keywords: string[] }>;
     generateFigures(topic: string, outline: string, content: string): Promise<{ title: string; caption: string; mermaid: string }[]>;
   };
+  /** H2 预算器：LLM 调用后累计该任务 token，超限抛错终止流水线 */
+  trackBudget(taskId: string): void;
   /** 分章起草（服务层实现，内部并行；onProgress 用于逐节进度通知）。 */
   runDrafting(
+    taskId: string,
     title: string,
     outline: Outline,
     refsPrompt: string,
@@ -169,7 +172,7 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
         const refsPrompt = deps.buildRefsPrompt(task.projectId);
         if (retry === 0) snapshotBeforeOverwrite(docId, '流水线起草前自动快照');
         const totalSections = outline.sections?.length || 0;
-        const draftContent = await deps.runDrafting(doc.title || task.topic, outline, refsPrompt, styleHint, reflexion, (done, total) => {
+        const draftContent = await deps.runDrafting(s.taskId, doc.title || task.topic, outline, refsPrompt, styleHint, reflexion, (done, total) => {
           void deps.notify(s.taskId, 'quality-gate', 'running', `起草进度 ${done}/${total} 节${retry > 0 ? `（第 ${retry} 次回炉）` : ''}`, retry);
         });
         void totalSections;
@@ -214,11 +217,13 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
           .run();
         const scored = Number(report.totalScore);
         if (scored > best.score) best = { score: scored, content: latest?.content ?? '', feedback: report.feedback };
+        deps.trackBudget(s.taskId); // H2：评审成本打点
         await deps.notify(s.taskId, 'quality-gate', 'scored', `总分 ${report.totalScore}/100`);
         if (report.totalScore < QUALITY_THRESHOLD && retry < MAX_RETRY) {
           retry += 1;
+          const reflex = buildReflexionText(reviewResult.scores, report.feedback);
           db.insert(reflexionLogs)
-            .values({ id: randomUUID(), taskId: s.taskId, round: retry, note: report.feedback, instructions: '[]', createdAt: Date.now() })
+            .values({ id: randomUUID(), taskId: s.taskId, round: retry, note: reflex.note, instructions: JSON.stringify(reflex.instructions), createdAt: Date.now() })
             .run();
           await deps.notify(s.taskId, 'quality-gate', 'retry', `第 ${retry} 次回炉（评分 ${report.totalScore} < ${QUALITY_THRESHOLD}）`, retry);
           continue;
@@ -238,13 +243,19 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
       const docId = s.documentId!;
       const finalDoc = db.select().from(documents).where(eq(documents.id, docId)).get();
       const content = finalDoc?.content ?? '';
-      const refIdx = content.indexOf('\n\n## 参考文献');
-      const figIdx = content.indexOf('\n\n## 图表');
-      const cuts = [refIdx, figIdx].filter((i) => i >= 0);
-      const cut = cuts.length ? Math.min(...cuts) : -1;
+      // H8 修复：尾部块（参考文献/图表）用正则匹配任意标题层级与换行变体，
+      // 不再依赖字面量 '\n\n## 参考文献'（模型输出 '\n## 参考文献' 或 '## 参考文献列表' 时旧逻辑切不到，
+      // 会导致参考文献被当作正文送润色，AI 有机会改写引文内容——学术诚信红线）。
+      const tailRegex = /\n+#{1,3}\s*(参考文献|引用文献|图表|references)\b[^\n]*/gi;
+      let cut = -1;
+      for (const m of content.matchAll(tailRegex)) {
+        const idx = m.index ?? -1;
+        if (idx >= 0 && (cut === -1 || idx < cut)) cut = idx; // 取最早出现的尾部标题
+      }
       const bodyPart = cut >= 0 ? content.slice(0, cut) : content;
       const tailPart = cut >= 0 ? content.slice(cut) : '';
       const polished = await deps.ai.polish(bodyPart);
+      deps.trackBudget(s.taskId); // H2：润色成本打点
       db.insert(polishRecords)
         .values({ id: randomUUID(), documentId: docId, type: 'polish', original: polished.original, polished: polished.polished, reason: polished.reason, createdAt: Date.now() })
         .run();
@@ -316,6 +327,38 @@ function parseResearchMeta(raw: string | null | undefined): ResearchMeta {
   } catch {
     return { lib: [], kn: [] };
   }
+}
+
+/**
+ * H1 修复：Reflexion 定向化——把评审结果转成「可执行的章节级修订指令」。
+ * 旧实现只把 feedback 原文塞回下一轮（模型自查自改，改进信号弱）；
+ * 现在按最低分维度从 REFLEXION_PLAYBOOK 取针对性动作 + feedback 摘要，
+ * 写入 reflexionLogs.note 供下一轮起草 prompt 直接消费，instructions 字段同步落结构化 JSON。
+ */
+const REFLEXION_DIM_CN: Record<string, string> = {
+  literature: '文献', logic: '逻辑', citation: '引用', language: '语言',
+  novelty: '创新性', figures: '图表', format: '格式',
+};
+const REFLEXION_PLAYBOOK: Record<string, string> = {
+  literature: '补强文献支撑：每个论点旁必须挂 [Ref:N] 锚点引用文献池中的真实文献，禁止凭空断言与编造引文',
+  logic: '修复论证链：检查章节间承接与因果，消除逻辑跳跃，段落间补过渡句，结论不得超出论据范围',
+  citation: '强化引用规范：事实性论断逐条挂 [Ref:N] 锚点，同一观点多源互证，消除孤证段落',
+  language: '提升语言质量：删除冗余与口语化表达，统一术语译名，句式学术化，避免长句堆叠',
+  novelty: '突出创新贡献：在引言与讨论中显式对比已有工作，明确本文差异点与增量贡献',
+  figures: '改进图表：每个图表必须在正文被引用并解读，图题/轴标签/图例完整，内容与论述一致',
+  format: '规范格式：统一标题层级、段落长度、公式编号、单位与缩写写法，段落首行不得孤句',
+};
+function buildReflexionText(scores: Record<string, number> | undefined, feedback: string): { note: string; instructions: string[] } {
+  if (!scores || Object.keys(scores).length === 0) {
+    return { note: `评审意见（本轮必须针对性改进）：${feedback.slice(0, 600)}`, instructions: [feedback.slice(0, 600)] };
+  }
+  const dims = Object.entries(scores)
+    .filter(([, v]) => typeof v === 'number')
+    .sort((a, b) => a[1] - b[1])
+    .slice(0, 2); // 最低分两维：改进信号最强
+  const instructions = dims.map(([k, v]) => `【${REFLEXION_DIM_CN[k] || k} ${v}分】${REFLEXION_PLAYBOOK[k] || '按评审意见针对性修改'}`);
+  const note = `针对性修订指令（本轮起草必须逐条落实）：\n${instructions.join('\n')}\n\n评审意见摘要：${feedback.slice(0, 400)}`;
+  return { note, instructions };
 }
 
 function reflexionNote(taskId: string): string {

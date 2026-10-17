@@ -41,7 +41,7 @@ export function LiteraturePage({ project }: { project: Project }) {
   }, [project.id]);
 
   useEffect(() => {
-    api.references.screenList(project.id).then(setScreenItems).catch(() => setScreenItems([]));
+    api.references.screenList(project.id).then(setScreenItems).catch((e: unknown) => { setScreenItems([]); setError(errMsg(e)); });
   }, [project.id]);
 
   // 引用网络（React Query）：切到图谱页时拉取；子组件写回走 setQueryData（保持局部演进能力）

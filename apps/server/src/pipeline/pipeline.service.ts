@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import pLimit from 'p-limit';
 import { Command } from '@langchain/langgraph';
 import { db } from '../db/database';
-import { pipelineTasks, documents, pipelineConfigs } from '../db/schema';
+import { pipelineTasks, documents, pipelineConfigs, appSettings } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
 import { parseJson, parseStringList } from '../common/json-guard';
@@ -72,8 +72,8 @@ export class PipelineService implements OnModuleInit {
         extractEpisodic: (p, t, o, s) => this.ai.extractEpisodic(p, t, o, s),
         generateFigures: (t, o, c) => this.ai.generateFigures(t, o, c),
       },
-      runDrafting: (title, outline, refsPrompt, styleHint, reflexion, onProgress) =>
-        this.runDrafting(title, outline, refsPrompt, styleHint, reflexion, onProgress),
+      runDrafting: (taskId, title, outline, refsPrompt, styleHint, reflexion, onProgress) =>
+        this.runDrafting(taskId, title, outline, refsPrompt, styleHint, reflexion, onProgress),
       buildRefsPrompt: (projectId) => this.referencesForPrompt(projectId),
       renderCitations: (projectId, docId, content, meta) => {
         const refPool = this.refsForDraft(projectId);
@@ -110,6 +110,7 @@ export class PipelineService implements OnModuleInit {
         };
       },
       notify: (taskId, key, status, output, retryCount) => this.notify(taskId, key, status, output, retryCount),
+      trackBudget: (taskId) => this.trackBudget(taskId),
       stepEnabled: (key) => this.stepEnabled(key),
       logger: this.logger,
     };
@@ -117,9 +118,37 @@ export class PipelineService implements OnModuleInit {
   }
 
   // ─── 公开 API（controller 调用） ──────────────────────────────
+  /** H2：任务级 token 预算器（task → 累计 tokens）。默认 300k，app_setting pipeline_token_budget 可调，0=关闭 */
+  private budget = new Map<string, number>();
+  private trackBudget(taskId: string): void {
+    const spent = (this.budget.get(taskId) || 0) + this.ai.lastTotalTokens;
+    this.budget.set(taskId, spent);
+    let cap = 300_000;
+    try {
+      const row = db.select().from(appSettings).where(eq(appSettings.key, 'pipeline_token_budget')).get();
+      if (row) cap = Number(row.value) || 0;
+    } catch { /* 表未建时用默认 */ }
+    if (cap > 0 && spent > cap) {
+      throw new BadRequestException(
+        `流水线 token 预算耗尽（累计 ${spent} > 上限 ${cap}）。可在设置中调整 pipeline_token_budget（0=不限）后重跑。`,
+      );
+    }
+  }
+
   create(projectId: string, topic: string) {
     if (!topic.trim()) throw new BadRequestException('请先输入研究主题');
     if (!this.ai.configured) throw new BadRequestException('AI 服务未配置：请在 apps/server/.env 设置 AI_API_KEY 后再运行流水线');
+    // 项目级并发互斥（H5）：同项目同时只允许一条 running 流水线。
+    // 背景：起草并行池 p-limit(3) 全局共享，双任务并行=6 路并发 → 429 风暴 + 成本翻倍；
+    // SQLite 同步写入无竞态窗口，DB 检查即互斥点。
+    const running = db
+      .select({ id: pipelineTasks.id })
+      .from(pipelineTasks)
+      .where(and(eq(pipelineTasks.projectId, projectId), eq(pipelineTasks.status, 'running')))
+      .get();
+    if (running) {
+      throw new BadRequestException(`该项目已有流水线在运行中（${running.id.slice(0, 8)}…）。请等待完成、在流水线页停止后再新建，或查看其他项目的任务。`);
+    }
     const now = Date.now();
     const task = {
       id: randomUUID(), projectId, documentId: null as string | null, topic: topic.trim(),
@@ -128,6 +157,7 @@ export class PipelineService implements OnModuleInit {
       retryCount: 0, lastError: '', createdAt: now, updatedAt: now,
     };
     db.insert(pipelineTasks).values(task).run();
+    this.budget.set(task.id, 0);
     void this.invokeGraph(task.id, { taskId: task.id, task: this.getTaskRow(task.id) });
     return this.get(task.id);
   }
@@ -311,6 +341,7 @@ export class PipelineService implements OnModuleInit {
 
   // ─── 起草（并行：p-limit，AI_DRAFT_CONCURRENCY 可配，默认 3；onProgress 逐节进度） ────
   private async runDrafting(
+    taskId: string,
     title: string,
     outline: Outline,
     referencesPrompt: string,
@@ -319,6 +350,7 @@ export class PipelineService implements OnModuleInit {
     onProgress?: (done: number, total: number) => void,
   ): Promise<string> {
     void title;
+    const taskIdRef = taskId;
     const sections = outline?.sections || [];
     const outlineJson = JSON.stringify(outline);
     const ctx = `${referencesPrompt}\n\n${styleHint}\n\n${reflexion}`.trim();
@@ -328,6 +360,7 @@ export class PipelineService implements OnModuleInit {
         this.draftingLimit(async () => {
           const sectionTitle = typeof sec === 'string' ? sec : sec.title;
           const content = await this.ai.draftSection(sectionTitle, outlineJson, ctx);
+          this.trackBudget(taskIdRef); // H2：起草成本打点（起草占全流程 token 大头）
           done += 1;
           onProgress?.(done, sections.length);
           return { i, text: `## ${sectionTitle}\n\n${content}` };

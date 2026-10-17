@@ -78,14 +78,17 @@ export class ReferencesService {
   search(query: string, limit = 8, projectId?: string): PaperHit[] {
     const q = query.trim();
     if (!q) return [];
-    const q2 = `%${q}%`;
-    const cond = sql`${references.title} LIKE ${q2} OR COALESCE(${references.authors}, '') LIKE ${q2} OR COALESCE(${references.abstract}, '') LIKE ${q2}`;
+    // LIKE 通配符转义：用户输入中的 % _ \ 按字面匹配（防 % 全命中）
+    const esc = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const q2 = `%${esc}%`;
+    const cond = sql`${references.title} LIKE ${q2} ESCAPE '\\' OR COALESCE(${references.authors}, '') LIKE ${q2} ESCAPE '\\' OR COALESCE(${references.abstract}, '') LIKE ${q2} ESCAPE '\\'`;
     const rows = db
       .select()
       .from(references)
       .where(projectId ? sql`${references.projectId} = ${projectId} AND (${cond})` : cond)
+      .limit(Math.max(1, Math.min(limit, 200))) // SQL 级截断：不再全量取回后内存切片
       .all();
-    return rows.slice(0, limit).map((r) => ({
+    return rows.map((r) => ({
       id: r.id,
       title: r.title,
       authors: parseAuthors(r.authors),

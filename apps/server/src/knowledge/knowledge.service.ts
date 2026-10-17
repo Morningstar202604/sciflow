@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
 import { sqlite } from '../db/database';
 import { knowledgeDocs, knowledgeChunks, references } from '../db/schema';
-import { eq, inArray, and, asc } from 'drizzle-orm';
+import { eq, inArray, and, asc, sql } from 'drizzle-orm';
 import { AiService } from '../ai/ai.service';
 import { EmbeddingService } from './embedding.service';
 import { fingerprint } from '../common/fingerprint';
@@ -12,6 +12,7 @@ import * as unpdf from 'unpdf';
 import { parseAuthors } from '../common/authors';
 
 const CHUNK_SIZE = 800; // 每块约 800 字（段落聚合，与文档切分逻辑保持一致）
+const CHUNK_OVERLAP = 120; // 15% 重叠：块边界处上下文连续，RAG 检索质量关键参数（不可为 0）
 
 /** 文献库↔知识库打通（#5）：列表/检索中嵌入的 reference 摘要 */
 interface RefSummary {
@@ -34,12 +35,12 @@ export class KnowledgeService {
   /** 文本分块：RecursiveCharacterTextSplitter（@langchain/textsplitters）——按段落→换行→中文句读递归切分到 CHUNK_SIZE */
   private readonly splitter = new RecursiveCharacterTextSplitter({
     chunkSize: CHUNK_SIZE,
-    chunkOverlap: 0,
+    chunkOverlap: CHUNK_OVERLAP,
     separators: ['\n\n', '\n', '。', '；', '，', ' ', ''],
   });
 
   private async chunkText(text: string): Promise<string[]> {
-    const cleaned = text.replace(/\r/g, '').replace(/[ 	]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+    const cleaned = text.replace(/\r/g, '').replace(/[  ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
     if (!cleaned) return [];
     const parts = await this.splitter.splitText(cleaned);
     return parts.map((p) => p.trim()).filter(Boolean);
@@ -298,7 +299,7 @@ export class KnowledgeService {
     const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
     if (docs.length === 0) return [];
     const tokens = KnowledgeService.buildTrigramQuery(question);
-    if (!tokens) return this.likeSearch(projectId, topK);
+    if (!tokens) return this.likeSearch(projectId, question, topK);
     try {
       const rows = sqlite
         .prepare(
@@ -315,10 +316,10 @@ export class KnowledgeService {
            LIMIT ?`,
         )
         .all(projectId, tokens, topK * 2) as any[]; // bm25() 值越小越相关；多召回留给 rerank
-      return rows.length ? rows : this.likeSearch(projectId, topK);
+      return rows.length ? rows : this.likeSearch(projectId, question, topK);
     } catch {
       // FTS5 不可用或查询语法错误 → LIKE 终极兜底
-      return this.likeSearch(projectId, topK);
+      return this.likeSearch(projectId, question, topK);
     }
   }
 
@@ -335,21 +336,28 @@ export class KnowledgeService {
   }
 
   /** LIKE 兜底检索（FTS5 不可用或查询语法错误时的终极兜底） */
-  private likeSearch(projectId: string, _topK: number): any[] {
+  private likeSearch(projectId: string, question: string, topK: number): any[] {
     const NO_SCORE = 999;
     const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
     if (docs.length === 0) return [];
-    const chunks = db.select().from(knowledgeChunks).where(inArray(knowledgeChunks.docId, docs.map((d) => d.id))).all();
-    return chunks.map((c) => ({
-      chunk_id: c.id,
-      doc_id: c.docId,
-      content: c.content,
-      context: c.context,
-      seq: c.seq,
-      doc_name: docs.find((d) => d.id === c.docId)?.name || '未知',
-      reference_id: docs.find((d) => d.id === c.docId)?.referenceId || null,
-      distance: NO_SCORE,
-    }));
+    // 终极兜底也要 SQL 级限流：LIKE 全匹配 + LIMIT topK*4，防止大知识库全量拉进内存；LIKE 通配符转义
+    const like = `%${question.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const rows = db
+      .select({
+        chunk_id: knowledgeChunks.id,
+        doc_id: knowledgeChunks.docId,
+        content: knowledgeChunks.content,
+        context: knowledgeChunks.context,
+        seq: knowledgeChunks.seq,
+        doc_name: knowledgeDocs.name,
+        reference_id: knowledgeDocs.referenceId,
+      })
+      .from(knowledgeChunks)
+      .innerJoin(knowledgeDocs, eq(knowledgeChunks.docId, knowledgeDocs.id))
+      .where(and(eq(knowledgeDocs.projectId, projectId), sql`${knowledgeChunks.content} LIKE ${like} ESCAPE '\\'`))
+      .limit(Math.max(1, topK * 4))
+      .all();
+    return rows.map((r) => ({ ...r, distance: NO_SCORE }));
   }
 
   async search(projectId: string, question: string, topK = 5) {

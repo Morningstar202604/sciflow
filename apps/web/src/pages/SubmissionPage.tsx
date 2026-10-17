@@ -51,6 +51,7 @@ function revisionBadge(deadline: number | null): ReactNode {
 
 export function SubmissionPage({ project }: { project: Project }) {
   const [tab, setTab] = useState<Tab>('journals');
+  const [loadErr, setLoadErr] = useState('');
   const [docs, setDocs] = useState<Doc[]>([]);
   const [selDoc, setSelDoc] = useState('');
   const [busy, setBusy] = useState(false);
@@ -94,12 +95,12 @@ export function SubmissionPage({ project }: { project: Project }) {
 
   // 拉取项目内文档，否则「选择项目内论文」下拉恒空
   useEffect(() => {
-    api.documents.list(project.id).then(setDocs).catch(() => setDocs([]));
+    api.documents.list(project.id).then(setDocs).catch((e) => { setDocs([]); setLoadErr(errMsg(e)); });
   }, [project.id]);
 
   // 期刊库加载
   useEffect(() => {
-    api.submission.listJournals().then(setLib).catch(() => setLib([]));
+    api.submission.listJournals().then(setLib).catch((e) => { setLib([]); setLoadErr(errMsg(e)); });
   }, []);
 
   const loadLib = async () => {
@@ -116,7 +117,7 @@ export function SubmissionPage({ project }: { project: Project }) {
       setComments([]);
       return;
     }
-    api.research.reviewComments(docId).then(setComments).catch(() => setComments([]));
+    api.research.reviewComments(docId).then(setComments).catch((e) => { setComments([]); setLoadErr(errMsg(e)); });
   };
 
   // 投稿跟踪列表（React Query，tab=track 时启用；同时预取每条投稿的 open 审稿意见数）
@@ -411,6 +412,8 @@ export function SubmissionPage({ project }: { project: Project }) {
   ];
 
   return (
+    <>
+      <ErrorBox message={loadErr} />
     <div className="max-w-4xl mx-auto">
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {TABS.map((t) => (
@@ -857,5 +860,6 @@ export function SubmissionPage({ project }: { project: Project }) {
         )
       )}
     </div>
+    </>
   );
 }

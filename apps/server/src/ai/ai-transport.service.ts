@@ -142,9 +142,13 @@ export class AiTransportService {
     }
   }
 
+  /** 最近一次调用的总 token 数（流水线预算器打点用；每次调用覆盖） */
+  lastTotalTokens = 0;
+
   /** LLM 调用成本追踪（token 用量审计，落 llm_call_log 表） */
   protected logLlmCall(opts: { caller: string; model: string; promptTokens: number; completionTokens: number; latencyMs: number; success: boolean; error?: string }): void {
     try {
+      this.lastTotalTokens = opts.promptTokens + opts.completionTokens;
       db.insert(llmCallLogs)
         .values({
           id: randomUUID(),
