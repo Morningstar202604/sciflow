@@ -16,6 +16,13 @@
     "baseUrl": "./",
     /* msw 走 exports 子路径（node10 解析读不到 map）；TS 层显式桥接，运行时仍由 Node exports 解析 */
     "paths": {
+      "@sciflow/core/*": ["../../packages/core/src/*"],
+      "@sciflow/db/*": ["../../packages/db/src/*"],
+      "@sciflow/core": ["../../packages/core/src/index.ts"],
+      "@sciflow/db": ["../../packages/db/src/index.ts"],
+      "better-sqlite3": ["./node_modules/better-sqlite3"],
+      "sqlite-vec": ["./node_modules/sqlite-vec"],
+      "drizzle-orm/*": ["./node_modules/drizzle-orm/*"],
       "msw": ["./node_modules/msw/lib/core/index.d.ts"],
       "msw/node": ["./node_modules/msw/lib/node/index.d.ts"],
       "msw/http": ["./node_modules/msw/lib/http/index.d.ts"]
@@ -26,6 +33,6 @@
     "strictNullChecks": true,
     "noImplicitAny": false
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../../packages/core/src/**/*", "../../packages/db/src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.spec.ts"]
 }
