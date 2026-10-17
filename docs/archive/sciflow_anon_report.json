@@ -1,0 +1,46 @@
+{
+  "gitee:badhope/sciflow": {
+    "exists": true,
+    "http": 200,
+    "full_name": "badhope/sciflow",
+    "pushed_at": "2026-10-15T22:07:49+08:00",
+    "default_branch": "main",
+    "private": false,
+    "visibility": null,
+    "clone_url": "https://gitee.com/badhope/sciflow.git"
+  },
+  "github:x33834/sciflow": {
+    "exists": true,
+    "http": 200,
+    "full_name": "X33834/sciflow",
+    "pushed_at": "2026-10-15T14:12:03Z",
+    "default_branch": "main",
+    "private": false,
+    "visibility": "public",
+    "clone_url": "https://github.com/X33834/sciflow.git"
+  },
+  "github:Morningstar202604/sciflow": {
+    "exists": true,
+    "http": 200,
+    "full_name": "Morningstar202604/sciflow",
+    "pushed_at": "2026-10-15T14:11:52Z",
+    "default_branch": "main",
+    "private": false,
+    "visibility": "public",
+    "clone_url": "https://github.com/Morningstar202604/sciflow.git"
+  },
+  "github:badhope/sciflow": {
+    "exists": true,
+    "http": 200,
+    "full_name": "badhope/sciflow",
+    "pushed_at": "2026-10-15T14:14:16Z",
+    "default_branch": "main",
+    "private": false,
+    "visibility": "public",
+    "clone_url": "https://github.com/badhope/sciflow.git"
+  },
+  "gitcode:badhope/sciflow": {
+    "exists": false,
+    "http": 400
+  }
+}

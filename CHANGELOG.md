@@ -2,6 +2,41 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.5.0] - 2026-10-18
+
+深度审计驱动的正确性批次 + 检索与引用升级 + 模块化拆分 + 可视化两件 + 五平台工程链路。全程以 `scripts/full_regression.py`（基线 161→165）为门禁，每批全绿入库。
+
+### Added
+- **检索 RRF 双路融合（B-3.2）**：`knowledge.search` 重构为 ANN(语义)+FTS5(词面) 并行召回 → Reciprocal Rank Fusion(k=60) 归一百分制；单路失败自动退化，双空回退 LIKE 兜底；`rrfFuse` 纯函数。
+- **LLM 重排开关（B-3.3）**：`retrieval_rerank=on` 时融合 top12 走 LLM 打分重排（默认 off），命中块透传 `rerankScore`。
+- **引用体检闭环（B-4.3）**：`GET /api/documents/:id/citation-audit` 锚点×落库交叉审计——幽灵引用红牌/无 DOI 黄牌/绿牌打分；质量页新增「引用体检」按钮与结果卡。
+- **网搜可插拔 Provider（B-6.1/F-3.4）**：DuckDuckGo 兜底 + SearXNG(开源自部署) + Tavily/Serper/Brave（用户自填 Key，掩码回显）；`GET/PUT /api/web/config`；chat 联网兜底开关（默认 off）；设置页网搜面板。
+- **DOI 核验（B-5.2）**：`POST /api/references/:id/verify-doi` opt-in 触发 Crossref——假 DOI 直接提示「可能是幻觉引用」，成功回填元数据并同步 citation verified。
+- **任务级 token 预算器（B-2.2）**：起草/评审/润色三点打点，默认 300k tokens，`pipeline_token_budget` 可调（0=不限），超限任务终止。
+- **流水线 DAG 实时图（F-2.1）**：自绘轻量 SVG 零依赖——状态八色着色、回炉回路虚线回边（Reflexion 语义可视化）、retry 徽标、当前步骤呼吸动画。
+- **成本仪表盘增量（F-2.3）**：usage 新增 `byModel`（fast/strong 档位分布）与 `budgetTokens`（预算上限透出），设置页补预算指标卡与模型分布 HBar。
+- **docs/HANDOFF.md**：新环境/新会话续接唯一入口（起步/完成度/待办/踩坑清单/文档地图）。
+- **docs/audit-report.md + docs/archive/audit-notes.md**：深度审计报告与 76 项原始疑点笔记入仓归档。
+
+### Fixed
+- **H1 Reflexion 定向回炉**：旧实现 instructions 恒空、只回传 feedback 原文 → 新增 REFLEXION_PLAYBOOK 按最低分两维生成章节级修订指令，结构化落库供下轮起草逐条落实（自动改分真正可演示）。
+- **H2 成本失控双闸**：并发互斥（同项目 running 任务 409 拒绝新建，防 p-limit 共享池 429 风暴）+ token 预算器。
+- **H3 RAG 上下文贫瘠**：注入片段 320→800 字符（`KNOWLEDGE_SNIPPET_CHARS` 可配）。
+- **H4/H6 SQL 级限流**：references.search 与 knowledge.likeSearch 全部 LIKE 转义 + SQL LIMIT（不再全量拉内存）。
+- **H5 并发互斥**：见 H2。
+- **H7 分块零重叠**：CHUNK_OVERLAP 0→120（15%），块边界语义连续。
+- **H8 尾部块切割失效**：`` 对中文永不匹配（JS \w 不含汉字）→ 显式 lookahead；参考文献/图表块不再被送润色（学术诚信红线）。
+- **前端静默吞错**：Submission/Literature 等四处 `.catch(() => setX([]))` 改错误态（ErrorBox/setError）。
+- **ZodError 全局 400**：入参校验失败由全局过滤器识别为 400+首条 issue（原 500 误导）。
+- **GENERATE_FIGURES 示例污染**：移除 GNN 硬编码示例，主题强制贴合论文领域。
+
+### Changed
+- **模块化拆分（M3）**：`packages/{core,db,ai,retrieval}` 四包物理落地（ESLint 依赖红线强制：packages 禁反向依赖接口层/接口层禁深路径绕过）；apps/server 原 10 处桶过渡，调用方零改动；ARCHITECTURE §2.9 回写。真 workspace 拆包待跨应用复用需求触发。
+- **零内置原则**：嵌入模型自动下载移除（`EMBEDDING_MODEL_PATH` 用户自备，不配自动降级 BM25）；默认模型名与占位列表清空。
+- **rootDir 显式固化 `../..`**：dist 入口变 `dist/apps/server/src/main.js`（scripts/Dockerfile/desktop/文档全链路同步）。
+- **回归基线 161→165**（27.x 引用体检 case）；`full_regression.py` 守门员地位不变，新失败一律 FAIL。
+- **仓库策略定案**：GitHub/badhope 唯一主仓，四端手动镜像（mirror.yml 移除）；主分支保护要求签名提交（SSH 签名链路已打通）。
+
 ## [0.4.2] - 2026-10-15
 
 容器化与前端两处真实缺陷修复 + 界面截图刷新 + 仓库元数据治理。

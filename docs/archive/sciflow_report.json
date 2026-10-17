@@ -1,0 +1,40 @@
+{
+  "gitcode": {
+    "login": "badhope",
+    "http": 200,
+    "total_repos": 35,
+    "sciflow": [
+      {
+        "full_name": "badhope/sciflow",
+        "pushed_at": "2026-10-15T22:07:44.297+08:00",
+        "default_branch": "main",
+        "private": false,
+        "html_url": "https://gitcode.com/badhope/sciflow"
+      }
+    ]
+  },
+  "gitee": {
+    "login": "<HTTP 401: 401 Unauthorized: Access token does not exist>",
+    "http": 401,
+    "total_repos": 0,
+    "sciflow": []
+  },
+  "github_x33834": {
+    "login": "<HTTP 401: Bad credentials>",
+    "http": 401,
+    "total_repos": 0,
+    "sciflow": []
+  },
+  "github_morningstar": {
+    "login": "<HTTP 401: Bad credentials>",
+    "http": 401,
+    "total_repos": 0,
+    "sciflow": []
+  },
+  "github_badhope": {
+    "login": "<HTTP 401: Bad credentials>",
+    "http": 401,
+    "total_repos": 0,
+    "sciflow": []
+  }
+}
