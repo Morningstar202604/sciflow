@@ -246,7 +246,7 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
       // H8 修复：尾部块（参考文献/图表）用正则匹配任意标题层级与换行变体，
       // 不再依赖字面量 '\n\n## 参考文献'（模型输出 '\n## 参考文献' 或 '## 参考文献列表' 时旧逻辑切不到，
       // 会导致参考文献被当作正文送润色，AI 有机会改写引文内容——学术诚信红线）。
-      const tailRegex = /\n+#{1,3}\s*(参考文献|引用文献|图表|references)\b[^\n]*/gi;
+      const tailRegex = /\n+#{1,3}\s*(参考文献|引用文献|图表|references)(?=[\s（(:：\-—]|$)[^\n]*/gi;
       let cut = -1;
       for (const m of content.matchAll(tailRegex)) {
         const idx = m.index ?? -1;
