@@ -4,6 +4,7 @@ import { AiService, ChatMessage, ChatStreamOptions } from '../ai/ai.service';
 import { MemoryService } from '../memory/memory.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { ChatSessionService } from './chat-session.service';
+import { WebSearchService } from '../websearch/websearch.service';
 import { db } from '../db/database';
 import { projects } from '../db/schema';
 
@@ -53,6 +54,7 @@ export class ChatService {
     private readonly memory: MemoryService,
     private readonly knowledge: KnowledgeService,
     private readonly chatSession: ChatSessionService,
+    private readonly websearch: WebSearchService,
   ) {}
 
   /** 组装项目上下文：程序/情景记忆 + 知识库检索片段（NotebookLM 式 RAG 注入）；同时返回去重后的来源列表
@@ -84,12 +86,14 @@ export class ChatService {
     } catch {
       /* 记忆不可用时忽略 */
     }
+    let hitsLen = 0;
     try {
       if (docContext && docContext.trim()) {
         parts.push(`当前正在撰写的论文（优先理解并关联此上下文）：\n${docContext.trim().slice(0, 2500)}`);
       }
       if (projectId && question) {
         const hits = await this.knowledge.search(projectId, question, 3);
+        hitsLen = hits.length;
         if (hits.length) {
           parts.push(`知识库资料（回答可标注【来源:文档名】）：\n${hits.map((h) => `【来源:${h.docName}】${h.content.slice(0, 320)}`).join('\n')}`);
           // 同一文档多个片段只保留一条来源，取最高分块；该最高分块的 chunkText/chunkSeq/referenceId/referenceTitle 一并透传
@@ -115,6 +119,31 @@ export class ChatService {
       }
     } catch {
       /* 知识库不可用时忽略 */
+    }
+    // 联网搜索兜底（默认关闭；app_setting websearch_in_chat=on 开启）：知识库无命中时按当前 provider 搜索公开网页
+    try {
+      if (projectId && question && hitsLen === 0 && this.websearch.isChatSearchEnabled()) {
+        const webResults = await this.websearch.search(question);
+        if (webResults.length > 0) {
+          parts.push(
+            `联网搜索资料（公开网页，仅供背景参考，注意甄别时效与权威性）：\n${WebSearchService.toContext(webResults)}`,
+          );
+          for (const r of webResults.slice(0, 3)) {
+            sources.push({
+              docName: `🌐 ${r.title}`.slice(0, 80),
+              score: 0,
+              chunkText: r.snippet.slice(0, 200),
+              chunkSeq: 0,
+              referenceId: null,
+              referenceTitle: null,
+              referenceAuthors: null,
+              referenceYear: null,
+            });
+          }
+        }
+      }
+    } catch {
+      /* 网搜失败静默跳过（不影响回答） */
     }
     return { context: parts.join('\n\n'), sources };
   }

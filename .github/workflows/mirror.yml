@@ -1,0 +1,75 @@
+# 多平台镜像同步（主仓 badhope → 4 镜像）
+# ============================================================================
+# 架构约定（2026-10-17 定案）：GitHub/badhope 是唯一开发主仓；Gitee、GitCode、
+# GitHub/X33834、GitHub/Morningstar202604 全部为只读镜像，不在此直接开发。
+# 每次主仓 push 到 main（或手动触发），本 workflow 把 main + tags 强推到 4 端。
+#
+# 仓库 Secrets 一次性配置（Settings → Secrets and variables → Actions）：
+#   MIRROR_GITEE_TOKEN         gitee.com 私人令牌（badhope）
+#   MIRROR_GITCODE_TOKEN       gitcode.com 个人令牌（badhope）
+#   MIRROR_X33834_TOKEN        github.com classic PAT（X33834 账号）
+#   MIRROR_MORNINGSTAR_TOKEN   github.com classic PAT（Morningstar202604 账号）
+#
+# 行为细节：
+#  - force push：镜像语义，远端永远与主仓一致（防止误在镜像端提交造成分叉）
+#  - 任一镜像失败不影响其他镜像（continue-on-error，失败会在 Summary 里标红）
+#  - 未配置对应 Secret 时该端自动跳过（首次接入前不用注释代码）
+
+name: mirror-sync
+
+on:
+  push:
+    branches: [main]
+    tags: ['*']
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-sync
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gitee
+            url: https://badhope:${{ secrets.MIRROR_GITEE_TOKEN }}@gitee.com/badhope/sciflow.git
+          - name: gitcode
+            url: https://badhope:${{ secrets.MIRROR_GITCODE_TOKEN }}@gitcode.com/badhope/sciflow.git
+          - name: gh-x33834
+            url: https://x-access-token:${{ secrets.MIRROR_X33834_TOKEN }}@github.com/X33834/sciflow.git
+          - name: gh-morningstar
+            url: https://x-access-token:${{ secrets.MIRROR_MORNINGSTAR_TOKEN }}@github.com/Morningstar202604/sciflow.git
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Sync main branch
+        id: push_main
+        continue-on-error: true
+        run: |
+          git remote add mirror "${{ matrix.url }}"
+          git push --force mirror "refs/heads/main:refs/heads/main"
+
+      - name: Sync tags
+        continue-on-error: true
+        if: steps.push_main.outcome == 'success'
+        run: git push --force mirror "refs/tags/*:refs/tags/*"
+
+      - name: Report
+        if: always()
+        run: |
+          if [ "${{ steps.push_main.outcome }}" = "success" ]; then
+            echo "✅ ${{ matrix.name }} 镜像同步成功"
+          elif [ "${{ steps.push_main.outcome }}" = "skipped" ]; then
+            echo "⏭️ ${{ matrix.name }} 已跳过（前置失败）"
+          else
+            echo "❌ ${{ matrix.name }} 同步失败：请检查 secret 是否已配置/是否有效" >&2
+            exit 1
+          fi

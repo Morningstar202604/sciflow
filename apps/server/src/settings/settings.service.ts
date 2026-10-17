@@ -10,7 +10,8 @@ export interface AppSettings {
   sources: { literature: string[] };
 }
 
-const FALLBACK_MODELS = ['agnes-3.0-flash', 'agnes-2.5-flash', 'agnes-2.5-pro', 'agnes-2.0-flash'];
+// 零内置：无可用模型列表时不伪造占位模型，前端按「未配置」引导用户自填
+const FALLBACK_MODELS: string[] = [];
 
 /** 模型列表 TTL 缓存：避免每次进设置页都实时请求网关（5 分钟内复用） */
 const MODELS_TTL_MS = 5 * 60 * 1000;

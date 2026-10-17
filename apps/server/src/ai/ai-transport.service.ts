@@ -61,7 +61,7 @@ export class AiTransportService {
   /** 当前生效密钥：优先 env，被激活厂商覆盖（v0.3.0 起库内为密文，读取时解密）。私有字段 + getter 暴露。 */
   private _secretKey = process.env.AI_API_KEY || '';
   /** fast 档：轻量快速模型（默认） */
-  protected fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
+  protected fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || '';
   /** strong 档：强模型（高难任务；未配置则回落 fast） */
   protected strongModel = process.env.AI_MODEL_STRONG || this.fastModel;
 
@@ -101,7 +101,7 @@ export class AiTransportService {
   resetToEnv() {
     this.baseUrl = (process.env.AI_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3').replace(/\/$/, '');
     this.setApiKey(process.env.AI_API_KEY || '');
-    this.fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || 'agnes-3.0-flash';
+    this.fastModel = process.env.AI_MODEL_FAST || process.env.AI_MODEL || '';
     this.strongModel = process.env.AI_MODEL_STRONG || this.fastModel;
   }
 
