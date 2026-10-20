@@ -1,12 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookMarked, Brain, Check, ChevronDown, ChevronUp, FileText, Link2, Loader2, MessageSquare, Quote, Trash2, Unlink, Upload } from 'lucide-react';
+import { BookMarked, Brain, Check, ChevronDown, ChevronUp, FileText, Link2, Loader2, MessageSquare, Quote, ScatterChart, Trash2, Unlink, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { Doc, KnowledgeDoc, KnowledgeDocDetail, KnowledgeQueryResult, KnowledgeSource, Project, Reference } from '../types';
 import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, SectionTitle, Badge, Spinner, errMsg } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
+import { SemanticMap } from './knowledge/SemanticMap';
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -80,18 +81,18 @@ function MindMap({ root, leaves }: { root: string; leaves: string[] }) {
               key={`e-${i}`}
               d={`M ${rootX + 110} ${rootY} C ${rootX + 220} ${rootY}, ${leafX - 60} ${ly}, ${leafX} ${ly}`}
               fill="none"
-              stroke="#94a3b8"
+              stroke="var(--viz-series-6)"
               strokeWidth={1.4}
             />
           );
         })}
       {/* 根节点（点击折叠/展开子树） */}
       <g onClick={() => setCollapsed((v) => !v)} className="cursor-pointer">
-        <rect x={rootX} y={rootY - 22} width={220} height={44} rx={10} fill="#14b8a6" />
+        <rect x={rootX} y={rootY - 22} width={220} height={44} rx={10} fill="var(--brand-400)" />
         <text x={rootX + 110} y={rootY + 4} textAnchor="middle" fontSize={12} fill="#ffffff" fontWeight={600}>
           {root.length > 16 ? root.slice(0, 16) + '…' : root}
         </text>
-        <text x={rootX + 110} y={rootY + 36} textAnchor="middle" fontSize={9} fill="#0f766e">
+        <text x={rootX + 110} y={rootY + 36} textAnchor="middle" fontSize={9} fill="var(--brand-600)">
           {collapsed ? '▸ 点击展开子树' : '▾ 点击折叠'}
         </text>
       </g>
@@ -99,7 +100,7 @@ function MindMap({ root, leaves }: { root: string; leaves: string[] }) {
       {!collapsed &&
         leaves.map((t, i) => {
           const ly = 36 + i * 38;
-          const fill = i % 2 === 0 ? '#06b6d4' : '#0ea5e9';
+          const fill = i % 2 === 0 ? 'var(--viz-series-2)' : 'var(--sky-500)';
           return (
             <g key={`n-${i}`}>
               <rect x={leafX} y={ly} width={200} height={leafH} rx={8} fill={fill} />
@@ -254,6 +255,8 @@ export function KnowledgePage({ project }: { project: Project }) {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<KnowledgeQueryResult | null>(null);
   const [busy, setBusy] = useState('');
+  /* 语义地图：展开时才拉数据（避免首屏多一次 embedding 全表扫描） */
+  const [mapOpen, setMapOpen] = useState(false);
   const [error, setError] = useState('');
   const toast = useContext(ToastContext);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -275,6 +278,13 @@ export function KnowledgePage({ project }: { project: Project }) {
   const qc = useQueryClient();
   const kbDocsQuery = useQuery({ queryKey: ['kb-docs', project.id], queryFn: () => api.knowledge.list(project.id) });
   const kbRefsQuery = useQuery({ queryKey: ['kb-refs', project.id], queryFn: () => api.references.list(project.id), retry: 0 });
+  const mapQuery = useQuery({
+    queryKey: ['kb-map', project.id],
+    queryFn: () => api.knowledge.semanticMap(project.id),
+    enabled: mapOpen,
+    staleTime: 5 * 60_000,
+    retry: 0,
+  });
   const docs: KnowledgeDoc[] = useMemo(() => kbDocsQuery.data ?? [], [kbDocsQuery.data]);
   const refs: Reference[] = useMemo(() => kbRefsQuery.data ?? [], [kbRefsQuery.data]);
   const load = async () => {
@@ -346,9 +356,9 @@ export function KnowledgePage({ project }: { project: Project }) {
   // 文档类型分布 Donut（pdf/markdown/text）
   const typeDist = useMemo(() => {
     const order: { key: string; label: string; color: string }[] = [
-      { key: 'pdf', label: 'PDF', color: '#f87171' },
-      { key: 'markdown', label: 'Markdown', color: '#0ea5e9' },
-      { key: 'text', label: '纯文本', color: '#94a3b8' },
+      { key: 'pdf', label: 'PDF', color: 'var(--rose-500)' },
+      { key: 'markdown', label: 'Markdown', color: 'var(--sky-500)' },
+      { key: 'text', label: '纯文本', color: 'var(--viz-series-6)' },
     ];
     const counts: Record<string, number> = { pdf: 0, markdown: 0, text: 0 };
     docs.forEach((d) => {
@@ -470,6 +480,38 @@ export function KnowledgePage({ project }: { project: Project }) {
           )}
         </div>
 
+        {/* 语义地图（F-2.2）：默认折叠，展开时才拉数据（只读已有向量，不触发嵌入模型） */}
+        {docs.length > 0 && (
+          <div className="mt-4">
+            <button
+              className="w-full flex items-center justify-between rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:border-teal-300 transition-colors"
+              onClick={() => setMapOpen((v) => !v)}
+              aria-expanded={mapOpen}
+              aria-controls="semantic-map-panel"
+            >
+              <span className="flex items-center gap-1.5">
+                <ScatterChart size={13} className="text-teal-600" aria-hidden="true" /> 语义地图（分块向量分布）
+              </span>
+              <span className="text-[11px] text-slate-400">{mapOpen ? '收起 ▾' : '展开 ▸'}</span>
+            </button>
+            {mapOpen && (
+              <div id="semantic-map-panel" className="mt-2 rounded-lg border border-slate-100 dark:border-slate-800 p-3">
+                {mapQuery.isLoading ? (
+                  <div className="text-xs text-slate-400 py-6 text-center">正在计算投影…</div>
+                ) : mapQuery.isError ? (
+                  <div className="text-xs text-rose-500 py-4">{errMsg(mapQuery.error)}</div>
+                ) : (
+                  <SemanticMap
+                    points={mapQuery.data?.points ?? []}
+                    total={mapQuery.data?.total ?? 0}
+                    sampled={mapQuery.data?.sampled ?? false}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 资料概览可视化 */}
         {docs.length > 0 && (
           <div className="mt-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800">
@@ -480,7 +522,7 @@ export function KnowledgePage({ project }: { project: Project }) {
               </div>
               <div>
                 <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">分块量 Top {chunkDist.length}</div>
-                <HBar items={chunkDist} barHeight={6} />
+                <HBar items={chunkDist} />
               </div>
             </div>
           </div>
@@ -608,7 +650,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                     value: s.score,
                     sub: `匹配 ${s.score}%`,
                     hint: s.snippet,
-                    color: s.score >= 70 ? undefined : s.score >= 40 ? '#f59e0b' : '#f87171',
+                    color: s.score >= 70 ? undefined : s.score >= 40 ? 'var(--amber-500)' : 'var(--rose-500)',
                   }))}
                 />
                 <div className="mt-2 space-y-2 border-t border-slate-100 dark:border-slate-800 pt-2">

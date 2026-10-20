@@ -302,6 +302,8 @@ export interface PipelineStepConfig {
   key: string;
   label: string;
   core: boolean;
+  /** 是否允许在设置页启停（骨架步骤为 false） */
+  configurable: boolean;
   enabled: number;
   customized: boolean;
 }

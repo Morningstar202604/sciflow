@@ -258,8 +258,13 @@ if runid:
             n_pipe = sum(1 for c in cd if c.get("format") == "pipeline") if isinstance(cd, list) else 0
             check("流水线 e2e·citations 回填 format=pipeline", sc == 200 and n_pipe >= 1, f"st={sc} n={n_pipe}")
             sdoc, dd = req("GET", f"/api/documents/{doc_id}")
-            check("流水线 e2e·文档正文含参考文献列表（renderCitations）",
-                  sdoc == 200 and "## 参考文献" in (dd.get("content") or ""), f"st={sdoc} len={len(dd.get('content',''))}")
+            # 契约变更（v0.6）：正文只保留 [n] 锚点，参考文献列表由前端按用户选中的 CSL 样式渲染，
+            # 流水线不再把一份硬编码 GB/T 形态的列表写进正文（否则打开写作页会出现两个参考文献区）。
+            # 断言改为：正文含数字锚点 + citations 已落库 —— 这两者才是"引用闭环"的真实契约。
+            _body = (dd.get("content") or "") if sdoc == 200 else ""
+            _anchors = sum(1 for _ in __import__("re").finditer(r"\[\d+\]", _body))
+            check("流水线 e2e·正文含数字锚点（引用闭环）",
+                  sdoc == 200 and _anchors >= 1, f"st={sdoc} anchors={_anchors} len={len(_body)}")
     # 不删，留给断点续跑验证
 
 # ---------- 6. 记忆中心 ----------
@@ -940,9 +945,16 @@ if MOCK:
                       f"notice={fin2.get('researchNotice')!r}")
                 sd, dd = req("GET", f"/api/documents/{fin2.get('documentId')}")
                 c2 = dd.get("content", "") if sd == 200 else ""
-                check("25.1 产物参考文献块含「（文献库 · 匹配」来源/匹配度标记",
-                      "（文献库 · 匹配" in c2, f"len={len(c2)}")
-                check("25.1 产物仍含「## 参考文献」块（既有契约不破）", "## 参考文献" in c2, "")
+                # v0.6 契约：正文不再内嵌参考文献列表；来源/匹配度改由 citations 元数据承载
+                _sc25, _cit25 = req("GET", f"/api/documents/{fin2.get('documentId')}/citations")
+                check("25.1 引用已落库（来源可追溯）",
+                      _sc25 == 200 and isinstance(_cit25, list) and len(_cit25) >= 1,
+                      f"st={_sc25} n={len(_cit25) if isinstance(_cit25, list) else '?'}")
+                # v0.6 契约：正文只保留 [n] 锚点，参考文献列表由前端按样式渲染。
+                # 这里只断言「锚点存在且 citations 已落库」——不再断言正文没有「## 参考文献」标题：
+                # 模型完全可能在正文里自己写这个标题（真实模型下会误报），那不是契约的一部分。
+                check("25.1 正文含数字锚点（引用闭环）",
+                      bool(__import__("re").search(r"\[\d+\]", c2)), f"len={len(c2)}")
 
     # 25.2 命中0：干净空项目（无文献/无知识库）跑流水线 → researchNotice 非空 + 产物含引导段
     st, pj0 = req("POST", "/api/projects", {"name": "跨库零命中项目", "description": "cross-search zero-hit path"})

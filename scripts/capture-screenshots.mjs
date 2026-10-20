@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const BASE = process.env.SHOT_BASE || 'http://127.0.0.1:5173';
-const API = process.env.SHOT_API || 'http://127.0.0.1:3300';
+const API = process.env.SHOT_API || 'http://127.0.0.1:3000';
 const OUT = path.resolve('docs/screenshots');
 const W = 1600;
 const H = 1000;
@@ -33,7 +33,9 @@ async function main() {
       const r2 = await fetch(`${API}/api/documents?projectId=${projects[0].id}&scope=project`);
       const docs = await r2.json();
       const list = Array.isArray(docs) ? docs : docs.items || [];
-      if (list.length) docId = list[0].id || list[0].documentId;
+      // 选择正文最长的文档：列表首项常是回归脚本产生的空壳文档，截图会得到空白预览
+      const best = [...list].sort((a, b) => (b.content || '').length - (a.content || '').length)[0];
+      if (best) docId = best.id || best.documentId;
     }
   } catch (e) {
     console.warn('doc lookup skipped:', e.message);
@@ -51,7 +53,9 @@ async function main() {
 
   for (const s of shots) {
     currentShot = s.name;
-    const url = `${BASE}/${s.hash}`;
+    // 工作台/写作页支持 ?doc= 深链：优先展示有正文的文档，避免截到回归产生的空壳文档
+    const hash = s.hash === '#/workspace' && docId ? `#/workspace?doc=${docId}` : s.hash;
+    const url = `${BASE}/${hash}`;
     await page.goto(url, { waitUntil: 'networkidle' });
     await page.waitForTimeout(s.wait);
     const file = path.join(OUT, s.name);

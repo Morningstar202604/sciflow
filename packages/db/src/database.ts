@@ -228,6 +228,7 @@ CREATE TABLE IF NOT EXISTS custom_prompt (
 CREATE TABLE IF NOT EXISTS llm_call_log (
   id TEXT PRIMARY KEY,
   caller TEXT DEFAULT 'general',
+  kind TEXT DEFAULT 'llm',
   model TEXT DEFAULT '',
   prompt_tokens INTEGER DEFAULT 0,
   completion_tokens INTEGER DEFAULT 0,
@@ -491,6 +492,8 @@ ensureColumn('reference', 'notes', "TEXT DEFAULT ''");
 ensureColumn('project', 'preface', "TEXT DEFAULT ''");
 // 差距 #1：自定义大纲模板（JSON 字符串数组）；旧库补齐默认 '[]'
 ensureColumn('project', 'templates', "TEXT DEFAULT '[]'");
+// 调用类型：llm=模型调用，tool=工具调用（分开统计，避免工具污染 token 成本看板）
+ensureColumn('llm_call_log', 'kind', "TEXT DEFAULT 'llm'");
 
 // ---------- 迁移：knowledge_chunk_fts 从 unicode61 升级到 trigram ----------
 // 原因：unicode61 不切分 CJK（整段中文是一个 token），中文短语检索永远命中不到；

@@ -83,7 +83,7 @@ export function WritingEditor({
   }, []);
 
   return (
-    <Card className={`flex-1 min-w-0 flex-col ${editorMode === 'split' ? 'md:w-1/2' : 'w-full'}`}>
+    <Card className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800 shrink-0">
         <input
           className="font-medium text-slate-800 dark:text-slate-100 outline-none flex-1 bg-transparent min-w-0"
@@ -116,22 +116,28 @@ export function WritingEditor({
         {editorMode !== 'preview' && (
           <div
             id="sciflow-editor"
-            className={`flex-1 min-w-0 h-full overflow-hidden text-[13.5px] ${editorMode === 'split' ? 'w-1/2 border-r border-slate-100 dark:border-slate-800' : 'w-full'}`}
+            className={`relative flex-1 min-w-0 min-h-0 h-full overflow-hidden text-[13.5px] ${
+              editorMode === 'split' ? 'w-1/2 border-r border-slate-100 dark:border-slate-800' : 'w-full'
+            }`}
           >
-            <CodeMirror
-              ref={cmRef}
-              value={content}
-              onChange={onChangeContent}
-              height="100%"
-              theme={dark ? 'dark' : 'light'}
-              extensions={[markdown({ base: markdownLanguage })]}
-              placeholder="在这里撰写论文正文（支持 Markdown）…可使用右侧 AI 工具：大纲生成、章节起草、润色、翻译、降重"
-              basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true, autocompletion: false }}
-              style={{ height: '100%' }}
-            />
+            {/* CodeMirror 需要显式高度：父级 flex 高度不确定时 height:100% 会塌成一行。
+                这里用绝对定位铺满容器，保证编辑区始终占满可用高度。 */}
+            <div className="absolute inset-0">
+              <CodeMirror
+                ref={cmRef}
+                value={content}
+                onChange={onChangeContent}
+                height="100%"
+                theme={dark ? 'dark' : 'light'}
+                extensions={[markdown({ base: markdownLanguage })]}
+                placeholder="在这里撰写论文正文（支持 Markdown）…下方「AI 工具」可做大纲生成、章节起草、润色、翻译、降重"
+                basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true, autocompletion: false }}
+                style={{ height: '100%' }}
+              />
+            </div>
           </div>
         )}
-        {editorMode !== 'edit' && renderPreview}
+        {editorMode !== 'edit' && <div className="flex-1 min-w-0 min-h-0 flex">{renderPreview}</div>}
       </div>
     </Card>
   );

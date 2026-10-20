@@ -17,6 +17,15 @@ export class KnowledgeController {
     return this.knowledge.list(projectId);
   }
 
+  /**
+   * 知识库语义地图（F-2.2）：分块 embedding 的 2D 投影。
+   * 只读已有向量，不调用嵌入模型；超过 limit 自动下采样。
+   */
+  @Get(':id/map')
+  map(@Param('id') projectId: string, @Query('limit') limit?: string) {
+    return this.knowledge.semanticMap(projectId, limit ? Math.max(1, Math.min(20000, Number(limit) || 5000)) : 5000);
+  }
+
   /** RAG 问答 */
   @Post('query')
   query(@Body() body: { projectId: string; question: string }) {

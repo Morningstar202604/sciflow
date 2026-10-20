@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Brain, Check, ExternalLink, FilePlus2, Loader2, PlayCircle, Send, Square, Workflow } from 'lucide-react';
 import { Streamdown } from 'streamdown';
 import { api, streamChat } from '../api/client';
+import { applyStreamDelta } from '../api/stream-accumulator';
 import type { ChatSource, Doc, PipelineTask, Project } from '../types';
 import { Badge, Button, Empty, Input } from '../components/ui';
 import { WritingPreview } from './writing/WritingPreview';
@@ -141,8 +142,15 @@ export function WorkspacePage({
         ]
           .filter(Boolean)
           .join('\n\n') || undefined,
-      onDelta: (d) => { updateLast((x) => ({ content: (x.content || '') + d })); scrollToBottom(); },
-      onReasoning: (r) => { updateLast((x) => ({ reasoning: (x.reasoning || '') + r })); scrollToBottom(); },
+      // onDelta/onReasoning 回调参数是「累积全文」——用统一的 applyStreamDelta 覆盖，禁止追加拼接
+      onDelta: (fullText) => {
+        updateLast((x) => applyStreamDelta({ content: x.content, reasoning: x.reasoning ?? '' }, { content: fullText }));
+        scrollToBottom();
+      },
+      onReasoning: (full) => {
+        updateLast((x) => ({ reasoning: applyStreamDelta({ content: x.content, reasoning: x.reasoning ?? '' }, { reasoning: full }).reasoning }));
+        scrollToBottom();
+      },
       onSources: (s) => updateLast({ sources: s }),
       onUsage: (u) => updateLast({ usage: u }),
       onDone: () => { setStreaming(false); updateLast({ streaming: false }); abortRef.current = null; },
@@ -302,13 +310,13 @@ export function WorkspacePage({
                     {m.content}
                   </div>
                 ) : (
-                  <div className="max-w-full text-sm leading-relaxed text-slate-700 dark:text-slate-200">
+                  <div className="max-w-full text-sm leading-relaxed text-slate-700 dark:text-slate-200" data-testid="assistant-message">
                     {m.reasoning ? (
                       <details className="mb-1.5">
                         <summary className="cursor-pointer select-none text-[11px] font-medium text-teal-700 dark:text-teal-300 flex items-center gap-1">
                           <Brain size={11} /> 思考过程
                         </summary>
-                        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 border-l-2 border-teal-300 dark:border-teal-700 pl-2 max-h-32 overflow-y-auto">{m.reasoning}</div>
+                        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 border-l-2 border-teal-300 dark:border-teal-700 pl-2 max-h-32 overflow-y-auto" data-testid="assistant-reasoning">{m.reasoning}</div>
                       </details>
                     ) : null}
                     {m.content ? <Streamdown mode={m.streaming ? 'streaming' : 'static'}>{m.content}</Streamdown> : m.streaming ? <Loader2 size={13} className="animate-spin text-teal-500" /> : null}

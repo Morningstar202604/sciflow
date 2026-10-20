@@ -273,12 +273,11 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
                 {totalSec > 0 && (
                   <div className="mt-2.5">
                     <HBar
-                      barHeight={6}
+                      max={totalSec}
                       items={[
                         {
                           label: '写作进度',
                           value: writtenSec,
-                          max: totalSec,
                           sub: `${writtenSec}/${totalSec} 章`,
                           hint: `v${d.version} · 已写 ${writtenSec}/${totalSec} 章 · ${wordK}K 字`,
                         },

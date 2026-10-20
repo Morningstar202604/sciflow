@@ -584,12 +584,11 @@ export function SubmissionPage({ project }: { project: Project }) {
                           {j.oa && <Badge tone="slate">{j.oa === 'yes' ? 'OA' : j.oa}</Badge>}
                         </div>
                         <HBar
-                          barHeight={7}
+                          max={100}
                           items={[
                             {
                               label: '匹配度',
                               value: j.score,
-                              max: 100,
                               sub: meta,
                               hint: `${j.name}：匹配度 ${j.score}/100${meta ? ` · ${meta}` : ''}`,
                             },

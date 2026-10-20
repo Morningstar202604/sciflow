@@ -57,7 +57,7 @@
 | --- | --- | --- |
 | 后端 | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· zod · Vercel AI SDK · LangGraph · MCP 官方 SDK | AI 走 OpenAI 兼容协议；编排只在 `pipeline/pipeline.graph.ts` |
 | 前端 | React 19 · Vite 6 · Tailwind CSS v4 · TanStack Query/Table · Recharts · sigma.js + graphology · CodeMirror 6 · react-markdown + KaTeX | 图表一律走 `components/charts.tsx` 或既有图谱组件 |
-| 工程 | pnpm workspace · vitest 2.x（server 16 / web 15）· Playwright · promptfoo · GitHub Actions（Node 22）· Python 3 回归脚本（161 项） | CI 三 job：类型/单测/构建 · 全量回归 · E2E+评测 |
+| 工程 | pnpm workspace · vitest（server 68 / web 50）· Playwright · promptfoo · GitHub Actions（Node 22）· Python 3 回归脚本（165 项） | CI 三 job：类型/单测/构建 · 全量回归 · E2E+评测 |
 | 数据 | SQLite 单文件（WAL、外键开、busy_timeout 5000ms） | 启动时 schema 自检自动建表/补列，幂等 |
 
 ## 3. 如何新增一个后端模块（5 步）
@@ -107,7 +107,7 @@ AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_regression.db PORT=3000 \
 SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 python3 scripts/full_regression.py
 ```
 
-- 回归基线（本机实测）：mock 网关 **PASS 161 / FAIL 0 / KNOWN 0**（KNOWN 机制保留，当前空集）。
+- 回归基线（本机实测）：mock 网关 **PASS 165 / FAIL 0 / KNOWN 0**（KNOWN 机制保留，当前空集）。
 - mock 模式跑端到端流水线时务必把 `AI_RPM_CAP` 调大（如 120），否则默认令牌桶会等待导致超时。
 
 ## 6. 代码风格红线

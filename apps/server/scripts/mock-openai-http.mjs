@@ -2,7 +2,7 @@
  * Mock OpenAI 兼容 HTTP 网关（离线外部工具用）
  * =============================================
  * 服务内部的 mock 网关是 MSW 进程内拦截（不监听端口），外部工具（promptfoo 等）
- * 无法访问；本脚本复用 dist/ai/mock-gateway.js 的同一路由表与响应构造器，
+ * 无法访问；本脚本复用构建产物中的同一路由表与响应构造器，
  * 在 127.0.0.1 上暴露真实 HTTP 端点，保证「一份路由、两种出口」不漂移。
  *
  * 用法：pnpm --filter @sciflow/server build && node apps/server/scripts/mock-openai-http.mjs
@@ -10,13 +10,30 @@
  */
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
+const here = path.dirname(fileURLToPath(import.meta.url));
+// tsc(rootDir=仓库根) 的产物布局是 dist/apps/server/src/...；保留扁平布局兜底。
+const candidates = [
+  '../dist/apps/server/src/ai/mock-gateway.js',
+  '../dist/ai/mock-gateway.js',
+].map((p) => path.resolve(here, p));
+const entry = candidates.find((p) => existsSync(p));
+if (!entry) {
+  console.error(
+    '[mock-http] 无法加载 mock 网关，请先运行 pnpm --filter @sciflow/server build\n已尝试：\n' +
+      candidates.map((p) => `  ${p}`).join('\n'),
+  );
+  process.exit(1);
+}
 let gw;
 try {
-  gw = require('../dist/ai/mock-gateway.js');
+  gw = require(entry);
 } catch (err) {
-  console.error('[mock-http] 无法加载 mock 网关，请先运行 pnpm --filter @sciflow/server build：', err.message);
+  console.error('[mock-http] 加载 mock 网关失败：', err.message);
   process.exit(1);
 }
 const { mockContentFromBody, jsonCompletion, sseStreamBody, MOCK_MODELS_BODY } = gw;

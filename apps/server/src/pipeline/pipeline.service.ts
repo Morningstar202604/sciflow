@@ -8,21 +8,16 @@ import { pipelineTasks, documents, pipelineConfigs, appSettings } from '../db/sc
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
 import { parseJson, parseStringList } from '../common/json-guard';
+import { PIPELINE_UI_STEPS, PIPELINE_STEP_KEYS } from '../common/pipeline-steps';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { CitationRenderer } from './citation-renderer';
 import { AgentTraceService } from '../agent/agent-trace.service';
 import { buildPipelineGraph, type PipelineGraphDeps, type StepStatusWire } from './pipeline.graph';
 import type { Outline, PipelineTaskRow, ResearchPlan } from './pipeline-state';
+import { envInt } from '../../../../packages/core/src/env';
 
-const STEPS: { key: string; label: string }[] = [
-  { key: 'topic-verify', label: '主题验证' },
-  { key: 'literature', label: '文献调研' },
-  { key: 'outline', label: '大纲生成' },
-  { key: 'quality-gate', label: '分章起草+质量门+回炉' },
-  { key: 'polish', label: '润色定稿' },
-  { key: 'citation-format', label: '引用格式化' },
-  { key: 'complete', label: '完成' },
-];
+/** UI 步骤条（单一来源：packages/core/pipeline-steps） */
+const STEPS: { key: string; label: string }[] = PIPELINE_UI_STEPS.map((s) => ({ key: s.key, label: s.label }));
 
 const ZERO_HIT_NOTICE = '研究阶段未在本地文献库/知识库检索到相关条目，已依赖模型知识完成起草；建议到「文献调研」页添加相关文献（粘贴 DOI/导入 BibTeX）、检查关键词拼写，或在知识库上传资料后重新运行。';
 
@@ -45,7 +40,7 @@ export class PipelineService implements OnModuleInit {
   private readonly logger = new Logger(PipelineService.name);
   private readonly citationRenderer = new CitationRenderer(db);
   private graph!: ReturnType<typeof buildPipelineGraph>;
-  private readonly draftingLimit = pLimit(Math.max(1, Number(process.env.AI_DRAFT_CONCURRENCY || 3)));
+  private readonly draftingLimit = pLimit(envInt('AI_DRAFT_CONCURRENCY', 3, { min: 1, max: 20 }));
 
   /** taskId → agent_execution runId（每次图调用一次执行记录，断点续跑开新记录） */
   private readonly traceRuns = new Map<string, string>();
@@ -73,12 +68,10 @@ export class PipelineService implements OnModuleInit {
         generateFigures: (t, o, c) => this.ai.generateFigures(t, o, c),
       },
       runDrafting: (taskId, title, outline, refsPrompt, styleHint, reflexion, onProgress) =>
-        this.runDrafting(taskId, title, outline, refsPrompt, styleHint, reflexion, onProgress),
-      buildRefsPrompt: (projectId) => this.referencesForPrompt(projectId),
+        this.runDrafting(taskId, title, outline, refsPrompt, styleHint, reflexion, onProgress),      buildRefsPrompt: (projectId) => this.referencesForPrompt(projectId),
       renderCitations: (projectId, docId, content, meta) => {
         const refPool = this.refsForDraft(projectId);
-        const libScore = new Map(meta.lib.map((l) => [l.title, l.score]));
-        return this.citationRenderer.render(docId, content, refPool, [], [], libScore, meta.kn);
+        return this.citationRenderer.render(docId, content, refPool, [], [], meta.kn);
       },
       crossEnrich: async (projectId, topic, plan) => {
         // 多语关键词逐条检索本地文献库（LIKE），按 id 去重合并后做匹配度打分
@@ -263,8 +256,17 @@ export class PipelineService implements OnModuleInit {
   }
 
   private stepEnabled(key: string): boolean {
-    try { const r = db.select().from(pipelineConfigs).where(eq(pipelineConfigs.stepKey, key)).get(); return !r || (r.enabled ?? 1) === 1; }
-    catch { return true; }
+    if (!PIPELINE_STEP_KEYS.has(key)) {
+      // 未知 key 说明调用方与清单脱节：显式告警，默认放行（不因配置缺失阻断流水线）
+      this.logger.warn(`[pipeline] stepEnabled 收到未注册的步骤 key「${key}」，已按启用处理`);
+      return true;
+    }
+    try {
+      const r = db.select().from(pipelineConfigs).where(eq(pipelineConfigs.stepKey, key)).get();
+      return !r || (r.enabled ?? 1) === 1;
+    } catch {
+      return true;
+    }
   }
 
   private async notify(taskId: string, key: string, status: StepStatusWire, output?: string, retryCount?: number) {

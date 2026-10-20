@@ -19,6 +19,9 @@ COPY apps/desktop/package.json apps/desktop/
 RUN pnpm install --frozen-lockfile --filter @sciflow/server --filter @sciflow/web
 COPY apps/server apps/server
 COPY apps/web apps/web
+# packages/ 是 server 与 web 共用的能力层（core/db/ai/retrieval），
+# 两边都以相对路径或 @sciflow/core 别名引用，缺它会在 tsc 阶段报 TS2307
+COPY packages packages
 RUN pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
 
 # ============ 后端运行时 ============

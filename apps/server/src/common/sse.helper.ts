@@ -25,11 +25,6 @@ export interface SseStreamResult {
   fullText?: string;
 }
 
-/** 向客户端写一个 SSE 事件 */
-export function writeSseEvent(res: Response, event: string, data: unknown): void {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
-
 /**
  * 将 OpenAI 兼容 SSE 流转发到客户端
  *  - delta.content → { delta: string }
@@ -66,11 +61,14 @@ export async function forwardOpenAiSse(res: Response, opts: SseStreamOptions): P
           const json = JSON.parse(payload) as Record<string, unknown>;
           const choice = (json?.choices as Array<{ delta?: Record<string, unknown> }>)?.[0]?.delta ?? {};
           const delta = choice.content;
-          const reasoning = forwardReasoning ? choice.reasoning_content || choice.thinking : undefined;
+          // 上游推理增量：AI SDK 用 reasoning_content，部分厂商用 thinking
+          const reasoning = forwardReasoning ? (choice.reasoning_content ?? choice.thinking) : undefined;
           if (typeof delta === 'string') fullText += delta;
-          const chunk: Record<string, string> = {};
+          const chunk: Record<string, unknown> = {};
           if (typeof delta === 'string') chunk.delta = delta;
           if (typeof reasoning === 'string') chunk.reasoning = reasoning;
+          // 工具调用透传（Agent 循环消费；前端可选展示）
+          if (Array.isArray(choice.tool_calls)) chunk.tool_calls = choice.tool_calls;
           if (Object.keys(chunk).length) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
           // 收尾 usage 块
           const usage = json?.usage as Record<string, number> | undefined;

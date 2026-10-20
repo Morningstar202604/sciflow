@@ -17,7 +17,7 @@
  * 结果统一带本地缓存（web_search_cache 表，2 小时 TTL）。
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
@@ -120,10 +120,26 @@ export class WebSearchService {
       this.writeSetting('websearch_in_chat', body.chatFallback ? 'on' : 'off');
     }
     if (body.provider !== undefined) {
-      if (!isProviderName(body.provider)) throw new Error(`未知 provider: ${body.provider}`);
+      if (!isProviderName(body.provider)) throw new BadRequestException(`未知 provider: ${body.provider}`);
       this.writeSetting(SETTING_KEYS.provider, body.provider);
     }
-    if (body.searxngUrl !== undefined) this.writeSetting(SETTING_KEYS.searxngUrl, body.searxngUrl.trim().replace(/\/$/, ''));
+    if (body.searxngUrl !== undefined) {
+      const raw = body.searxngUrl.trim().replace(/\/$/, '');
+      // 只接受 http/https：避免把 javascript:/file: 之类写入配置后被 fetch 误用；
+      // 同时把「拼错协议」在保存时就暴露出来，而不是等到搜索时才报错。
+      if (raw) {
+        let parsed: URL;
+        try {
+          parsed = new URL(raw);
+        } catch {
+          throw new BadRequestException('SearXNG 地址不是合法 URL（示例：http://127.0.0.1:8080）');
+        }
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          throw new BadRequestException('SearXNG 地址必须以 http:// 或 https:// 开头');
+        }
+      }
+      this.writeSetting(SETTING_KEYS.searxngUrl, raw);
+    }
     // key 提交：空串=清除；含 * =掩码回显不改原值
     const saveKey = (settingKey: string, submitted?: string) => {
       if (submitted === undefined) return;

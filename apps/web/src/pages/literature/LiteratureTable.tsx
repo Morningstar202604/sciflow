@@ -1,5 +1,6 @@
-import { useCallback, useContext, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table';
+import { ExtractionHeatmap } from './ExtractionHeatmap';
 import { BookOpenCheck, FileDown, FlaskConical, Loader2, ShieldCheck, StickyNote, Trash2, Upload } from 'lucide-react';
 import type { EvidenceResult, PaperComparisonResult, Project, Reference, ReferenceGraph, DeepDiveResult, GapResult, ExtractedPaper, ExtractionField, ExtractionTableResult, ScreeningItem } from '../../types';
 import { Badge, Button, Card, CollapsibleCard, Empty, ErrorBox, Input, Spinner, Textarea, jsonText, errMsg } from '../../components/ui';
@@ -430,6 +431,12 @@ export function LiteratureTable(props: LiteratureTableProps) {
   }, [refs]);
 
   // 系统综述：筛选队列
+  // 大列表分批渲染：文献上千条时一次性挂载全部卡片会明显卡顿（每张卡含 4 个按钮 + 2 个输入）。
+  // 分批追加而不是虚拟滚动——卡片高度随「筛选理由/阅读状态」动态变化，固定行高会裁内容。
+  const PAGE_SIZE = 60;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // 切换项目或文献集合变化时回到第一批（否则新项目会沿用上个项目的展开量）
+  useEffect(() => setVisibleCount(PAGE_SIZE), [project.id, refs.length]);
   const [showScreen, setShowScreen] = useState(false);
   const [screenFilter, setScreenFilter] = useState<'all' | ScreenStatus>('all');
   const [screenSelected, setScreenSelected] = useState<Set<string>>(new Set());
@@ -719,7 +726,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
               <div className="grid md:grid-cols-2 gap-3">
                 <div>
                   <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">年份分布 Top 10</div>
-                  <HBar data={yearDist} height={100} />
+                  <HBar data={yearDist} />
                 </div>
                 <div>
                   <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">来源 / venue 分布</div>
@@ -729,13 +736,13 @@ export function LiteratureTable(props: LiteratureTableProps) {
               {topCited.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-slate-200/70 dark:border-slate-800">
                   <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">高被引 Top {topCited.length}</div>
-                  <HBar data={topCited} height={100} />
+                  <HBar data={topCited} />
                 </div>
               )}
             </div>
 
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
-              {refs.map((r) => {
+              {refs.slice(0, visibleCount).map((r) => {
                 const sc = screenMap.get(r.id);
                 const scStatus: ScreenStatus = sc?.status ?? 'pending';
                 return (
@@ -857,6 +864,15 @@ export function LiteratureTable(props: LiteratureTableProps) {
                   </div>
                 );
               })}
+              {/* 分批加载：还有未渲染条目时给出明确入口（不做无限自动追加，避免长列表持续重排） */}
+              {refs.length > visibleCount && (
+                <button
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 py-2 text-xs text-slate-500 dark:text-slate-400 hover:border-teal-300 hover:text-teal-600 transition-colors"
+                  onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                >
+                  还有 {refs.length - visibleCount} 条，加载更多
+                </button>
+              )}
             </div>
           </>
         )}
@@ -998,6 +1014,15 @@ export function LiteratureTable(props: LiteratureTableProps) {
             <FlaskConical size={13} /> 导出编码表 CSV
           </Button>
         </div>
+
+        {extFields.length > 0 && extTable && extTable.rows.length > 0 && (
+          <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 mb-3">
+            <ExtractionHeatmap
+              fields={extFields.map((f) => ({ id: f.id, label: f.label }))}
+              rows={extTable.rows}
+            />
+          </div>
+        )}
 
         <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 mb-3">
           <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">抽取字段管理</div>

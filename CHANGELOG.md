@@ -2,6 +2,55 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.6.0] - 2026-10-20
+
+实测驱动的正确性批次：装依赖、起服务、用 Chromium 逐页操作后发现 12 个用户可见缺陷，修复后又由独立审计抓出 13 个本轮引入的回归。同时补全 Agent 工具链（此前完全不可用），重建前端布局契约。
+详细记录见 [`docs/RUNTIME-FINDINGS.md`](docs/RUNTIME-FINDINGS.md)。
+
+### Added
+- **Agent 工具链（核心能力）**：`AgentToolBridge` 把 11 个 MCP 工具转成模型可调用工具，对话中模型能自主检索文献库/知识库。带项目作用域（防跨项目检索）、调用次数上限、单项超时、轨迹落库。实测真实模型单轮触发 5 次工具调用并引用真实文献元数据。
+- **流式能力补全**：`completeStream` 改遍历 `result.stream`，转发 `text-delta` / `reasoning-delta` / `tool-call`；前端新增 `onToolCall` 回调。此前推理增量与工具调用被完全丢弃。
+- **布局契约 `AppShell`**：侧栏/工具栏/滚动/断点收敛到一处，窄屏自动变抽屉。写作页由五栏改为「编辑器主区 + 底部 Tab + AI 助手抽屉」。
+- **语义化设计 token**：`--foreground` / `--muted` / `--border` / `--viz-series-*` 等，图表与 DAG 不再写死 hex。
+- **LaTeX / HTML 导出**：`DocExporter` 接上两个按钮（本地纯函数转换，不依赖网络）。
+- **引用顺序护栏**：新增 `citation-order.spec.ts`（5 条），并做过红绿验证。
+- **用量分型统计**：`llm_call_log.kind` 区分 `llm` / `tool`，成本看板不再被无 token 的工具调用污染；新增 `tools` 汇总。
+- **文档**：`docs/RUNTIME-FINDINGS.md`（实测记录）+ `docs/runtime-screenshots/`（修复前后对照）。
+
+### Fixed
+- **工作台流式回答平方膨胀**：`onDelta` 回调参数是累积全文，工作台却按增量追加（5 个分片后长度 10→31）。抽出 `applyStreamDelta` 纯函数统一语义。
+- **业务错误被改写为「无法连接服务器」**：`core.ts` 用字符类正则判首字，87 条后端中文错误中 74 条被覆盖。重写为 `ApiError` + 两层分离。
+- **质量雷达图恒等于满分**：数据多边形写死 `poly(100)`，与满值网格逐字节相同。
+- **写作页 1024px 编辑器宽度仅 2px**：五栏挤一行所致，重构后为 387px。
+- **上传 >100KB 返回 500**：body-parser 默认 100kb 且异常被兜成 500；现配置 64mb 并映射为可读 413。
+- **分章起草开关是死开关**：写入 `pipeline_config` 但 graph 从不读取；`figures` 开关则无 UI 入口。步骤清单收敛为 `packages/core/pipeline-steps.ts` 单一来源。
+- **流水线产物无版本历史**：graph 绕过 `DocumentsService` 直接写库；新增 `writeDocumentContent` 统一入口。
+- **参考文献重复渲染**：服务端内嵌列表与前端 CSL 渲染并存；改为正文只留 `[n]` 锚点。
+- **HBar 三条数据丢标签**：高度公式漏算轴区；重写为内部自适应，调用方不再能传 `height`/`barHeight`。
+- **进度环浅色主题下文字不可见**：标签色写死 `rgba(255,255,255,*)`。
+- **流水线页同一任务渲染两遍**：删除重复的线性时间线（439 行）。
+- **README 启动命令失效**：`dist/main.js` → `dist/apps/server/src/main.js`；`.env` 加载改多路径探测。
+- **工具调用污染用量统计**、**citations 无 ORDER BY 导致编号错位**、**413 文案写死上限**、**桌面抽屉无遮罩**、**选项目后抽屉不收起**、**版本重复快照**、**起草禁用时仍自动配图**、**导出按钮落在可视区外**。
+
+### Fixed（全模块复审批次，B1–B12）
+- **鉴权绕过（安全）**：`agent-trace` / `websearch` 的 `@Public()` 与类级守卫冲突，企业模式下执行轨迹、prompt、token 用量完全开放。移除并加 `auth-surface.spec.ts` 白名单契约。
+- **删项目留下孤儿行**：零外键 + 手写级联漏了 `agent_execution` / `agent_step` / `chat_session`。补齐并加真实库级联测试。
+- **非数字环境变量致并发闸门失效**：`Number(env)` → NaN → `pLimit(NaN)`。新增 `envInt`/`envFloat`（回落 + 夹取 + 告警），9 条单测。
+- **环形图配色错位**：零值分段仍占配色槽位，唯一非零分段取到第 N 色（实拍为紫色）。过滤零值；全零给占位。
+- **质量页短板柱状图视觉误导**：未设 `max` 导致三根柱都顶满；固定 0–100 并 token 化配色。
+- **流水线 DAG 被整段 JSON 撑爆**：新增 `summarizeStepOutput`（大纲→标题+章数、质量门→总分），加 `overflow-hidden` 与 `title` 提示。
+- **mock 网关脚本路径失效**：`mock-openai-http.mjs` 仍 require 旧 dist 布局，promptfoo 必崩；双路径候选 + 实跑验证。
+- **桌面打包前置检查失效**：`prepare-server.mjs` 检查不存在的 `dist/main.js`。
+- **设计 token 缺失**：`--rose-500` 等 4 个被组件引用但未定义，取色静默失效。
+- **CI 缺失**：README 承诺的三 job GitHub Actions 实际不存在，新增 `.github/workflows/ci.yml`（命令与本机实测一致）。
+- **文档数字失真**：Electron 38→41（内嵌 Node 24）、测试数、回归数、路由数（111→114）全部按实测更新；`.env.example` 补齐 20+ 个实际可用变量。
+
+### Changed
+- 版本统一 `0.6.0`（root / server / web / desktop / core / db / CLI / OpenAPI）。
+- 回归断言按新引用契约更新；`full_regression.py` 明确要求**全新数据库**。
+- `Dockerfile` 补 `COPY packages`（此前容器内 tsc 报 TS2307）。
+- web 加 `@sciflow/core` 别名，不再用深相对路径跨树引用。
+
 ## [0.5.0] - 2026-10-18
 
 深度审计驱动的正确性批次 + 检索与引用升级 + 模块化拆分 + 可视化两件 + 五平台工程链路。全程以 `scripts/full_regression.py`（基线 161→165）为门禁，每批全绿入库。

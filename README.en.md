@@ -12,7 +12,7 @@
 
 > **Repository mirrors (synced across 5 platforms)**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (161 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree.
+> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (165 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree.
 
 SciFlow is a **local-first, single-machine** AI research assistant: give it a research topic and it runs the whole academic lifecycle — **literature survey → research planning → outline generation (human confirmation) → section-wise drafting (Agentic RAG, search-while-writing) → 7-dimension quality gate (auto Reflexion rewrite below threshold) → polishing → citation formatting → submission assistance** — while accumulating process assets in a NotebookLM-style RAG knowledge base and a visual workbench.
 
@@ -82,8 +82,8 @@ SciFlow is a **local-first, single-machine** AI research assistant: give it a re
 | --- | --- |
 | Backend `apps/server` | NestJS 11 · TypeScript (strict) · Drizzle ORM · better-sqlite3 (WAL) · Vercel AI SDK (OpenAI-compatible) · LangGraph (orchestration / checkpoint resume / interrupts) · official MCP SDK · zod · helmet + pino · in-process MSW mock gateway |
 | Frontend `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · TanStack Query / Table · Recharts · sigma.js + graphology · streamdown (streaming Markdown) · CodeMirror 6 · react-markdown + KaTeX |
-| Desktop `apps/desktop` | Electron 38 (embedded Node 22, native `require(ESM)`) · embedded backend (`ELECTRON_RUN_AS_NODE`) · local SQLite (userData-isolated, native modules auto-rebuilt for the Electron ABI when packaging) · electron-builder · electron-updater (opt-in) |
-| Engineering | pnpm workspace · vitest (server 16 / web 15) · Playwright smoke · promptfoo prompt-contract evals · GitHub Actions with 3 jobs (types/unit/build · full regression · E2E+evals) · Python 3 regression script (161 checks) |
+| Desktop `apps/desktop` | Electron 41 (embedded Node 24, native `require(ESM)`) · embedded backend (`ELECTRON_RUN_AS_NODE`) · local SQLite (userData-isolated, native modules auto-rebuilt for the Electron ABI when packaging) · electron-builder · electron-updater (opt-in) |
+| Engineering | pnpm workspace · vitest (server 68 / web 50) · Playwright smoke · promptfoo prompt-contract evals · GitHub Actions with 3 jobs (types/unit/build · full regression · E2E+evals) · Python 3 regression script (165 checks) |
 
 **Architecture overview**
 
@@ -125,7 +125,7 @@ pnpm --filter @sciflow/server build
 
 # 4. Run (two terminals)
 #    backend :3000
-node apps/server/dist/main.js
+node apps/server/dist/apps/server/src/main.js
 #    frontend :5173
 pnpm --filter @sciflow/web dev
 
@@ -173,7 +173,7 @@ Compatible endpoints (any of these, always `base_url` + model name): DeepSeek `h
 pnpm --filter @sciflow/server typecheck
 pnpm --filter @sciflow/web typecheck
 
-# Unit tests (vitest: server 16 + web 15)
+# Unit tests (vitest: server 68 + web 50)
 pnpm --filter @sciflow/server test
 pnpm --filter @sciflow/web test
 
@@ -181,7 +181,8 @@ pnpm --filter @sciflow/web test
 pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
 
 # E2E smoke (Playwright; prerequisites: mock backend :3000 + web dev :5173 running)
-pnpm exec playwright test
+pnpm exec playwright test e2e/workspace-smoke.spec.ts
+# Real-model E2E (skipped by default; needs a real endpoint): E2E_REAL=1 pnpm exec playwright test e2e/real-chat.spec.ts
 
 # Prompt-contract evals (promptfoo, offline; prerequisites: server build + mock HTTP gateway below)
 pnpm exec promptfoo eval -c evals/promptfooconfig.yaml
@@ -194,7 +195,7 @@ With `AI_MOCK=1`, **MSW intercepts all AI calls in-process** (no port, no networ
 ```bash
 # backend (mock mode, relaxed rate limit)
 AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_regression.db PORT=3000 \
-  node apps/server/dist/main.js
+  node apps/server/dist/apps/server/src/main.js
 
 # other terminal: full regression (all routes + one end-to-end pipeline with artifact assertions)
 SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
@@ -203,7 +204,7 @@ SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
 
 > When an external tool (e.g. promptfoo) needs a real HTTP endpoint: `node apps/server/scripts/mock-openai-http.mjs` — it reuses the same route table and listens on `127.0.0.1:5099`.
 
-Regression baseline (fresh database + mock gateway, see `scripts/full_regression.py`): **PASS 161 / FAIL 0 / KNOWN 0** (the KNOWN mechanism remains, currently empty — all 11 legacy gaps fixed). The mock gateway is for testing/demos only and does not represent real model capability.
+Regression baseline (fresh database + mock gateway, see `scripts/full_regression.py`): **PASS 165 / FAIL 0 / KNOWN 0** (the KNOWN mechanism remains, currently empty — all 11 legacy gaps fixed). The mock gateway is for testing/demos only and does not represent real model capability.
 
 ## 📚 Documentation Index
 

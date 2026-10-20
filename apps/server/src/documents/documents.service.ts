@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, asc } from 'drizzle-orm';
 import { Cite } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
 import '@citation-js/plugin-csl';
@@ -318,6 +318,13 @@ export class DocumentsService {
     return this.refs.addCitation({ documentId, ...input });
   }
 
+  /**
+   * 文档引用列表。
+   *
+   * 顺序契约：正文 [n] 锚点与列表第 n 条必须指向同一篇文献。
+   * 因此显式按 createdAt 升序（= 首次插入顺序 = 流水线 render 的首次出现序），
+   * 不依赖 SQLite 的隐式 rowid 顺序——否则重跑/手工增删后会出现编号错位。
+   */
   listCitations(documentId: string) {
     const rows = db
       .select({
@@ -327,6 +334,7 @@ export class DocumentsService {
       .from(citations)
       .innerJoin(references, eq(citations.referenceId, references.id))
       .where(eq(citations.documentId, documentId))
+      .orderBy(asc(citations.createdAt), asc(citations.id))
       .all();
     return rows.map((r) => ({ ...r.citation, reference: r.reference }));
   }

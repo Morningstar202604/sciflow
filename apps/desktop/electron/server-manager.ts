@@ -2,7 +2,7 @@
  * SciFlow 桌面端 · 内嵌后端进程管理器
  *
  * 职责：
- *  1. 解析后端入口（dev：仓库内 apps/server/dist/main.js；prod：resources/server/dist/main.js）
+ *  1. 解析后端入口（dev：仓库内 apps/server/dist/apps/server/src/main.js；prod：resources/bundle/server/dist/apps/server/src/main.js）
  *  2. 以 ELECTRON_RUN_AS_NODE 方式用 Electron 自带 Node 运行后端（免分发独立 Node）
  *  3. 自动探测空闲端口，注入数据目录（userData 隔离）与 CORS（回环开放）
  *  4. 轮询 /api/health 直到就绪；退出时优雅终止（SIGTERM → 8s 超时 SIGKILL）

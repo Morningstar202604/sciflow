@@ -20,10 +20,9 @@ loadEnv({ path: join(__dirname, '..', '.env') });
 
 import { Command } from 'commander';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { SpawnSyncOptions, spawnSync } from 'node:child_process';
 
-const CLI_VERSION = '0.4.2';
+const CLI_VERSION = '0.6.0';
 
 /** 单次同步 HTTP 请求（复用已启动的本地服务，避免 CLI 自身启 server） */
 function localApi(path: string, opts?: { method?: string; body?: unknown }): any {
@@ -41,9 +40,17 @@ function localApi(path: string, opts?: { method?: string; body?: unknown }): any
 }
 
 let app: any;
-/** 惰性创建 Nest 应用上下文（仅需要直连服务的命令会触发） */
+/**
+ * 惰性创建 Nest 应用上下文。
+ *
+ * AppModule 用动态 import：静态导入会在模块加载期就拉起 db/database.ts 的顶层初始化
+ * （建表、加载 sqlite-vec），导致 `sciflow --help` 也去建库并往 stdout 打日志。
+ */
 async function getApp() {
-  if (!app) app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+  if (!app) {
+    const { AppModule } = await import('./app.module');
+    app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+  }
   return app;
 }
 async function closeApp() {

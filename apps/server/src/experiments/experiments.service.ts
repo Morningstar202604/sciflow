@@ -9,9 +9,10 @@ import path from 'node:path';
 import { db } from '../db/database';
 import { experiments, projects } from '../db/schema';
 import { parseStringList } from '../common/json-guard';
+import { envInt } from '../../../../packages/core/src/env';
 
 /** 沙箱威胁模型：单用户本机。边界 = 独立临时目录 + 超时杀进程组 + 输出截断 + env 白名单 + 数组参数（不走 shell） */
-const RUN_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS || 10_000);
+const RUN_TIMEOUT_MS = envInt('SANDBOX_TIMEOUT_MS', 10_000, { min: 500, max: 300_000 });
 const MAX_STREAM_BYTES = 64 * 1024; // stdout / stderr 各截断阈值
 const MAX_MEMORY_MB = 1024; // RSS 监控上限（约 1GB）
 const MAX_FIGURES = 8; // 最多保留的 matplotlib 出图数

@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { sql, eq, and } from 'drizzle-orm';
+import { sql, eq, and, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { Cite } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
@@ -307,6 +307,15 @@ export class ReferencesService {
       .where(and(eq(citations.documentId, body.documentId), eq(citations.referenceId, body.referenceId)))
       .get();
     if (existing) return existing;
+    // createdAt 必须严格大于该文档已有引用：同毫秒插入会让 ORDER BY 不稳定，
+    // 导致正文 [n] 与列表第 n 条错位（列表顺序 = 插入顺序 = 正文首次出现顺序）。
+    const maxRow = db
+      .select({ createdAt: citations.createdAt })
+      .from(citations)
+      .where(eq(citations.documentId, body.documentId))
+      .orderBy(desc(citations.createdAt))
+      .get();
+    const createdAt = Math.max(Date.now(), (maxRow?.createdAt ?? 0) + 1);
     const row = {
       id: randomUUID(),
       documentId: body.documentId,
@@ -315,7 +324,7 @@ export class ReferencesService {
       context: body.context || '',
       format: body.format || 'apa',
       verified: ref.doi ? 1 : 0,
-      createdAt: Date.now(),
+      createdAt,
     };
     db.insert(citations).values(row).run();
     return row;

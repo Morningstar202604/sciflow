@@ -1,1 +1,1 @@
-{ "name": "@sciflow/core", "version": "0.4.2", "private": true, "main": "src/index.ts", "types": "src/index.ts" }
+{ "name": "@sciflow/core", "version": "0.6.0", "private": true, "main": "src/index.ts", "types": "src/index.ts" }

@@ -189,20 +189,20 @@ function PipelineEditor() {
       <div className="mt-4">
         <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
           全自动流水线的 {state.pipelineSteps.length} 个阶段可自定义启停：关闭的步骤直接跳过（步骤显示「已禁用」）。
-          「主题验证 / 分章起草 / 完成」为骨架步骤不可关闭。改动对之后新建的流水线生效。
+          「主题验证 / 完成」为骨架步骤不可关闭，其余均可自由启停。改动对之后新建的流水线生效。
         </div>
         <div className="grid sm:grid-cols-2 gap-1.5">
           {state.pipelineSteps.map((st) => (
             <div key={st.key} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
               <button
-                className={`relative w-7 h-4 rounded-full transition-colors ${st.enabled ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-700'} ${st.core ? 'opacity-50 cursor-not-allowed' : ''}`}
-                onClick={() => { if (!st.core) togglePipelineStep(st.key, st.enabled ? 0 : 1); }}
+                className={`relative w-7 h-4 rounded-full transition-colors ${st.enabled ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-700'} ${!st.configurable ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={() => { if (st.configurable) togglePipelineStep(st.key, st.enabled ? 0 : 1); }}
               >
                 <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${st.enabled ? 'left-3.5' : 'left-0.5'}`} />
               </button>
               <span className="text-xs text-slate-700 dark:text-slate-200">{st.label}</span>
               <span className="text-[11px] text-slate-400 flex-1">{st.key}</span>
-              {st.core ? (
+              {!st.configurable ? (
                 <span className="text-[10px] text-slate-400">骨架</span>
               ) : st.enabled ? (
                 <Badge tone="teal">启用</Badge>

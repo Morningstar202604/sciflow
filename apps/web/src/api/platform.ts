@@ -56,14 +56,8 @@ export const platform = {
     search: (q: string) => request<{ results: { title: string; url: string; snippet: string }[] }>('/api/web/search', { method: 'POST', body: JSON.stringify({ q }) }),
   },
   usage: {
-    summary: () =>
-      request<{
-        total: { calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; avg_latency_ms: number; success_rate: number };
-        byCaller: { caller: string; calls: number; total_tokens: number; success_rate: number }[];
-        byDay: { day: string; calls: number; total_tokens: number }[];
-        byModel: { model: string; calls: number; total_tokens: number }[];
-        budgetTokens: number;
-      }>('/api/usage/summary'),
+    // 类型与 UsageStats 共用同一份声明，避免两处结构漂移
+    summary: () => request<import('../pages/settings/settings-context').UsageSummary>('/api/usage/summary'),
   },
   mcp: {
     info: () => request<{ protocol: string; version: string; name: string; tools: number }>('/api/mcp/info'),

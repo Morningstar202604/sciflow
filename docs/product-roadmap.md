@@ -135,7 +135,7 @@ sciflow 是一个**本地优先、单机部署**的 AI 科研助手：NestJS 11 
 | 构建 | 前后端 `build`（CI ×2） | 全绿 |
 | 依赖安全 | `pnpm audit --registry=https://registry.npmjs.org --prod` | **0 已知漏洞**（生产依赖；安全补丁经 pnpm overrides 钉版，见 pnpm-workspace.yaml） |
 | 体积红线 | 图表/编辑器/图谱分别独立 chunk（懒加载）；首屏不加载图表与图谱包 | 守住，新增功能不引入重型运行时 |
-| 本地 mock AI 网关 | `AI_MOCK=1` 起后端后跑 `full_regression.py`（见 README「本地 mock AI 网关」） | **mock 模式 PASS 161 / FAIL 0 / KNOWN 0**：无 Key 本机即可端到端跑通流水线；外部工具（promptfoo）用 `apps/server/scripts/mock-openai-http.mjs` 暴露 127.0.0.1:5099 |
+| 本地 mock AI 网关 | `AI_MOCK=1` 起后端后跑 `full_regression.py`（见 README「本地 mock AI 网关」） | **mock 模式 PASS 165 / FAIL 0 / KNOWN 0**：无 Key 本机即可端到端跑通流水线；外部工具（promptfoo）用 `apps/server/scripts/mock-openai-http.mjs` 暴露 127.0.0.1:5099 |
 
 > 后续每轮改造完成后，须以同一套基线（typecheck ×2 + vitest + build ×2 + `full_regression.py`）回归全绿作为合并门槛；AI 网关限流类失败仍按环境项处理并显式标注，不得静默吞掉。
 

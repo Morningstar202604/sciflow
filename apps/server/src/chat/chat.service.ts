@@ -1,12 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { AiService, ChatMessage, ChatStreamOptions } from '../ai/ai.service';
 import { MemoryService } from '../memory/memory.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { ChatSessionService } from './chat-session.service';
 import { WebSearchService } from '../websearch/websearch.service';
+import { AgentToolBridge } from '../agent/agent-tool-bridge';
 import { db } from '../db/database';
 import { projects } from '../db/schema';
+import { envInt } from '../../../../packages/core/src/env';
 
 /** RAG 来源（随 SSE 首事件下发给前端）
  *  向后兼容：旧字段 docName/score 保留；chunkText/chunkSeq/referenceId/referenceTitle 为本轮新增附加字段，
@@ -47,17 +49,19 @@ interface ChatRuntimeOptions {
 }
 
 /** RAG 注入到模型的每块片段上限（字符）。320 太短导致上下文贫瘠（审计 H3）；默认 800，可经环境变量调整 */
-const KNOWLEDGE_SNIPPET_CHARS = Math.max(200, Number(process.env.KNOWLEDGE_SNIPPET_CHARS || 800));
+const KNOWLEDGE_SNIPPET_CHARS = envInt('KNOWLEDGE_SNIPPET_CHARS', 800, { min: 200, max: 8000 });
 
 /** Agent 化科研问答：回答前自动注入项目记忆 + 跨会话摘要 + 知识库 RAG 上下文 */
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
   constructor(
     private readonly ai: AiService,
     private readonly memory: MemoryService,
     private readonly knowledge: KnowledgeService,
     private readonly chatSession: ChatSessionService,
     private readonly websearch: WebSearchService,
+    private readonly tools: AgentToolBridge,
   ) {}
 
   /** 组装项目上下文：程序/情景记忆 + 知识库检索片段（NotebookLM 式 RAG 注入）；同时返回去重后的来源列表
@@ -171,7 +175,18 @@ export class ChatService {
 
   stream(message: string, history: ChatMessage[] = [], projectId?: string, docContext?: string, opts: ChatRuntimeOptions = {}) {
     return this.contextFor(projectId, message, docContext, history.length).then(async ({ context, sources }) => {
-      const streamOpts: ChatStreamOptions = { modelName: opts.model, enableThinking: opts.enableThinking, signal: opts.signal };
+      // Agent 工具：开启时把 MCP 工具集注入本轮请求，模型可自主决定检索文献/查知识库。
+      // projectId 一并注入，保证工具只在当前项目范围内检索（避免跨项目数据泄露）。
+      const useTools = this.tools.isEnabled() && Boolean(projectId);
+      const toolSet = useTools ? this.tools.buildToolSet(projectId) : undefined;
+      const toolNames = toolSet ? Object.keys(toolSet) : [];
+      this.logger.log(`[agent] useTools=${useTools} tools=${toolNames.length}`);
+      const streamOpts: ChatStreamOptions = {
+        modelName: opts.model,
+        enableThinking: opts.enableThinking,
+        signal: opts.signal,
+        ...(toolSet && toolNames.length ? { tools: toolSet, maxSteps: 3 } : {}),
+      };
       const stream = context
         ? await this.ai.streamChatWithContext(message, history, context, streamOpts)
         : await this.ai.streamChat(message, history, streamOpts);

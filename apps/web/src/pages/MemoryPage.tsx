@@ -142,7 +142,7 @@ export function MemoryPage() {
                 centerValue={String(allItems.length)}
                 centerLabel="总记忆"
                 segments={[
-                  { label: '情景记忆', value: epiCount, color: '#0ea5e9' },
+                  { label: '情景记忆', value: epiCount, color: 'var(--sky-500)' },
                   { label: '程序记忆', value: procCount, color: 'var(--brand-500)' },
                 ]}
               />

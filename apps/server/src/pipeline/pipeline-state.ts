@@ -60,15 +60,5 @@ export interface PipelineState {
   report?: QualityReport;
 }
 
-export const PIPELINE_STEP_LABELS: Record<string, string> = {
-  'topic-verify': '主题验证',
-  literature: '文献调研',
-  outline: '大纲生成',
-  drafting: '分章起草',
-  'quality-gate': '质量门评分',
-  polish: '润色定稿',
-  'citation-format': '引用格式化',
-  complete: '完成',
-};
 
 export type { PaperHit };

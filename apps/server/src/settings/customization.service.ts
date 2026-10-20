@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
 import { appSettings, customIntents, customPrompts, pipelineConfigs } from '../db/schema';
 import { parseJson } from '../common/json-guard';
+import { PIPELINE_STEPS } from '../common/pipeline-steps';
 
 /** 高度自定义：意图库 + 提示词 用户可配置（系统默认仅作兜底） */
 
@@ -61,32 +62,31 @@ export class CustomizationService {
   }
 
   // ---------- 流水线步骤自定义 ----------
-  /** 8 步流水线（topic-verify/complete 为骨架不可禁用） */
+  /** 步骤清单单一来源：packages/core/pipeline-steps（与 graph 的 stepEnabled 同名 key） */
   listPipelineSteps() {
-    const STEPS = [
-      { key: 'topic-verify', label: '主题验证', core: true },
-      { key: 'literature', label: '文献调研', core: false },
-      { key: 'outline', label: '大纲生成', core: false },
-      { key: 'drafting', label: '分章起草', core: false },
-      { key: 'quality-gate', label: '质量门评分', core: false },
-      { key: 'polish', label: '润色定稿', core: false },
-      { key: 'citation-format', label: '引用格式化', core: false },
-      { key: 'complete', label: '完成', core: true },
-    ];
     const rows = db.select().from(pipelineConfigs).all();
-    return STEPS.map((st) => {
+    return PIPELINE_STEPS.map((st) => {
       const r = rows.find((x) => x.stepKey === st.key);
-      return { key: st.key, label: st.label, core: st.core, enabled: r ? (r.enabled ?? 1) : 1, customized: !!r };
+      return {
+        key: st.key,
+        label: st.label,
+        core: st.core,
+        configurable: st.configurable,
+        enabled: r ? (r.enabled ?? 1) : 1,
+        customized: !!r,
+      };
     });
   }
 
   updatePipelineStep(stepKey: string, enabled: number) {
-    const step = this.listPipelineSteps().find((s) => s.key === stepKey);
-    if (!step) throw new BadRequestException('未知步骤');
-    if (step.core && !enabled) throw new BadRequestException('骨架步骤不可禁用');
+    const step = PIPELINE_STEPS.find((s) => s.key === stepKey);
+    if (!step) throw new BadRequestException(`未知步骤：${stepKey}`);
+    // 只有骨架步骤（topic-verify / complete）不可开关；其余都可自由启停。
+    if (!step.configurable) throw new BadRequestException(`步骤「${step.label}」为骨架步骤，不可开关`);
+    const flag = enabled ? 1 : 0;
     const existing = db.select().from(pipelineConfigs).where(eq(pipelineConfigs.stepKey, stepKey)).get();
-    if (existing) db.update(pipelineConfigs).set({ enabled }).where(eq(pipelineConfigs.stepKey, stepKey)).run();
-    else db.insert(pipelineConfigs).values({ stepKey, enabled, stepOrder: 0 }).run();
+    if (existing) db.update(pipelineConfigs).set({ enabled: flag }).where(eq(pipelineConfigs.stepKey, stepKey)).run();
+    else db.insert(pipelineConfigs).values({ stepKey, enabled: flag, stepOrder: 0 }).run();
     return this.listPipelineSteps();
   }
 

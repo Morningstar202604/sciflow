@@ -152,10 +152,10 @@ export function LiteraturePage({ project }: { project: Project }) {
       else buckets.neutral += s.count;
     });
     return [
-      { label: '支持', value: buckets.support, color: '#10b981', hint: `证据支持该论断的文献 ${buckets.support} 篇` },
-      { label: '部分支持', value: buckets.partial, color: '#f59e0b', hint: `部分支持 / 有条件支持 ${buckets.partial} 篇` },
-      { label: '矛盾', value: buckets.conflict, color: '#f87171', hint: `文献结论相互矛盾 ${buckets.conflict} 篇` },
-      { label: '中立/不足', value: buckets.neutral, color: '#94a3b8', hint: `证据不足或中立 ${buckets.neutral} 篇` },
+      { label: '支持', value: buckets.support, color: 'var(--emerald-500)', hint: `证据支持该论断的文献 ${buckets.support} 篇` },
+      { label: '部分支持', value: buckets.partial, color: 'var(--amber-500)', hint: `部分支持 / 有条件支持 ${buckets.partial} 篇` },
+      { label: '矛盾', value: buckets.conflict, color: 'var(--rose-500)', hint: `文献结论相互矛盾 ${buckets.conflict} 篇` },
+      { label: '中立/不足', value: buckets.neutral, color: 'var(--viz-series-6)', hint: `证据不足或中立 ${buckets.neutral} 篇` },
     ].filter((s) => s.value > 0);
   }, [evidence]);
 

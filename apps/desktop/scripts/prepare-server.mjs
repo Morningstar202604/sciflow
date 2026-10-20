@@ -31,7 +31,8 @@ const step = (msg) => console.log(`\x1b[36m[prepare]\x1b[0m ${msg}`);
 const ok = (msg) => console.log(`\x1b[32m[prepare]\x1b[0m ${msg}`);
 
 function assertBuilt() {
-  const serverDist = path.join(repoRoot, 'apps', 'server', 'dist', 'main.js');
+  // tsc(rootDir=仓库根) 产物布局：dist/apps/server/src/main.js
+  const serverDist = path.join(repoRoot, 'apps', 'server', 'dist', 'apps', 'server', 'src', 'main.js');
   const webDist = path.join(repoRoot, 'apps', 'web', 'dist', 'index.html');
   if (!fs.existsSync(serverDist)) {
     console.error('\x1b[31m[prepare]\x1b[0m 缺少后端构建产物，请先执行：pnpm --filter @sciflow/server build');
@@ -70,7 +71,7 @@ async function main() {
 
   // ---------- 1.5 Electron ABI：为内嵌 Node 重编原生模块 ----------
   // 背景：server bundle 的 better-sqlite3 在开发机按 Node ABI 编译；Electron 内嵌 Node 的 ABI
-  // 与系统 Node 不同（Node24=137 / Electron38 内嵌 Node22=127），不重编会在运行时报 ERR_DLOPEN_FAILED。
+  // 与系统 Node 不同（系统 Node 24 ABI=137 / Electron 41 ABI=145），不重编会在运行时报 ERR_DLOPEN_FAILED。
   // 本步骤读取 desktop 的 electron 版本，按 Electron 目标重编（幂等：ABI 戳一致则跳过）。
   step('为 Electron ABI 重编原生模块（better-sqlite3）…');
   const electronPkgPath = path.join(desktopDir, 'node_modules', 'electron', 'package.json');

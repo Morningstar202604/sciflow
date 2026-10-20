@@ -219,6 +219,8 @@ export const customPrompts = sqliteTable('custom_prompt', {
 export const llmCallLogs = sqliteTable('llm_call_log', {
   id: text('id').primaryKey(),
   caller: text('caller').default('general'), // 调用方标识（pipeline/chat/orchestrator 等）
+  /** 记录类型：llm=模型调用（计入 token 成本）；tool=工具调用（只计次数/耗时，无 token） */
+  kind: text('kind').default('llm'),
   model: text('model').default(''),
   promptTokens: integer('prompt_tokens').default(0),
   completionTokens: integer('completion_tokens').default(0),

@@ -99,6 +99,14 @@ export const research = {
     bind: (id: string, referenceId: string | null) =>
       request<KnowledgeDoc>(`/api/knowledge/${id}/bind`, { method: 'PATCH', body: JSON.stringify({ referenceId }) }),
     remove: (id: string) => request<{ ok: boolean }>(`/api/knowledge/${id}`, { method: 'DELETE' }),
+    /** 语义地图：分块 embedding 的 2D 投影（F-2.2） */
+    semanticMap: (projectId: string, limit = 5000) =>
+      request<{
+        points: { id: string; docId: string; docName: string; seq: number; x: number; y: number; snippet: string }[];
+        total: number;
+        sampled: boolean;
+        limit: number;
+      }>(`/api/knowledge/${projectId}/map?limit=${limit}`),
   },
   research: {
     designReview: (idea: string, papers: { title: string; year?: number | null; venue?: string; abstract?: string }[]) =>

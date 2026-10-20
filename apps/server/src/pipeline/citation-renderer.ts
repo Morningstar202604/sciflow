@@ -8,7 +8,6 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { parseStringList } from '../common/json-guard';
 import type * as schema from '../db/schema';
 import { references, citations } from '../db/schema';
 import type { Reference } from '../db/schema';
@@ -32,8 +31,9 @@ export class CitationRenderer {
   ) {}
 
   /**
-   * Render [Ref:N] / [补充Ref:N] anchors to numbered citations [1], [2], ...
-   * and append a reference list block.  Side-effect: back-fills citation rows.
+   * 把正文里的 [Ref:N] / [补充Ref:N] 锚点重编号为 [1]、[2]…，并回填 citations 表。
+   * 正文不再生成参考文献列表（列表由前端按用户选中的 CSL 样式统一渲染）。
+   * Side-effect: back-fills citation rows.
    */
   render(
     documentId: string,
@@ -41,7 +41,6 @@ export class CitationRenderer {
     refPool: Reference[],
     supplementHits: PaperHit[] = [],
     suppRefIds: (string | null)[] = [],
-    libScore: Map<string, number> = new Map(),
     knowledgeHits: PaperHit[] = [],
   ): string {
     if (!content) return content;
@@ -60,27 +59,16 @@ export class CitationRenderer {
     let out = content.replace(/\[Ref:(\d+)\]/g, (_m, n: string) => { const idx = Number(n) - 1; return numOf.has(idx) ? `[${numOf.get(idx)}]` : `[文献${n}]`; });
     out = out.replace(/\[补充Ref:(\d+)\]/g, (_m, n: string) => { const idx = Number(n) - 1; return suppNum.has(idx) ? `[${suppNum.get(idx)}]` : '[补充文献]'; });
 
-    const list: string[] = [];
-    for (const idx of order) {
-      const r = refs[idx];
-      const authors = parseStringList(r.authors).join(', ') || '佚名';
-      const score = libScore.get(r.title);
-      const tag = typeof score === 'number' ? `（文献库 · 匹配 ${score.toFixed(2)}）` : '';
-      list.push(`[${list.length + 1}] ${authors}. ${r.title}[J].${r.venue ? ` ${r.venue},` : ''} ${r.year ? `${r.year}.` : 'n.d.'}${r.doi ? ` https://doi.org/${r.doi.replace(/^https?:\/\//, '')}` : ''}${tag}`);
-    }
-    for (const idx of suppOrder) {
-      const h = supplementHits[idx];
-      const authors = (h.authors || []).join(', ') || '佚名';
-      list.push(`[${list.length + 1}] ${authors}. ${h.title}[J].${h.venue ? ` ${h.venue},` : ''} ${h.year ? `${h.year}.` : 'n.d.'}${h.doi ? ` https://doi.org/${h.doi.replace(/^https?:\/\//, '')}` : ''}`);
-    }
-
     const blocks: string[] = [];
-    if (list.length) blocks.push(list.join('\n'));
+    // 注意：不再把参考文献列表写进正文。
+    // 历史 bug：这里拼一份硬编码 GB/T 形态的列表，前端 WritingPreview 又按用户选中的样式拼一份，
+    // 流水线产物打开后出现两个"参考文献"区且格式不同。
+    // 现在正文只保留 [n] 锚点，列表由前端按当前样式统一渲染（数据源是 citations 表）。
     if (knowledgeHits.length) {
       const knLines = knowledgeHits.map((k) => `- 《${k.title}》（知识库 · 匹配 ${(k.matchScore ?? 0).toFixed(2)}）：${(k.abstract || '').slice(0, 100).trim()}`).join('\n');
       blocks.push(`### 知识库参考（研究阶段本地检索）\n\n${knLines}`);
     }
-    if (blocks.length) out += `\n\n## 参考文献\n\n${blocks.join('\n\n')}`;
+    if (blocks.length) out += `\n\n## 研究资料\n\n${blocks.join('\n\n')}`;
 
     this.backfillCitations(documentId, refs, order, suppOrder, suppRefIds, poolSpot, suppSpot);
     return out;
@@ -114,11 +102,17 @@ export class CitationRenderer {
     try {
       const existing = this.db.select().from(citations).where(eq(citations.documentId, documentId)).all();
       const have = new Set(existing.map((c) => c.referenceId));
-      const now = Date.now();
+      // createdAt 递增 1ms：同一批插入若共用时间戳，`ORDER BY createdAt` 的先后就不稳定，
+      // 正文 [n] 与列表第 n 条可能错位。用递增时间保证插入序 = 正文首次出现序。
+      let stamp = Date.now();
       const insertOne = (referenceId: string, spot: CitationSpot | undefined, doi: string) => {
         if (!referenceId || have.has(referenceId)) return;
-        this.db.insert(citations).values({ id: randomUUID(), documentId, referenceId, location: spot?.location || '', context: spot?.context || '', format: 'pipeline', verified: doi ? 1 : 0, createdAt: now }).run();
+        this.db
+          .insert(citations)
+          .values({ id: randomUUID(), documentId, referenceId, location: spot?.location || '', context: spot?.context || '', format: 'pipeline', verified: doi ? 1 : 0, createdAt: stamp })
+          .run();
         have.add(referenceId);
+        stamp += 1;
       };
       for (const idx of order) { const r = refs[idx]; if (!r) continue; insertOne(r.id, poolSpot.get(idx), r.doi || ''); }
       for (const idx of suppOrder) {
