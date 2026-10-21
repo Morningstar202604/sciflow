@@ -117,20 +117,23 @@ Chat(科研问答) · Submission(投稿辅助) · Settings(设置)
 git clone <你的仓库镜像地址> sciflow && cd sciflow
 pnpm install
 
-# 2. 配置 AI（复制模板并填写你自己的 Key；模板已含全部变量说明）
+# 2. 先跑环境自检（Node/依赖/目录/端口/AI/向量/Python 一次看全）
+pnpm doctor        # 有问题会给出具体修复动作；可加 --fix 自动修复安全项
+
+# 3. 配置 AI（复制模板并填写你自己的 Key；模板已含全部变量说明）
 cp apps/server/.env.example apps/server/.env
 #    编辑 apps/server/.env：至少填 AI_BASE_URL / AI_API_KEY / AI_MODEL
 
-# 3. 编译后端
+# 4. 编译后端
 pnpm --filter @sciflow/server build
 
-# 4. 启动（两个终端）
+# 5. 启动（两个终端）
 #    后端 :3000
 node apps/server/dist/apps/server/src/main.js
 #    前端 :5173
 pnpm --filter @sciflow/web dev
 
-# 5. 浏览器打开
+# 6. 浏览器打开
 #    http://localhost:5173
 ```
 
