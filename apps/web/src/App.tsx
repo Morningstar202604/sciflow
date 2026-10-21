@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageErrorBoundary } from './components/PageErrorBoundary';
 import {
-  BookOpen, Brain, Beaker, FlaskConical, LayoutDashboard, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon,
+  BookOpen, Brain, Beaker, FlaskConical, LayoutDashboard, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, MessageSquare as MessageSquareIcon, XCircle as XCircleIcon,
 } from 'lucide-react';
 import { api } from './api/client';
 import { isNetworkError } from './api/core';
@@ -67,6 +67,7 @@ const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: type
     label: '核心工作',
     items: [
       { key: 'workspace', label: '工作台', icon: LayoutDashboard },
+      { key: 'chat', label: '科研问答', icon: MessageSquareIcon },
       { key: 'writing', label: '长文写作', icon: BookOpen },
       { key: 'literature', label: '文献库', icon: FlaskConical },
       { key: 'knowledge', label: '知识库', icon: BookMarked },
@@ -127,7 +128,8 @@ const PAGE_RENDERERS: Record<View, (ctx: PageRenderCtx) => ReactNode> = {
     project ? (
       <PageErrorBoundary pageName="工作台">
         <SuspensePage>
-          <WorkspacePage project={project} initialDocId={initialDocId} onOpenFullEditor={openDoc} />
+          {/* key=project.id：切项目必须整页重挂载，否则旧项目的消息会被写进新项目的 localStorage（跨项目串话） */}
+          <WorkspacePage key={project.id} project={project} initialDocId={initialDocId} onOpenFullEditor={openDoc} />
         </SuspensePage>
       </PageErrorBoundary>
     ) : null,
@@ -150,7 +152,7 @@ const PAGE_RENDERERS: Record<View, (ctx: PageRenderCtx) => ReactNode> = {
         </Suspense>
       </PageErrorBoundary>
     ) : null,
-  chat: ({ project }) => (project ? <PageErrorBoundary pageName="科研问答"><SuspensePage name="科研问答"><ChatPage project={project} /></SuspensePage></PageErrorBoundary> : null),
+  chat: ({ project }) => (project ? <PageErrorBoundary pageName="科研问答"><SuspensePage name="科研问答"><ChatPage key={project.id} project={project} /></SuspensePage></PageErrorBoundary> : null),
   submission: ({ project }) => (project ? <PageErrorBoundary pageName="投稿辅助"><SuspensePage name="投稿辅助"><SubmissionPage project={project} /></SuspensePage></PageErrorBoundary> : null),
 };
 
@@ -200,6 +202,11 @@ function AppInner() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('sciflow-theme', theme);
   }, [theme]);
+
+  // 路由级标题：浏览器标签/历史记录可区分（此前全站恒为默认标题，多标签时无法辨认）
+  useEffect(() => {
+    document.title = `${VIEW_LABELS[view] || '工作台'} · SciFlow`;
+  }, [view]);
 
   // 任务6：写作面包屑文档名——React Query 按 ?doc= 拉取（WritingPage 内部切文档改 ?doc=，queryKey 变化自动刷新）
   const writingDocQuery = useQuery({
@@ -461,7 +468,7 @@ function SidebarContent({
       <div className="flex items-center gap-2.5 px-4 pb-2 pt-4">
         <div className="brand-logo flex h-7 w-7 items-center justify-center rounded-lg text-white">
           <svg viewBox="0 0 64 64" className="h-5 w-5" aria-hidden="true">
-            <path d="M 45 13 C 34 8, 20 14, 21 24 C 22 34, 43 30, 44 41 C 45 51, 29 57, 18 51" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" />
+            <path d="M 46.2 16.8 C 40.4 11.0, 28.2 10.5, 22.8 16.4 C 17.1 22.6, 23.2 29.3, 32.0 31.4 C 40.7 33.5, 47.0 36.9, 44.8 43.4 C 42.5 49.9, 31.3 52.4, 20.6 46.8" fill="none" stroke="currentColor" strokeWidth="5.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
         <div className="leading-tight">

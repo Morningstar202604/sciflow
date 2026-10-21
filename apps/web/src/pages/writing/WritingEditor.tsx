@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Eye, FileText, Pencil } from 'lucide-react';
-import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
+import CodeMirror, { EditorView, type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import type { Doc } from '../../types';
 import { Badge, Card } from '../../components/ui';
@@ -129,7 +129,7 @@ export function WritingEditor({
                 onChange={onChangeContent}
                 height="100%"
                 theme={dark ? 'dark' : 'light'}
-                extensions={[markdown({ base: markdownLanguage })]}
+                extensions={[markdown({ base: markdownLanguage }), EditorView.lineWrapping]}
                 placeholder="在这里撰写论文正文（支持 Markdown）…下方「AI 工具」可做大纲生成、章节起草、润色、翻译、降重"
                 basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true, autocompletion: false }}
                 style={{ height: '100%' }}

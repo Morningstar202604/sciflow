@@ -8,13 +8,16 @@
 
 :root {
   color-scheme: light;
+  /* 对比度修正：默认 slate-400 (#94a3b8) 在白底上仅 2.6:1，达不到 WCAG AA。
+     辅助文字统一提升到 slate-500 档（4.6:1），深色模式保持原亮度。 */
+  --color-slate-400: #5b6b82;
   /* ---- SciFlow 品牌 token（科研流体：teal → cyan → sky） ---- */
   --brand-400: #14b8a6;
-  --brand-500: #0d9488;
-  --brand-600: #0f766e;
-  --brand-grad: linear-gradient(135deg, #0d9488 0%, #0891b2 55%, #0284c7 100%);
-  --brand-grad-soft: linear-gradient(135deg, rgba(13, 148, 136, 0.10), rgba(8, 145, 178, 0.08) 55%, rgba(2, 132, 199, 0.06));
-  --brand-glow: 0 8px 30px rgba(13, 148, 136, 0.25), 0 2px 8px rgba(8, 145, 178, 0.20);
+  --brand-500: #0f9e94;
+  --brand-600: #0b7f78;
+  --brand-grad: linear-gradient(135deg, #0f9e94 0%, #0b8fb4 52%, #0b6fc4 100%);
+  --brand-grad-soft: linear-gradient(135deg, rgba(15, 158, 148, 0.10), rgba(11, 143, 180, 0.08) 52%, rgba(11, 111, 196, 0.06));
+  --brand-glow: 0 8px 28px rgba(11, 143, 180, 0.22), 0 2px 8px rgba(15, 158, 148, 0.18);
   --card-shadow: 0 1px 2px rgba(15, 118, 110, 0.04), 0 8px 24px -12px rgba(15, 118, 110, 0.10);
   --bg-app: #f4f6fb;
   --ink: #1c2a44;
@@ -26,7 +29,7 @@
   --card-foreground: #1c2a44;
   --popover: #ffffff;
   --popover-foreground: #1c2a44;
-  --primary: #0d9488;
+  --primary: #0f9e94;
   --primary-foreground: #ffffff;
   --secondary: #eef2f7;
   --secondary-foreground: #334155;
@@ -37,7 +40,7 @@
   --destructive: #e11d48;
   --border: #e2e8f0;
   --input: #e2e8f0;
-  --ring: #0d9488;
+  --ring: #0f9e94;
 
   --blue: #2563eb;
   --orange: #ea580c;
@@ -53,8 +56,8 @@
   --sky-500: #0ea5e9;
 
   /* 图表系列色：默认全部落在品牌/辅助色上，保持克制 */
-  --viz-series-1: #0d9488;
-  --viz-series-2: #0891b2;
+  --viz-series-1: #0f9e94;
+  --viz-series-2: #0b8fb4;
   --viz-series-3: #2563eb;
   --viz-series-4: #7c3aed;
   --viz-series-5: #ea580c;
@@ -68,7 +71,8 @@
 }
 .dark {
   color-scheme: dark;
-  --brand-grad: linear-gradient(135deg, #14b8a6 0%, #06b6d4 55%, #0ea5e9 100%);
+  --color-slate-400: #94a3b8;
+  --brand-grad: linear-gradient(135deg, #2dd4bf 0%, #22d3ee 52%, #38bdf8 100%);
   --brand-grad-soft: linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(6, 182, 212, 0.09) 55%, rgba(14, 165, 233, 0.06));
   --brand-glow: 0 8px 30px rgba(20, 184, 166, 0.20), 0 2px 8px rgba(6, 182, 212, 0.18);
   --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px -14px rgba(6, 182, 212, 0.14);
@@ -666,3 +670,78 @@ kbd {
 .semantic-map__dot { width: 8px; height: 8px; border-radius: 999px; flex: 0 0 8px; display: inline-block; }
 .semantic-map__legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--muted-foreground); }
 .semantic-map__legend-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+
+/* ============================================================
+   对话 Markdown 排版（Streamdown 输出）
+   目标：代码块/表格/公式/列表在气泡内也有稳定节奏，和写作预览一致
+   ============================================================ */
+.markdown-body { font-size: 14px; line-height: 1.75; word-break: break-word; }
+.markdown-body > *:first-child { margin-top: 0; }
+.markdown-body > *:last-child { margin-bottom: 0; }
+.markdown-body p { margin: 0.5em 0; }
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 { margin: 1.1em 0 0.5em; font-weight: 650; line-height: 1.35; letter-spacing: -0.01em; }
+.markdown-body h1 { font-size: 1.35em; }
+.markdown-body h2 { font-size: 1.2em; }
+.markdown-body h3 { font-size: 1.08em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body ul,
+.markdown-body ol { margin: 0.55em 0; padding-left: 1.35em; }
+.markdown-body li { margin: 0.22em 0; }
+.markdown-body li::marker { color: var(--brand-500); }
+.markdown-body blockquote {
+  margin: 0.7em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--brand-400);
+  color: var(--muted-foreground);
+}
+.markdown-body a { color: var(--brand-600); text-decoration: underline; text-underline-offset: 2px; }
+.dark .markdown-body a { color: #5eead4; }
+.markdown-body code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.88em;
+  padding: 0.12em 0.36em;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--brand-500) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand-500) 14%, transparent);
+}
+.markdown-body pre {
+  margin: 0.8em 0;
+  padding: 0.85em 1em;
+  border-radius: 10px;
+  overflow-x: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.markdown-body pre code { background: transparent; border: 0; padding: 0; font-size: inherit; color: inherit; }
+.markdown-body table { width: 100%; border-collapse: collapse; margin: 0.8em 0; font-size: 13px; }
+.markdown-body th,
+.markdown-body td { border: 1px solid var(--border); padding: 0.4em 0.6em; text-align: left; }
+.markdown-body th { background: color-mix(in srgb, var(--brand-500) 7%, transparent); font-weight: 600; }
+.markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 1.1em 0; }
+.markdown-body .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.2em 0; }
+
+/* Streamdown 默认留白偏大（space-y-4 / text-xl 标题），在对话气泡内收紧到阅读节奏 */
+.markdown-body > div { row-gap: 0.45rem; }
+.markdown-body [data-streamdown="heading-1"] { font-size: 1.3em; margin: 0.9em 0 0.4em; }
+.markdown-body [data-streamdown="heading-2"] { font-size: 1.18em; margin: 0.85em 0 0.35em; }
+.markdown-body [data-streamdown="heading-3"] { font-size: 1.06em; margin: 0.8em 0 0.3em; }
+.markdown-body [data-streamdown="ordered-list"],
+.markdown-body [data-streamdown="unordered-list"] { margin: 0.35em 0; }
+.markdown-body [data-streamdown="list-item"] { padding-top: 0.1em; padding-bottom: 0.1em; }
+.markdown-body [data-streamdown="code-block"] { margin: 0.6em 0; border-radius: 10px; }
+
+/* CodeMirror 暗色配色对齐应用 navy 主题（默认 one-dark 是中性灰，和卡片/侧栏不协调） */
+.dark .cm-editor { background: var(--card) !important; color: var(--foreground); }
+.dark .cm-editor .cm-gutters { background: color-mix(in srgb, var(--card) 88%, #000) !important; color: #64748b; border-right: 1px solid var(--border) !important; }
+.dark .cm-editor .cm-activeLine { background: rgba(20, 184, 166, 0.06) !important; }
+.dark .cm-editor .cm-activeLineGutter { background: rgba(20, 184, 166, 0.10) !important; }
+.dark .cm-editor .cm-content { caret-color: #5eead4; }
+.dark .cm-editor .cm-selectionBackground,
+.dark .cm-editor.cm-focused .cm-selectionBackground { background: rgba(45, 212, 191, 0.22) !important; }
+.dark .cm-editor .cm-cursor { border-left-color: #5eead4; }

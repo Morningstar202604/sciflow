@@ -1,4 +1,4 @@
-import { forwardRef, ReactNode, useEffect } from 'react';
+import { forwardRef, ReactNode, useEffect, useId, useRef } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Info, Loader2, Sparkles, X, XCircle } from 'lucide-react';
 import { EmptyDocuments, EmptySearch, EmptyChat, EmptyKnowledge, EmptyPipeline } from './illustrations';
 
@@ -45,7 +45,7 @@ export function Card({ children, className = '', onClick, hover }: { children: R
   return (
     <div
       onClick={onClick}
-      className={`bg-white rounded-xl border border-slate-200 dark:border-slate-800 shadow-[var(--card-shadow)] ${hover ? 'card-lift cursor-pointer' : ''} ${className}`}
+      className={`bg-[var(--card)] text-[var(--card-foreground)] rounded-xl border border-slate-200 dark:border-slate-800 shadow-[var(--card-shadow)] ${hover ? 'card-lift cursor-pointer' : ''} ${className}`}
     >
       {children}
     </div>
@@ -150,22 +150,61 @@ export function Modal({ open, title, children, onClose, width = 'max-w-2xl' }: {
   onClose: () => void;
   width?: string;
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
+
+  /** 无障碍 + 键盘：Esc 关闭、Tab 焦点陷阱、关闭后归还焦点（与 ShellDrawer 同一套语义） */
   useEffect(() => {
     if (!open) return;
+    const restore = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key === 'Tab' && panelRef.current) {
+        const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey && (active === first || !panelRef.current.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const raf = requestAnimationFrame(() => {
+      const first = panelRef.current?.querySelector<HTMLElement>('input, textarea, button:not([disabled]), a[href]');
+      first?.focus();
+    });
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      cancelAnimationFrame(raf);
+      if (restore && document.contains(restore)) restore.focus();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/40 backdrop-blur-[2px] p-4 pt-16 overflow-y-auto overlay-in" onClick={onClose}>
-      <div className={`bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full ${width} p-5 modal-in border border-slate-200 dark:border-slate-700`} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={`bg-[var(--card)] rounded-xl shadow-2xl w-full ${width} p-5 modal-in border border-slate-200 dark:border-slate-700`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">{title}</h3>
-          <button onClick={onClose} className="p-1 rounded-md text-slate-400 dark:text-slate-500 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+          <h3 id={titleId} className="text-base font-semibold text-slate-800 dark:text-slate-100">{title}</h3>
+          <button onClick={onClose} className="p-1 rounded-md text-slate-400 dark:text-slate-500 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" aria-label="关闭对话框">
             <X size={18} />
           </button>
         </div>

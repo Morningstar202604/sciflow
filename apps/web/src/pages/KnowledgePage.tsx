@@ -375,7 +375,8 @@ export function KnowledgePage({ project }: { project: Project }) {
         .sort((a, b) => b.chunkCount - a.chunkCount)
         .slice(0, 8)
         .map((d) => ({
-          label: d.name.length > 22 ? d.name.slice(0, 22) + '…' : d.name,
+          // 窄屏标签更短，避免左侧标签吃掉绘图区（390 实测长文件名会把柱子挤到只剩一小段）
+          label: d.name.length > 16 ? d.name.slice(0, 16) + '…' : d.name,
           value: d.chunkCount,
           hint: d.name,
         })),

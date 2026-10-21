@@ -35,8 +35,8 @@ export class UsageService {
              COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
              COALESCE(SUM(completion_tokens),0) AS completion_tokens,
              COALESCE(SUM(total_tokens),0) AS total_tokens,
-             CAST(AVG(latency_ms) AS INT) AS avg_latency_ms,
-             ROUND(100.0 * SUM(success) / COUNT(*), 1) AS success_rate
+             COALESCE(CAST(AVG(latency_ms) AS INT), 0) AS avg_latency_ms,
+             COALESCE(ROUND(100.0 * SUM(success) / NULLIF(COUNT(*), 0), 1), 0) AS success_rate
            FROM llm_call_log WHERE kind = 'llm'`,
         )
         .get() as UsageRow;
@@ -46,8 +46,8 @@ export class UsageService {
              COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
              COALESCE(SUM(completion_tokens),0) AS completion_tokens,
              COALESCE(SUM(total_tokens),0) AS total_tokens,
-             CAST(AVG(latency_ms) AS INT) AS avg_latency_ms,
-             ROUND(100.0 * SUM(success) / COUNT(*), 1) AS success_rate
+             COALESCE(CAST(AVG(latency_ms) AS INT), 0) AS avg_latency_ms,
+             COALESCE(ROUND(100.0 * SUM(success) / NULLIF(COUNT(*), 0), 1), 0) AS success_rate
            FROM llm_call_log WHERE kind = 'llm' GROUP BY caller ORDER BY total_tokens DESC`,
         )
         .all() as UsageRow[];
@@ -66,7 +66,7 @@ export class UsageService {
         .all() as { model: string; calls: number; total_tokens: number }[];
       // 工具调用单独汇总：次数/失败数/平均耗时/按工具名分布
       const toolTotal = sqlite
-        .prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(1 - success),0) AS failures, CAST(AVG(latency_ms) AS INT) AS avg_latency_ms FROM llm_call_log WHERE kind = 'tool'`)
+        .prepare(`SELECT COUNT(*) AS calls, COALESCE(SUM(1 - success),0) AS failures, COALESCE(CAST(AVG(latency_ms) AS INT), 0) AS avg_latency_ms FROM llm_call_log WHERE kind = 'tool'`)
         .get() as { calls: number; failures: number; avg_latency_ms: number } | undefined;
       const toolByName = sqlite
         .prepare(`SELECT caller AS name, COUNT(*) AS calls FROM llm_call_log WHERE kind = 'tool' GROUP BY caller ORDER BY calls DESC LIMIT 8`)

@@ -386,6 +386,24 @@ function SettingsLayout() {
                 {state.check.ai.ok ? `${state.check.ai.latencyMs}ms · ${state.check.ai.detail}` : state.check.ai.detail}
               </span>
             </div>
+            {state.check.retrieval && (
+              <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <ModelIcon ok={state.check.retrieval.ok} />
+                  <span className="text-slate-600 dark:text-slate-300">检索栈</span>
+                  <span className="flex flex-wrap gap-1.5 text-xs">
+                    <Badge tone={state.check.retrieval.vector ? 'green' : 'amber'}>向量 {state.check.retrieval.vector ? '可用' : '降级'}</Badge>
+                    <Badge tone={state.check.retrieval.embeddingModel ? 'green' : 'amber'}>嵌入模型 {state.check.retrieval.embeddingModel ? '已配置' : '未配置'}</Badge>
+                    <Badge tone={state.check.retrieval.fullText ? 'green' : 'red'}>全文索引 {state.check.retrieval.fullText ? '可用' : '不可用'}</Badge>
+                  </span>
+                </div>
+                {state.check.retrieval.notes.length > 0 && (
+                  <ul className="mt-1.5 ml-6 list-disc text-[11px] text-amber-600 dark:text-amber-400 space-y-0.5">
+                    {state.check.retrieval.notes.map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Card>

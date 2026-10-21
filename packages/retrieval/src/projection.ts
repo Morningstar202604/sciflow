@@ -131,6 +131,13 @@ export function blobToVector(blob: Buffer | Uint8Array | null | undefined): numb
  */
 export function downsampleIndices(total: number, limit: number): number[] {
   if (total <= limit) return Array.from({ length: total }, (_, i) => i);
-  const step = total / limit;
-  return Array.from({ length: limit }, (_, i) => Math.min(total - 1, Math.floor(i * step)));
+  if (limit <= 1) return [0];
+  // 端点对齐：(total-1)/(limit-1) 保证首尾必选，尾部数据不再被系统性丢弃
+  // （旧实现用 total/limit，1000 选 100 时最后一个下标只到 990，末 1% 永远看不到）
+  const step = (total - 1) / (limit - 1);
+  const out: number[] = [];
+  for (let i = 0; i < limit; i++) out.push(Math.round(i * step));
+  out[limit - 1] = total - 1;
+  for (let i = 1; i < out.length; i++) if (out[i] <= out[i - 1]) out[i] = out[i - 1] + 1;
+  return out;
 }

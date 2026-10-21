@@ -176,7 +176,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
                 ))}
               </div>
             )}
-            {overview.pendingOutline === 0 && overview.overdueSubmissions.length === 0 && overview.lowQualityDocs.length === 0 && (
+            {overview.pendingOutline === 0 && overview.overdueSubmissions.length === 0 && overview.lowQualityDocs.length === 0 && overview.openReviewComments === 0 && (
               <div className="text-xs text-slate-400 dark:text-slate-500">暂无卡点，全链路运转正常。</div>
             )}
           </div>

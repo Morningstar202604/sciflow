@@ -113,8 +113,11 @@ describe('downsampleIndices', () => {
   it('超限时返回恰好 limit 个且覆盖全区间', () => {
     const idx = downsampleIndices(1000, 100);
     expect(idx).toHaveLength(100);
+    // 首尾必须精确落在两端：原断言 `last < 1000` 对「只取前 100 条」同样成立（突变未捕获）
     expect(idx[0]).toBe(0);
-    expect(idx[idx.length - 1]).toBeLessThan(1000);
+    expect(idx[idx.length - 1]).toBe(999);
+    // 步长均匀：任意相邻间隔不超过 ceil((n-1)/(limit-1))，防止前半密后半疏
+    for (let i = 1; i < idx.length; i++) expect(idx[i] - idx[i - 1]).toBeLessThanOrEqual(11);
     // 递增（无重复）
     for (let i = 1; i < idx.length; i++) expect(idx[i]).toBeGreaterThan(idx[i - 1]);
   });

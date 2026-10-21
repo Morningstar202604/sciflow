@@ -12,7 +12,7 @@
 
 > **Repository mirrors (synced across 5 platforms)**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (165 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree.
+> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (167 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree.
 
 SciFlow is a **local-first, single-machine** AI research assistant: give it a research topic and it runs the whole academic lifecycle — **literature survey → research planning → outline generation (human confirmation) → section-wise drafting (Agentic RAG, search-while-writing) → 7-dimension quality gate (auto Reflexion rewrite below threshold) → polishing → citation formatting → submission assistance** — while accumulating process assets in a NotebookLM-style RAG knowledge base and a visual workbench.
 
@@ -83,7 +83,7 @@ SciFlow is a **local-first, single-machine** AI research assistant: give it a re
 | Backend `apps/server` | NestJS 11 · TypeScript (strict) · Drizzle ORM · better-sqlite3 (WAL) · Vercel AI SDK (OpenAI-compatible) · LangGraph (orchestration / checkpoint resume / interrupts) · official MCP SDK · zod · helmet + pino · in-process MSW mock gateway |
 | Frontend `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · TanStack Query / Table · Recharts · sigma.js + graphology · streamdown (streaming Markdown) · CodeMirror 6 · react-markdown + KaTeX |
 | Desktop `apps/desktop` | Electron 41 (embedded Node 24, native `require(ESM)`) · embedded backend (`ELECTRON_RUN_AS_NODE`) · local SQLite (userData-isolated, native modules auto-rebuilt for the Electron ABI when packaging) · electron-builder · electron-updater (opt-in) |
-| Engineering | pnpm workspace · vitest (server 68 / web 50) · Playwright smoke · promptfoo prompt-contract evals · GitHub Actions with 3 jobs (types/unit/build · full regression · E2E+evals) · Python 3 regression script (165 checks) |
+| Engineering | pnpm workspace · vitest (server 74 / web 57) · Playwright smoke · promptfoo prompt-contract evals · GitHub Actions with 3 jobs (types/unit/build · full regression · E2E+evals) · Python 3 regression script (167 checks) |
 
 **Architecture overview**
 
@@ -204,7 +204,7 @@ SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
 
 > When an external tool (e.g. promptfoo) needs a real HTTP endpoint: `node apps/server/scripts/mock-openai-http.mjs` — it reuses the same route table and listens on `127.0.0.1:5099`.
 
-Regression baseline (fresh database + mock gateway, see `scripts/full_regression.py`): **PASS 165 / FAIL 0 / KNOWN 0** (the KNOWN mechanism remains, currently empty — all 11 legacy gaps fixed). The mock gateway is for testing/demos only and does not represent real model capability.
+Regression baseline (fresh database + mock gateway, see `scripts/full_regression.py`): **PASS 167 / FAIL 0 / KNOWN 0** (the KNOWN mechanism remains, currently empty — all 11 legacy gaps fixed). The mock gateway is for testing/demos only and does not represent real model capability.
 
 ## 📚 Documentation Index
 

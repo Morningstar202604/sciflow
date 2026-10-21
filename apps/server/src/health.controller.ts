@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { AiService } from './ai/ai.service';
 import { Public } from './auth/public.decorator';
-import { sqlite } from './db/database';
+import { sqlite, vecLoaded } from './db/database';
 
 @Controller()
 export class HealthController {
@@ -25,6 +25,11 @@ export class HealthController {
       db: dbOk,
       desktop: process.env.SCIFLOW_DESKTOP === '1',
       ai: this.ai.config,
+      // 能力探测：前端据此显示「向量检索 / 仅全文检索」降级状态，而不是静默劣化
+      capabilities: {
+        vectorSearch: vecLoaded,
+        embeddingModel: Boolean(process.env.EMBEDDING_MODEL_PATH),
+      },
     };
   }
 }

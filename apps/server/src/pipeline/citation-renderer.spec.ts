@@ -107,10 +107,15 @@ describe('CitationRenderer', () => {
     expect(out).not.toContain('## 参考文献');
   });
 
-  it('引用行回填到 citations 表，且 createdAt 严格递增', () => {
+  it('引用行回填到 citations 表，且顺序/数量/时间戳严格正确', () => {
     renderer.render(docId, 'B[Ref:2] A[Ref:1] C[Ref:3]', pool);
     const rows = db.select().from(citations).where(eq(citations.documentId, docId)).all();
-    expect(rows.map((r) => r.referenceId)).toEqual(['ref-Paper A', 'ref-Paper B', 'ref-Paper C'].filter((id) => rows.some((r) => r.referenceId === id)));
+    // 精确断言：3 条、按池下标顺序 A→B→C（原断言用结果过滤结果，永远为真；且少写一条也全绿）
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.referenceId)).toEqual(['ref-Paper A', 'ref-Paper B', 'ref-Paper C']);
+    // 回填字段完整（location 在无 spot 时为空串，这里断言格式与 DOI 已写入）
+    expect(rows.every((r) => r.format === 'pipeline')).toBe(true);
+    expect(rows.every((r) => r.referenceId && r.documentId === docId)).toBe(true);
     const stamps = rows.map((r) => r.createdAt);
     for (let i = 1; i < stamps.length; i++) expect(stamps[i]).toBeGreaterThan(stamps[i - 1]);
   });

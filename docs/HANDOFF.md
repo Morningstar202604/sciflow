@@ -68,6 +68,7 @@ pnpm build && pnpm start                        # 或 pnpm dev（前后端并行
 | `docs/archive/audit-notes.md` | 76 项原始疑点笔记（审计过程全记录） |
 | `docs/product-roadmap.md` | 产品定位与合规红线（2026-09-30 决策依据） |
 | `docs/RUNTIME-FINDINGS.md` | v0.6 实测缺陷 D1–D12 / 回归 A1–A13 / 测试真实性审计 / 设计契约 |
+| `docs/RUNTIME-FINDINGS-v0.7.md` | v0.7 四路独立审计结论、10 项 P0 复现→修复→复测、门禁实数、突变验证 |
 | `docs/enterprise-transformation-plan.md` | 桌面端封装方案（已落地，含踩坑记录） |
 | `CHANGELOG.md` | 版本历史（0.6.0 起含运行时修复与 Agent 工具链） |
 | `SECURITY.md` / `CONTRIBUTING.md` | 安全披露 / 贡献流程 |

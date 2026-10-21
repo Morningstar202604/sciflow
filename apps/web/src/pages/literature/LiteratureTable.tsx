@@ -398,10 +398,11 @@ export function LiteratureTable(props: LiteratureTableProps) {
       const y = r.year ? String(r.year) : '未知';
       m.set(y, (m.get(y) || 0) + 1);
     });
+    // 按年份升序展示（趋势可读）；「未知」固定排最后，避免占据首位误导
     return [...m.entries()]
       .map(([label, value]) => ({ name: label, value, hint: `${label} 年：${value} 篇` }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
+      .sort((a, b) => (a.name === '未知' ? 1 : b.name === '未知' ? -1 : Number(a.name) - Number(b.name)))
+      .slice(0, 12);
   }, [refs]);
 
   const topCited = useMemo(() => {
@@ -725,7 +726,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
             <div className="mb-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800">
               <div className="grid md:grid-cols-2 gap-3">
                 <div>
-                  <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">年份分布 Top 10</div>
+                  <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">年份分布</div>
                   <HBar data={yearDist} />
                 </div>
                 <div>

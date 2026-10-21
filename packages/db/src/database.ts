@@ -25,6 +25,8 @@ sqlite.pragma('foreign_keys = ON');
 sqlite.pragma('busy_timeout = 5000');
 
 // ---------- sqlite-vec 扩展加载（向量 ANN 检索） ----------
+/** 运行期能力探测：扩展是否真的加载成功（供 /api/health 与设置页自检展示） */
+export let vecLoaded = false;
 try {
   // sqlite-vec 官方入口：getLoadablePath() 按平台解析预编译扩展（win32→vec0.dll；mac→dylib；linux→so）
   // 注意：不能 require.resolve('sqlite-vec/better-sqlite3')——该包的 exports 只允许 '.' 子路径，
@@ -33,6 +35,7 @@ try {
   if (process.env.SCIFLOW_NO_VEC !== '1') {
     const sqliteVec = sqliteVecMod;
     sqlite.loadExtension(sqliteVec.getLoadablePath());
+    vecLoaded = true;
     console.log('[DB] sqlite-vec 扩展已加载（向量 ANN 检索可用）');
   } else {
     console.warn('[DB] SCIFLOW_NO_VEC=1，跳过 sqlite-vec 扩展加载（排障模式）');

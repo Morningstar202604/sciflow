@@ -77,10 +77,12 @@ jobs:
             sleep 1
           done
           echo "backend failed to start"; tail -50 /tmp/server.log; exit 1
-      - name: Run regression (165 checks)
+      - name: Run regression
         env:
           SCIFLOW_BASE: http://127.0.0.1:3000
           AI_MOCK: '1'
+          # 必须与启动实例的 DATABASE_PATH 一致：否则脚本内 2 个依赖真实库的 check 会降级为 info
+          SCIFLOW_DB_PATH: /tmp/sciflow_ci.db
         run: python3 scripts/full_regression.py
       - name: Dump server log on failure
         if: failure()

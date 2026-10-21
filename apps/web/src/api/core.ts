@@ -137,9 +137,18 @@ export async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   if (!text) return undefined as T;
+  // 纯文本端点（投稿信/回复信/期刊推荐/文献综述等 Nest 直接返回字符串）：
+  // 按文本原样交给调用方，不再把合法文本误判为「无法解析的数据」。
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  const isPlainText =
+    contentType.includes('text/plain') || contentType.includes('text/html') || contentType.includes('text/markdown');
+  if (isPlainText) return text as unknown as T;
   try {
     return JSON.parse(text) as T;
   } catch {
+    // 未声明 Content-Type 但确为纯文本：同样按文本返回（宁可展示原文，也不误报版本不匹配）
+    const head = text.trimStart()[0];
+    if (head !== '{' && head !== '[') return text as unknown as T;
     throw new ApiError('服务返回了无法解析的数据，请检查后端版本是否匹配', res.status, true);
   }
 }
@@ -158,6 +167,8 @@ export function streamChat(opts: {
   docContext?: string;
   model?: string;
   enableThinking?: boolean;
+  /** 本轮强制联网搜索（输入区「联网」开关） */
+  webSearch?: boolean;
   signal?: AbortSignal;
   onDelta?: (text: string) => void;
   onReasoning?: (text: string) => void;
@@ -185,6 +196,7 @@ export function streamChat(opts: {
       docContext: opts.docContext,
       model: opts.model,
       enableThinking: opts.enableThinking,
+      webSearch: opts.webSearch,
     }),
     signal,
   })

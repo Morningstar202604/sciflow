@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useReducer, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import { api } from '../../api/client';
 import type {
   AppSettings, SelfCheck, ModelProvider, McpServerInfo, McpToolInfo,
@@ -127,6 +127,8 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children, toast }: { children: ReactNode; toast: (kind: ToastKind, text: string) => void }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  /** 首次挂载自动加载：此前只有「刷新」按钮里调用 load()，用户首次进入设置页会永久停在「加载配置…」 */
+  const autoLoaded = useRef(false);
 
   const refreshAll = useCallback(async () => {
     try {
@@ -165,6 +167,12 @@ export function SettingsProvider({ children, toast }: { children: ReactNode; toa
       dispatch({ type: 'LOAD_ERROR', message: errMsg(e) });
     }
   }, []);
+
+  useEffect(() => {
+    if (autoLoaded.current) return;
+    autoLoaded.current = true;
+    void load();
+  }, [load]);
 
   const runCheck = useCallback(async () => {
     dispatch({ type: 'CHECK_START' });

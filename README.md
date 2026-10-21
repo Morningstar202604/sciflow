@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A520%20(CI%2022)-339933.svg)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-11.7.0-f69220.svg)](package.json)
-[![version](https://img.shields.io/badge/version-0.6.0-black.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.7.0-black.svg)](CHANGELOG.md)
 
 > **🌐 语言 / Language：[中文](README.md) · [English](README.en.md)**
 
 > **仓库镜像（五平台同步）**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> GitHub 三仓运行同一套 CI：lint · typecheck ×2 · vitest ×2 · build ×2 · mock 全量回归（165 项）· promptfoo 契约评估 · Playwright 冒烟；GitCode 与 Gitee 同步同一发布树。
+> GitHub 三仓运行同一套 CI：lint · typecheck ×2 · vitest ×2 · build ×2 · mock 全量回归（167 项）· promptfoo 契约评估 · Playwright 冒烟；GitCode 与 Gitee 同步同一发布树。
 
 SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一个研究主题，自动完成 **文献调研 → 研究规划 → 大纲（人工确认）→ 分章起草（边写边查的 Agentic RAG）→ 质量门评分（不达标自动 Reflexion 回炉）→ 润色 → 引用格式化 → 投稿辅助** 的科研全生命周期，并以 NotebookLM 式 RAG 知识库 + 可视化工作台沉淀过程资产。
 
@@ -83,7 +83,7 @@ SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一�
 | 后端 `apps/server` | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· Vercel AI SDK（OpenAI 兼容）· LangGraph（编排 / 断点续跑 / 人工确认）· MCP 官方 SDK · zod · helmet + pino · MSW 进程内 mock 网关 |
 | 前端 `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · TanStack Query / Table · Recharts · sigma.js + graphology · streamdown（流式 Markdown）· CodeMirror 6 · react-markdown + KaTeX |
 | 桌面端 `apps/desktop` | Electron 41（内嵌 Node 24，原生支持 require(ESM)）· 内嵌后端（`ELECTRON_RUN_AS_NODE`）· 本地 SQLite（userData 隔离，打包时自动按 Electron ABI 重编原生模块）· electron-builder 三平台打包 · electron-updater 自动更新（opt-in） |
-| 工程 | pnpm workspace · vitest（server 68 / web 50）· Playwright 冒烟 · promptfoo 契约评估 · GitHub Actions 三 job（类型/单测/构建 · 全量回归 · E2E+评测）· Python 3 回归脚本（165 项） |
+| 工程 | pnpm workspace · vitest（server 74 / web 57）· Playwright 冒烟 · promptfoo 契约评估 · GitHub Actions 三 job（类型/单测/构建 · 全量回归 · E2E+评测）· Python 3 回归脚本（167 项） |
 
 **架构概览**
 
@@ -206,7 +206,7 @@ SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
 
 > 外部工具（如 promptfoo）需要真实 HTTP 端点时：`node apps/server/scripts/mock-openai-http.mjs`——复用同一路由表，监听 `127.0.0.1:5099`。
 
-回归基线（全新库 + mock 网关实测，见 `scripts/full_regression.py`）：**PASS 165 / FAIL 0 / KNOWN 0**（KNOWN 机制保留但当前为空集：历史 11 项存量缺口已全部修复）。mock 网关仅用于测试/演示，不代表真实模型能力。
+回归基线（全新库 + mock 网关实测，见 `scripts/full_regression.py`）：**PASS 167 / FAIL 0 / KNOWN 0**（KNOWN 机制保留但当前为空集：历史 11 项存量缺口已全部修复）。mock 网关仅用于测试/演示，不代表真实模型能力。
 
 ## 📚 文档索引
 

@@ -139,8 +139,36 @@ const ROUTE_TABLE: RouteRule[] = [
   { matches: (p) => p.includes('把以下研究主题提炼为一句可执行的研究题目'), respond: (p) => extractTopic(p) },
 ];
 
-/** 默认兜底回复 */
-const FALLBACK_REPLY = '这是本地 mock AI 网关的确定性回复：已收到请求。请检查 prompt 路由关键词是否需要补充。';
+/**
+ * 默认兜底回复（通用科研问答）。
+ * 用途仅限 mock 演示/测试；带 Markdown 结构以便验证前端渲染（标题/列表/公式/代码块/表格）。
+ */
+const FALLBACK_REPLY = [
+  '这是 **本地 mock 网关** 的示例回复（未接入真实模型）。接上任意 OpenAI 兼容端点后即为真实回答。',
+  '',
+  '### 消息传递（Message Passing）三步',
+  '1. **消息生成**：每条边 (i→j) 上计算 m_ij = φ(h_i, h_j, e_ij)',
+  '2. **聚合**：节点 j 汇总邻居消息 a_j = ⊕_{i∈N(j)} m_ij（sum / mean / max / attention）',
+  '3. **更新**：h_j′ = ψ(h_j, a_j)',
+  '',
+  '$$h_j^{(l+1)} = \\sigma\\Big(W\\sum_{i \\in \\mathcal{N}(j)} \\frac{1}{c_{ij}} h_i^{(l)}\\Big)$$',
+  '',
+  '```python',
+  'import torch',
+  'from torch_geometric.nn import GCNConv',
+  '',
+  'conv = GCNConv(in_channels=64, out_channels=32)',
+  'h = conv(x, edge_index)   # 一次消息传递',
+  '```',
+  '',
+  '| 变体 | 聚合方式 | 特点 |',
+  '| --- | --- | --- |',
+  '| GCN | 归一化求和 | 简单、稳定 |',
+  '| GAT | 多头注意力 | 区分邻居重要性 |',
+  '| E(3)-GNN | 等变聚合 | 三维分子适用 |',
+  '',
+  '> 提示：以上内容由本地 mock 生成，仅用于界面演示。',
+].join('\n');
 
 /** OpenAI 兼容模型列表响应体（MSW 拦截与 HTTP 包装脚本共用） */
 export const MOCK_MODELS_BODY = {

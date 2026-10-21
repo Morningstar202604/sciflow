@@ -1,18 +1,28 @@
 import { Controller, Post, Body, Res, Req, Get, Query } from '@nestjs/common';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { Response, Request } from 'express';
 import { ChatService } from './chat.service';
 import { ChatMessage } from '../ai/ai.service';
 import { forwardOpenAiSse } from '../common/sse.helper';
 
-interface ChatRequestBody {
-  message: string;
+export class ChatRequestBody {
+  @ApiProperty({ description: '本轮用户提问', example: '图神经网络的消息传递机制是什么？' })
+  message!: string;
+
+  @ApiPropertyOptional({ description: '历史消息（role/content）', type: 'array', items: { type: 'object' } })
   history?: ChatMessage[];
+
+  @ApiPropertyOptional({ description: '项目 ID：用于知识库 RAG 与项目记忆检索' })
   projectId?: string;
+
+  @ApiPropertyOptional({ description: '关联文档上下文（标题+大纲+正文片段）' })
   docContext?: string;
-  /** 可选：显式指定模型 ID（best-effort 覆盖默认模型） */
+  @ApiPropertyOptional({ description: '显式指定模型 ID（best-effort 覆盖默认模型）' })
   model?: string;
-  /** 可选：开启推理过程透传（delta.reasoning_content / delta.thinking） */
+  @ApiPropertyOptional({ description: '开启推理过程透传（delta.reasoning_content / delta.thinking）' })
   enableThinking?: boolean;
+  @ApiPropertyOptional({ description: '本轮强制联网搜索（输入区「联网」开关，按轮生效）' })
+  webSearch?: boolean;
 }
 
 /**
@@ -62,7 +72,7 @@ export class ChatController {
     try {
       const { stream, sources } = await this.chat.stream(
         body.message, body.history || [], body.projectId, body.docContext,
-        { model: body.model, enableThinking: body.enableThinking, signal: ac.signal },
+        { model: body.model, enableThinking: body.enableThinking, signal: ac.signal, webSearch: body.webSearch },
       );
       // 正文流开始前先推送 RAG 来源（无命中则不发送）
       if (sources.length && !closed) {

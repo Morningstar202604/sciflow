@@ -789,6 +789,37 @@
         ]
       }
     },
+    "/knowledge/{id}/map": {
+      "get": {
+        "operationId": "KnowledgeController_map",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Knowledge"
+        ]
+      }
+    },
     "/knowledge/query": {
       "post": {
         "operationId": "KnowledgeController_query",
@@ -1676,6 +1707,16 @@
       "post": {
         "operationId": "ChatController_answer",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequestBody"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": ""
@@ -1690,6 +1731,16 @@
       "post": {
         "operationId": "ChatController_stream",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequestBody"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": ""
@@ -2832,12 +2883,53 @@
   "info": {
     "title": "SciFlow API",
     "description": "本地优先科研工作台（单用户）",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "contact": {}
   },
   "tags": [],
   "servers": [],
   "components": {
-    "schemas": {}
+    "schemas": {
+      "ChatRequestBody": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "本轮用户提问",
+            "example": "图神经网络的消息传递机制是什么？"
+          },
+          "history": {
+            "type": "array",
+            "description": "历史消息（role/content）",
+            "items": {
+              "type": "object"
+            }
+          },
+          "projectId": {
+            "type": "string",
+            "description": "项目 ID：用于知识库 RAG 与项目记忆检索"
+          },
+          "docContext": {
+            "type": "string",
+            "description": "关联文档上下文（标题+大纲+正文片段）"
+          },
+          "model": {
+            "type": "string",
+            "description": "显式指定模型 ID（best-effort 覆盖默认模型）"
+          },
+          "enableThinking": {
+            "type": "boolean",
+            "description": "开启推理过程透传（delta.reasoning_content / delta.thinking）"
+          },
+          "webSearch": {
+            "type": "boolean",
+            "description": "本轮强制联网搜索（输入区「联网」开关，按轮生效）"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    }
   }
 }

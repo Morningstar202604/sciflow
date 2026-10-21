@@ -173,7 +173,7 @@ export interface HBarProps {
 const HBar_ROW_H = 30;
 const HBar_AXIS_H = 26; // X 轴刻度 + 上下边距
 const HBar_TOP_PAD = 6;
-const HBar_LABEL_W = 84;
+const HBar_LABEL_W = 96;
 
 function normalizeHBarData(input: HBarDataPoint[] | undefined): HBarDataPoint[] {
   return (input || []).map((d) => ({ name: d.name || d.label || '', value: d.value, color: d.color, sub: d.sub, hint: d.hint }));
@@ -207,7 +207,24 @@ export function HBar({ data, items, barThickness = 16, max, formatValue, sub, hi
             domain={[0, max ?? 'dataMax']}
             height={HBar_AXIS_H}
           />
-          <YAxis type="category" dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} width={HBar_LABEL_W} interval={0} />
+          {/* 类别标签超长时截断（保留完整值在 tooltip），避免窄屏把绘图区压到几乎不可见 */}
+          <YAxis
+            type="category"
+            dataKey="name"
+            tick={(props: { x?: number; y?: number; payload?: { value?: string } }) => {
+              const raw = String(props.payload?.value ?? '');
+              const text = raw.length > 14 ? `${raw.slice(0, 13)}…` : raw;
+              return (
+                <text x={props.x} y={props.y} dy={4} textAnchor="end" fill="var(--muted-foreground)" fontSize={11}>
+                  {text}
+                </text>
+              );
+            }}
+            axisLine={false}
+            tickLine={false}
+            width={HBar_LABEL_W}
+            interval={0}
+          />
           <Tooltip
             cursor={{ fill: 'var(--accent)', fillOpacity: 0.5 }}
             contentStyle={TOOLTIP_STYLE}

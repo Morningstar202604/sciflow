@@ -147,14 +147,20 @@ if docid:
     st, d2 = req("PATCH", f"/api/documents/{docid}", {"title": "回归测试论文-v2"})
     check("文档更新 PATCH :id", st == 200 and d2.get("title") == "回归测试论文-v2", f"{st} {d2}")
     st, d2 = req("GET", f"/api/documents/{docid}/export")
-    check("文档导出 export", st == 200, f"{st}")
+    export_text = d2 if isinstance(d2, str) else json.dumps(d2 or "", ensure_ascii=False)
+    check(
+        "文档导出 export（内容非空且含标题/正文）",
+        st == 200 and len(export_text) > 50 and "回归测试论文" in export_text,
+        f"st={st} len={len(export_text)} head={export_text[:80]!r}",
+    )
     st, d2 = req("POST", f"/api/documents/{docid}/citations", {"text": "Graph neural networks have shown great success in node classification tasks."})
     if st in (200, 201):
         info("引文抽取 POST citations", "成功")
         st, d3 = req("GET", f"/api/documents/{docid}/citations")
-        check("引文列表 GET citations", st == 200, f"{st}")
+        check("引文列表 GET citations", st == 200 and isinstance(d3, list), f"{st} {str(d3)[:80]}")
         st, d3 = req("GET", f"/api/documents/{docid}/export-citations")
-        check("引文导出 export-citations", st == 200, f"{st}")
+        cite_text = d3 if isinstance(d3, str) else json.dumps(d3 or "", ensure_ascii=False)
+        check("引文导出 export-citations（非空）", st == 200 and len(cite_text.strip()) > 5, f"st={st} len={len(cite_text)}")
     else:
         info("引文抽取 POST citations", f"业务校验拒绝 st={st}（内容过短属正常拦截）")
     # AI 接口
@@ -199,10 +205,8 @@ if tools:
     # 构造一个必填参数缺失的调用 → guardrail 应拒绝（参数校验）
     bad_args = {"__missing__": True} if "query" in json.dumps(tools[0].get("inputSchema", {})) else {"query": ""}
     st, d2 = req("POST", "/api/mcp/call", {"name": name, "arguments": bad_args})
-    if st in (400, 422):
-        check("Guardrail 参数校验拒绝（缺参）", True, f"{st} {str(d2)[:100]}")
-    else:
-        check("Guardrail 参数校验拒绝（缺参）", st in (400, 422) or "拒绝" in str(d2), f"未拒绝 st={st} {str(d2)[:100]}")
+    # 恒真断言已删除：两个分支此前都会通过，该 check 毫无判别力
+    check("Guardrail 参数校验拒绝（缺参）", st in (400, 422) or "拒绝" in str(d2), f"未拒绝 st={st} {str(d2)[:100]}")
     # 正常调用
     st, d2 = req("POST", "/api/mcp/call", {"name": name, "arguments": {"query": "图神经网络"}})
     check(f"MCP 工具调用 {name}", st in (200, 201), f"st={st} {str(d2)[:90]}")

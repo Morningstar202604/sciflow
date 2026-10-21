@@ -62,30 +62,30 @@ sciflow 是一个**本地优先、单机部署**的 AI 科研助手：NestJS 11 
 
 | # | 差距项 | 优先级 | 工作量 | 状态 | 说明 |
 |---|---|---|---|---|---|
-| 1 | 文内实时引用：编辑器选区插入 `[n]` 锚点，citations 与正文位置映射，导出/换样式按锚点重排 | P0 | M | 待办 | 纯本地数据模型改造，"像 Zotero 一样写作"的最低门槛 |
-| 2 | 文献库 ↔ 知识库打通：`knowledge_docs.referenceId` 外键，上传 PDF 自动绑定/创建 reference | P0 | M | 待办 | 消掉最大的数据重复录入；本轮已定型方向 |
-| 3 | RAG 引用可点：返回 chunkId，前端展开原文上下文，接 #2 后标注到具体 reference | P0 | S | 待办 | 本地即可，随 #2 一起做 |
+| 1 | 文内实时引用：编辑器选区插入 `[n]` 锚点，citations 与正文位置映射，导出/换样式按锚点重排 | P0 | M | 已落地 | 纯本地数据模型改造，"像 Zotero 一样写作"的最低门槛 |
+| 2 | 文献库 ↔ 知识库打通：`knowledge_docs.referenceId` 外键，上传 PDF 自动绑定/创建 reference | P0 | M | 已落地 | 消掉最大的数据重复录入；本轮已定型方向 |
+| 3 | RAG 引用可点：返回 chunkId，前端展开原文上下文，接 #2 后标注到具体 reference | P0 | S | 已落地 | 本地即可，随 #2 一起做 |
 | 4 | submission 投稿状态机 + 状态历史 | P0 | M | 已落地 | 两层表 + 13 态枚举 + L1/L2/L3 方案（见投稿报告） |
-| 5 | 选刊结果落库：journals-match 命中后「投它 → 登记投稿」一键带 journalId | P1 | S | 待办 | 与 #4 衔接，形成"匹配→投稿→跟踪"闭环 |
-| 6 | pipeline Research hits 自动 `references.create` 入库（带去重指纹） | P1 | M | 待办 | 当前 hits 只存 `agent_run.detail` JSON，不回写文献库 |
-| 7 | 质量反馈驱动待办：`quality_report.feedback` 结构化成 `review_comment`（category+sectionRef） | P1 | S | 待办 | 让 7 维雷达真正驱动修改 |
-| 8 | 审稿数据打通：投稿 `replyReview` 直接读本文档 `review_comment`，逐条生成 response 回写 | P1 | S | 待办 | 一处录入、三处复用，消掉重复粘贴 |
-| 9 | 编码表/筛选队列产出流向下游：纳入文献→一键生成对比表/综述段落；编码表导出 CSV | P1 | M | 待办 | 当前 extraction_value 编码完即停在表格里 |
-| 10 | 参考文献样式扩展：citeproc-js + CSL，按目标期刊一键换样式并实时重排 | P1 | S | 待办 | 现仅 4 种固定样式 |
-| 11 | 文献笔记：`references` 加 notes 字段，笔记可在写作时 @ 引用进正文 | P1 | M | 待办 | 读后想法无处沉淀 |
-| 12 | BibTeX/RIS 导入导出 | P1 | S | 待办 | 纯本地文件交换，不依赖外部 API；整项目可移植 |
-| 13 | 写作防抖自动保存（⌘S 降级为"存版本快照"） | P1 | S | 待办 | 已有 versions 基础好做 |
-| 14 | 移动端响应式：Pipeline/Quality/Submission/Chat 零 `md:` 断点，表格移动端改卡片列表 | P1 | M | 待办 | 手机上目前横滑/溢出不可读 |
-| 15 | 文献空态引导 + 文案止血：搜索框改"在我的文献库中检索"，空态给"粘贴 DOI / 导入 BibTeX"三步 | P1 | S | 待办 | 在线检索已不做，先把预期落差填上 |
-| 16 | 版本 diff：左右栏对比 + 命名版本，替代整包 JSON 快照覆盖 | P2 | M | 待办 | |
-| 17 | 项目/文档大纲模板（综述 / IMRaD / 基金提案） | P2 | S | 待办 | |
-| 18 | ⌘K 命令面板接文献/文档内容搜索（复用本地 LIKE） | P2 | S | 待办 | 现仅跳页面/切主题/建项目 |
-| 19 | 导航信息架构整理（科研问答与知识库入口合并/重命名）；写作页面包屑补当前文档层级 | P2 | S | 待办 | |
-| 20 | 批量 DOI 核验按钮，核验成功自动把 reference 标 `cited` | P2 | S | 待办 | 本地核验，不调外部补全 |
-| 21 | 导出只读快照（对话+引用打包成自包含 HTML/Markdown 自己发给合作者） | P2 | S | 待办 | 替代在线协作 |
-| 22 | 项目级系统提示（projectPreface，每轮注入 system prompt） | P2 | S | 待办 | 完整 memory 系统的轻量替代 |
-| 23 | 实验记录二期：`experiment_runs` 多次执行历史快照；QuickJS 跑不可信 JS 兜底 | P2 | M | 待办 | MVP 一张 `experiment` 表已够 |
-| 24 | NotebookLM 式学习/复盘（测验卡 / 思维导图） | P2 | M | 待办 | 优先级低 |
+| 5 | 选刊结果落库：journals-match 命中后「投它 → 登记投稿」一键带 journalId | P1 | S | 已落地 | 与 #4 衔接，形成"匹配→投稿→跟踪"闭环 |
+| 6 | pipeline Research hits 自动 `references.create` 入库（带去重指纹） | P1 | M | 已落地（AI 域） | 当前 hits 只存 `agent_run.detail` JSON，不回写文献库 |
+| 7 | 质量反馈驱动待办：`quality_report.feedback` 结构化成 `review_comment`（category+sectionRef） | P1 | S | 已落地 | 让 7 维雷达真正驱动修改 |
+| 8 | 审稿数据打通：投稿 `replyReview` 直接读本文档 `review_comment`，逐条生成 response 回写 | P1 | S | 已落地 | 一处录入、三处复用，消掉重复粘贴 |
+| 9 | 编码表/筛选队列产出流向下游：纳入文献→一键生成对比表/综述段落；编码表导出 CSV | P1 | M | 已落地 | 当前 extraction_value 编码完即停在表格里 |
+| 10 | 参考文献样式扩展：citeproc-js + CSL，按目标期刊一键换样式并实时重排 | P1 | S | 已落地（8 样式自绘格式化） | 现仅 4 种固定样式 |
+| 11 | 文献笔记：`references` 加 notes 字段，笔记可在写作时 @ 引用进正文 | P1 | M | 已落地 | 读后想法无处沉淀 |
+| 12 | BibTeX/RIS 导入导出 | P1 | S | 已落地 | 纯本地文件交换，不依赖外部 API；整项目可移植 |
+| 13 | 写作防抖自动保存（⌘S 降级为"存版本快照"） | P1 | S | 已落地 | 已有 versions 基础好做 |
+| 14 | 移动端响应式：Pipeline/Quality/Submission/Chat 零 `md:` 断点，表格移动端改卡片列表 | P1 | M | 已落地 | 手机上目前横滑/溢出不可读 |
+| 15 | 文献空态引导 + 文案止血：搜索框改"在我的文献库中检索"，空态给"粘贴 DOI / 导入 BibTeX"三步 | P1 | S | 已落地 | 在线检索已不做，先把预期落差填上 |
+| 16 | 版本 diff：左右栏对比 + 命名版本，替代整包 JSON 快照覆盖 | P2 | M | 已落地 | |
+| 17 | 项目/文档大纲模板（综述 / IMRaD / 基金提案） | P2 | S | 已落地 | |
+| 18 | ⌘K 命令面板接文献/文档内容搜索（复用本地 LIKE） | P2 | S | 已落地 | 现仅跳页面/切主题/建项目 |
+| 19 | 导航信息架构整理（科研问答与知识库入口合并/重命名）；写作页面包屑补当前文档层级 | P2 | S | 已落地 | |
+| 20 | 批量 DOI 核验按钮，核验成功自动把 reference 标 `cited` | P2 | S | 已落地 | 本地核验，不调外部补全 |
+| 21 | 导出只读快照（对话+引用打包成自包含 HTML/Markdown 自己发给合作者） | P2 | S | 已落地 | 替代在线协作 |
+| 22 | 项目级系统提示（projectPreface，每轮注入 system prompt） | P2 | S | 已落地 | 完整 memory 系统的轻量替代 |
+| 23 | 实验记录二期：`experiment_runs` 多次执行历史快照；QuickJS 跑不可信 JS 兜底 | P2 | M | 部分（QuickJS backlog） | MVP 一张 `experiment` 表已够 |
+| 24 | NotebookLM 式学习/复盘（测验卡 / 思维导图） | P2 | M | 已落地 | 优先级低 |
 | — | 外部学术检索（OpenAlex/S2/PubMed/CrossRef/arXiv 在线调用） | P0→否 | M | **已明确不做** | README 已主动移除国外在线源，零外部网络依赖 |
 | — | 文献挂载 PDF + 内置 PDF.js 阅读器 + 高亮批注 | P0/L→否 | L | **已明确不做** | 工作量 L、与轻量冲突；知识库 PDF 仅做分块 |
 | — | 在线 DOI/标题自动补全元数据（调 CrossRef/S2） | P1→否 | M | **已明确不做** | 走国外 API；以本地 BibTeX 导入替代 |
@@ -167,7 +167,7 @@ sciflow 是一个**本地优先、单机部署**的 AI 科研助手：NestJS 11 
 | 14 | 移动端响应式 | 已落地 | **已落地** | 抽屉侧栏、表格 `overflow-auto`、卡片网格 `lg:` 断点；本轮新增控件均 `flex-wrap` 不溢出 |
 | 15 | 文献空态引导 + 文案止血 | 已落地 | **已落地** | 搜索框「在我的文献库中检索」、空态三步引导（粘贴 DOI/导入 BibTeX/手动录入） |
 | 16 | 版本 diff + 命名版本 | 已落地 | **已落地** | VersionDiffModal + version-name 幂等命名；回归 #23 覆盖 |
-| 17 | 项目/文档大纲模板（综述/IMRaD/基金） | 待办 | **backlog（P2）** | 需在 WritingPage 内预制大纲，触碰 449.48KB 体积红线，本轮不强推以免压破；下轮以极小 JSON 模板注入 |
+| 17 | 项目/文档大纲模板（综述/IMRaD/基金） | 已落地 | **已落地** | `writing/outline-templates.ts` 独立懒加载 chunk，写作页「套用模板…」一键注入，不占主包体积 |
 | 18 | ⌘K 命令面板接文献/知识库搜索 | 已落地 | **已落地** | CommandPalette 并行检索 references.search + knowledge list 前端过滤 |
 | 19 | 导航信息架构 + 写作面包屑 | 已落地 | **已落地** | 左导航分组、写作面包屑补「项目 > 论文写作 > 文档名」 |
 | 20 | 批量 DOI 本地核验 | 后端就绪/前端缺入口 | **本轮补齐** | 后端 `verify-dois` 三分桶（valid/invalid/skipped，合法→cited）早已落库+回归；本轮 LiteraturePage 工具区加「核验 DOI」按钮 |

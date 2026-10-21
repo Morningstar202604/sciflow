@@ -84,12 +84,18 @@ describe('ChatSessionService', () => {
   });
 
   it('listSummaries 应按 createdAt 倒序返回且 limit 生效', () => {
-    // 直接插入 3 条
-    db.insert(chatSessions).values({ id: 's1', projectId: TEST_PROJECT, summary: 'first', messageCount: 2, totalTokens: 100, createdAt: 1000, updatedAt: 1000 }).run();
-    db.insert(chatSessions).values({ id: 's2', projectId: TEST_PROJECT, summary: 'second', messageCount: 3, totalTokens: 200, createdAt: 2000, updatedAt: 2000 }).run();
-    db.insert(chatSessions).values({ id: 's3', projectId: TEST_PROJECT, summary: 'third', messageCount: 4, totalTokens: 300, createdAt: 3000, updatedAt: 3000 }).run();
+    // 原用例只 db.select 后断言行数，从不调用被测方法——orderBy(desc) 被改成 asc 也全绿。
+    for (let i = 1; i <= 6; i++) {
+      db.insert(chatSessions)
+        .values({ id: `s${i}`, projectId: TEST_PROJECT, summary: `m${i}`, messageCount: 2, totalTokens: 100, createdAt: i * 1000, updatedAt: i * 1000 })
+        .run();
+    }
     svc = new ChatSessionService({ complete: async () => '' } as any);
-    const rows = db.select().from(chatSessions).all().filter((s) => s.projectId === TEST_PROJECT);
-    expect(rows.length).toBe(3);
+    const rows = svc.listSummaries(TEST_PROJECT, 5);
+    expect(rows).toHaveLength(5);
+    expect(rows.map((r) => r.id)).toEqual(['s6', 's5', 's4', 's3', 's2']);
+    expect(svc.listSummaries(TEST_PROJECT, 2).map((r) => r.id)).toEqual(['s6', 's5']);
+    // 项目隔离：其他项目的摘要不能混进来
+    expect(svc.listSummaries('other-project')).toHaveLength(0);
   });
 });

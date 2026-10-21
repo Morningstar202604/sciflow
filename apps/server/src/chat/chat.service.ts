@@ -46,6 +46,8 @@ interface ChatRuntimeOptions {
   enableThinking?: boolean;
   /** 客户端断连信号 */
   signal?: AbortSignal;
+  /** 本轮强制联网搜索（输入区「联网」开关） */
+  webSearch?: boolean;
 }
 
 /** RAG 注入到模型的每块片段上限（字符）。320 太短导致上下文贫瘠（审计 H3）；默认 800，可经环境变量调整 */
@@ -66,7 +68,7 @@ export class ChatService {
 
   /** 组装项目上下文：程序/情景记忆 + 知识库检索片段（NotebookLM 式 RAG 注入）；同时返回去重后的来源列表
    *  historyLen=0 时自动注入最近 N 轮对话摘要（跨会话记忆不丢失） */
-  private async contextFor(projectId?: string, question?: string, docContext?: string, historyLen = 0): Promise<{ context: string; sources: ChatSource[] }> {
+  private async contextFor(projectId?: string, question?: string, docContext?: string, historyLen = 0, forceWebSearch = false): Promise<{ context: string; sources: ChatSource[] }> {
     const parts: string[] = [];
     const sources: ChatSource[] = [];
     // 跨会话摘要注入：新对话（history 为空）时自动注入最近几轮摘要
@@ -129,7 +131,8 @@ export class ChatService {
     }
     // 联网搜索兜底（默认关闭；app_setting websearch_in_chat=on 开启）：知识库无命中时按当前 provider 搜索公开网页
     try {
-      if (projectId && question && hitsLen === 0 && this.websearch.isChatSearchEnabled()) {
+      // forceWebSearch=true 来自输入区「联网」开关（按轮生效）：即使知识库有命中或全局兜底关闭也执行
+      if (projectId && question && (forceWebSearch || (hitsLen === 0 && this.websearch.isChatSearchEnabled()))) {
         const webResults = await this.websearch.search(question);
         if (webResults.length > 0) {
           parts.push(
@@ -155,8 +158,14 @@ export class ChatService {
     return { context: parts.join('\n\n'), sources };
   }
 
-  async answer(message: string, history: ChatMessage[] = [], projectId?: string, docContext?: string, opts: Pick<ChatRuntimeOptions, 'model'> = {}) {
-    const { context, sources } = await this.contextFor(projectId, message, docContext, history.length);
+  async answer(
+    message: string,
+    history: ChatMessage[] = [],
+    projectId?: string,
+    docContext?: string,
+    opts: Pick<ChatRuntimeOptions, 'model' | 'webSearch'> = {},
+  ) {
+    const { context, sources } = await this.contextFor(projectId, message, docContext, history.length, opts.webSearch === true);
     const answerText = context
       ? await this.ai.chatWithContext(message, history, context, { modelName: opts.model })
       : await this.ai.chat(message, history, { modelName: opts.model });
@@ -174,7 +183,7 @@ export class ChatService {
   }
 
   stream(message: string, history: ChatMessage[] = [], projectId?: string, docContext?: string, opts: ChatRuntimeOptions = {}) {
-    return this.contextFor(projectId, message, docContext, history.length).then(async ({ context, sources }) => {
+    return this.contextFor(projectId, message, docContext, history.length, opts.webSearch === true).then(async ({ context, sources }) => {
       // Agent 工具：开启时把 MCP 工具集注入本轮请求，模型可自主决定检索文献/查知识库。
       // projectId 一并注入，保证工具只在当前项目范围内检索（避免跨项目数据泄露）。
       const useTools = this.tools.isEnabled() && Boolean(projectId);
