@@ -30,6 +30,25 @@ const webDir = path.join(resourcesDir, 'web');
 const step = (msg) => console.log(`\x1b[36m[prepare]\x1b[0m ${msg}`);
 const ok = (msg) => console.log(`\x1b[32m[prepare]\x1b[0m ${msg}`);
 
+/** 轻量目录体积（用于裁剪前后对比；失败返回 0） */
+function dirSizeLite(d) {
+  let total = 0;
+  try {
+    for (const f of fs.readdirSync(d, { withFileTypes: true, recursive: true })) {
+      if (f.isFile()) {
+        try {
+          total += fs.statSync(path.join(f.parentPath ?? f.path, f.name)).size;
+        } catch {
+          /* race */
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return total;
+}
+
 function assertBuilt() {
   // tsc(rootDir=仓库根) 产物布局：dist/apps/server/src/main.js
   const serverDist = path.join(repoRoot, 'apps', 'server', 'dist', 'apps', 'server', 'src', 'main.js');
@@ -129,6 +148,111 @@ async function main() {
       ok(`better-sqlite3 已按 Electron ${electronVersion} ABI 重编`);
     }
   }
+
+  // ---------- 1.8 裁剪可选原生加速包（体积红线） ----------
+  // node-llama-cpp 的可选依赖会按平台把 CUDA / Vulkan / CUDA-ext 全量装进来
+  // （实测 @node-llama-cpp+win-x64-cuda-ext 351MB + cuda 168MB + vulkan 71MB）。
+  // 桌面端嵌入模型使用 CPU 推理即可：只保留 win-x64（CPU）与通用包，其余在打包产物中删除。
+  // 不删源码仓库的 node_modules，只删 resources/ 下的副本；用户仍可自行放 GGUF 模型。
+  step('裁剪可选 GPU 加速包（保留 CPU 推理）…');
+  const pnpmStore = path.join(serverBundleDir, 'node_modules', '.pnpm');
+  const prunePatterns = [
+    /^@node-llama-cpp\+(win|linux|mac).*-cuda/,
+    /^@node-llama-cpp\+(win|linux|mac).*-vulkan/,
+    /^@node-llama-cpp\+(win|linux|mac).*-metal/,
+  ];
+  let pruned = 0;
+  let freed = 0;
+  if (fs.existsSync(pnpmStore)) {
+    for (const entry of fs.readdirSync(pnpmStore)) {
+      if (!prunePatterns.some((re) => re.test(entry))) continue;
+      const full = path.join(pnpmStore, entry);
+      const size = dirSizeLite(full);
+      fs.rmSync(full, { recursive: true, force: true });
+      pruned += 1;
+      freed += size;
+    }
+  }
+  ok(`已裁剪 ${pruned} 个可选 GPU 包，释放 ${(freed / 1024 / 1024).toFixed(0)} MB`);
+
+  // 关键：pnpm 在 .pnpm/node_modules/<pkg> 下留了指向被删目录的符号链接。
+  // 7-Zip 打包时会因悬空链接报 `WARNING: 系统找不到指定的路径` 并以 exit 1 失败
+  // （实测 NSIS 阶段 7za process failed 1）。这里清理所有指向不存在目标的链接。
+  let dangling = 0;
+  const sweepLinks = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isSymbolicLink()) {
+        try {
+          fs.statSync(full); // 跟随，目标不存在会抛
+        } catch {
+          fs.rmSync(full, { force: true });
+          dangling += 1;
+        }
+        continue;
+      }
+      if (e.isDirectory()) sweepLinks(full);
+    }
+  };
+  try {
+    sweepLinks(path.join(serverBundleDir, 'node_modules'));
+    // .pnpm 内部还有一层 node_modules 链接目录（前面遍历已覆盖），再兜底一次
+    const nested = path.join(pnpmStore, 'node_modules');
+    if (fs.existsSync(nested)) sweepLinks(nested);
+  } catch {
+    /* ignore */
+  }
+  ok(`已清理 ${dangling} 个悬空符号链接`);
+
+  // 同时去掉 node-llama-cpp 的 cuda/vulkan 运行时二进制（如果在通用包内）
+  const llamaDirs = fs.existsSync(pnpmStore)
+    ? fs.readdirSync(pnpmStore).filter((d) => d.startsWith('node-llama-cpp@'))
+    : [];
+  for (const d of llamaDirs) {
+    const bins = path.join(pnpmStore, d, 'node_modules', 'node-llama-cpp', 'llama');
+    for (const sub of ['cuda', 'vulkan']) {
+      const target = path.join(bins, sub);
+      if (fs.existsSync(target)) {
+        fs.rmSync(target, { recursive: true, force: true });
+        pruned += 1;
+      }
+    }
+  }
+
+  // ---------- 1.9 剔除不该进安装包的目录 ----------
+  // pnpm deploy 会把 server 包整目录复制过来，实测带进：data/（本机测试库 60MB）、src/（TS 源码）、
+  // *.spec.ts（测试）、vitest/eslint 配置。安装包只应包含 dist + 生产依赖。
+  step('剔除源码与本地测试库…');
+  const stripTargets = ['data', 'src', 'scripts', 'test', 'tests', 'coverage', '.turbo'];
+  let stripped = 0;
+  let strippedBytes = 0;
+  for (const name of stripTargets) {
+    const target = path.join(serverBundleDir, name);
+    if (!fs.existsSync(target)) continue;
+    strippedBytes += dirSizeLite(target);
+    fs.rmSync(target, { recursive: true, force: true });
+    stripped += 1;
+  }
+  // 递归删除 spec/test 与 sourcemap（安装包不需要，且会泄漏测试内部结构）
+  const walkRemove = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name === 'node_modules' || e.name === '.pnpm') continue;
+        walkRemove(full);
+      } else if (/\.(spec|test)\.(ts|tsx|js|mjs|cjs)$/.test(e.name)) {
+        strippedBytes += fs.statSync(full).size;
+        fs.rmSync(full, { force: true });
+        stripped += 1;
+      }
+    }
+  };
+  try {
+    walkRemove(serverBundleDir);
+  } catch {
+    /* ignore */
+  }
+  ok(`已剔除 ${stripped} 项（源码/测试/本地库），释放 ${(strippedBytes / 1024 / 1024).toFixed(0)} MB`);
 
   // ---------- 2. web 静态产物 ----------
   step('复制前端产物…');
