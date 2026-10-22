@@ -24,6 +24,11 @@ export class DocumentsService {
     private readonly refs: ReferencesService,
   ) {}
 
+  /** 全部文档（仅本地/桌面单用户模式；企业模式由控制器拒绝） */
+  listAll() {
+    return db.select().from(documents).orderBy(documents.updatedAt).all();
+  }
+
   list(projectId: string) {
     return db.select().from(documents).where(eq(documents.projectId, projectId)).orderBy(documents.updatedAt).all();
   }
@@ -429,8 +434,14 @@ export class DocumentsService {
       if (idx >= 0 && (cut === -1 || idx < cut)) cut = idx;
     }
     const body = cut >= 0 ? content.slice(0, cut) : content;
+    // 锚点识别：兼容 `[n]`、`[Ref:n]`、`【n】` 与上标形式 `^[n]`（历史缺陷：只认 `[n]`，
+    // 导致正文用 `[Ref:1]` 时 audit 认为 0 锚点、直接给满分「假绿」）。
     const anchorNums = new Set<number>();
-    for (const m of body.matchAll(/\[(\d{1,3})\]/g)) {
+    for (const m of body.matchAll(/\[\s*(?:Ref\s*[:：]\s*)?(\d{1,3})\s*\]/gi)) {
+      const n = Number(m[1]);
+      if (n > 0) anchorNums.add(n);
+    }
+    for (const m of body.matchAll(/【\s*(\d{1,3})\s*】/g)) {
       const n = Number(m[1]);
       if (n > 0) anchorNums.add(n);
     }
@@ -447,7 +458,12 @@ export class DocumentsService {
     if (rows.length === 0 && anchorNums.size > 0) issues.push('红牌：正文有锚点但 citation 表为空——文档未经引用渲染流程');
     if (noDoi > 0) issues.push(`黄牌：${noDoi} 条已绑定引用无 DOI，可信度待核`);
     if (issues.length === 0 && anchorNums.size > 0) issues.push('绿牌：全部锚点已绑定且具备 DOI 可信度');
-    const score = Math.max(0, 100 - ghost * 20 - (rows.length === 0 && anchorNums.size > 0 ? 60 : 0) - noDoi * 5);
+    // 无锚点不再直接算「满分」：此前 0 锚点 → issues 为空 + score=100，用户会误以为引用体检通过。
+    // 现在显式给「未检测到引用」提示并封顶 60（不是错误，但也不是通过）。
+    const noAnchors = anchorNums.size === 0;
+    if (noAnchors) issues.push('提示：正文未检测到引用锚点（[n] / [Ref:n] / 【n】），无法评估引用完整性');
+    const base = noAnchors ? 60 : 100;
+    const score = Math.max(0, base - ghost * 20 - (rows.length === 0 && anchorNums.size > 0 ? 60 : 0) - noDoi * 5);
     return {
       anchorTotal: anchorNums.size,
       maxAnchor,

@@ -1043,6 +1043,23 @@ if p26id:
     st, _na = req("GET", "/api/documents/non-exist-id-xyz/citation-audit")
     check("27.3 不存在文档 citation-audit 返回 404", st == 404, f"st={st}")
 
+    # 27.4 兼容 [Ref:n] 锚点（历史缺陷：只认 [n]，正文用 [Ref:1] 时 anchorTotal=0 → 假满分）
+    st4, d4 = req("POST", "/api/documents", {"projectId": p26id, "title": "Ref锚点文档"})
+    d4id = d4.get("id") if st4 == 201 else None
+    if d4id:
+        req("PATCH", f"/api/documents/{d4id}", {"content": "## 引言\n依据[Ref:1]与[Ref:2]。"})
+        st5, da = req("GET", f"/api/documents/{d4id}/citation-audit")
+        check("27.4 [Ref:n] 锚点可识别且幽灵引用受罚",
+              st5 == 200 and da.get("anchorTotal") == 2 and da.get("ghost") == 2 and da.get("score", 100) < 60,
+              f"body={str(da)[:160]}")
+        # 27.5 无锚点不再是「满分假绿」
+        req("PATCH", f"/api/documents/{d4id}", {"content": "## 引言\n本文没有任何引用标注。"})
+        st6, db_ = req("GET", f"/api/documents/{d4id}/citation-audit")
+        check("27.5 无锚点时 score 封顶 60 且给出提示",
+              st6 == 200 and db_.get("anchorTotal") == 0 and db_.get("score", 100) <= 60
+              and any("未检测到引用" in str(i) for i in (db_.get("issues") or [])),
+              f"body={str(db_)[:160]}")
+
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL} / KNOWN(存量缺口) {KNOWN}")
 if KNOWN_FAILED:

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { CommonModule } from './common/common.module';
 import { AiModule } from './ai/ai.module';
 import { AgentTraceModule } from './agent/agent-trace.module';
 import { AuthModule } from './auth/auth.module';
@@ -37,6 +38,7 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
     }),
     // 全局频率限制：每分钟 60 次（AI 调用 + API），防止 token 成本爆炸 / DoS
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
+    CommonModule,
     AiModule,
     AgentTraceModule,
     AuthModule,

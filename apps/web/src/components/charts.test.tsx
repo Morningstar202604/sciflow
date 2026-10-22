@@ -9,7 +9,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { jsonText } from './ui';
-import { Donut, HBar } from './charts';
+import { Donut, donutCellColors, HBar } from './charts';
 
 vi.mock('recharts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('recharts')>();
@@ -98,6 +98,15 @@ describe('Donut（零值分段配色）', () => {
     expect(aria).toContain('已定稿 1');
     expect(aria).not.toContain('草稿 0');
     expect(aria).not.toContain('评审中 0');
+    // 关键断言（原用例只查 aria-label，把 SERIES[i] 改成 SERIES[(i+3)%] 仍全绿）：
+    // 唯一非零分段必须落到第 1 系列色，而不是按原始下标取第 4 色。
+    const colors = donutCellColors([
+      { label: '草稿', value: 0 },
+      { label: '评审中', value: 0 },
+      { label: '已润色', value: 0 },
+      { label: '已定稿', value: 1 },
+    ].filter((d) => d.value > 0));
+    expect(colors).toEqual(['var(--viz-series-1)']);
   });
 
   it('全部为零：不渲染空环，给出占位', () => {

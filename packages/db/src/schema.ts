@@ -12,6 +12,8 @@ export const projects = sqliteTable('project', {
   preface: text('preface').default(''),
   /** 差距#1：自定义大纲模板（JSON 字符串：[{name,description,sections:[{title,points}]}]） */
   templates: text('templates').default('[]'),
+  /** 归属用户（AUTH_MODE=jwt 企业模式使用；空串=本地单用户模式的公共项目） */
+  ownerId: text('owner_id').default(''),
 });
 
 /** 文档（论文草稿，多版本历史以 JSON 保存在 versions） */

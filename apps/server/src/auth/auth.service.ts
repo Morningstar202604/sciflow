@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
@@ -38,6 +38,20 @@ export class AuthService {
     if (existing) throw new BadRequestException('该邮箱已注册，请直接登录');
 
     const count = db.select({ id: users.id }).from(users).all().length;
+
+    // 开放注册闸门（安全审计 2026-10）：
+    // /api/auth/register 是 @Public()。若对外暴露且允许任意注册，任何人都能自助开账号；
+    // 更严重的是「首位注册者自动 admin」——空库时第一个匿名请求就拿到管理员。
+    // 策略：
+    //  - 空库首次注册 = 初始化管理员，始终允许（否则无法完成首次部署）
+    //  - 已有用户后默认关闭注册；确需开放协作时显式 ALLOW_REGISTRATION=1
+    const allowOpen = process.env.ALLOW_REGISTRATION === '1';
+    if (count > 0 && !allowOpen) {
+      throw new ForbiddenException(
+        '注册已关闭（已存在用户）。如需开放注册，请设置 ALLOW_REGISTRATION=1 后重启；' +
+          '或由管理员在服务端直接创建账号。',
+      );
+    }
     const role = count === 0 ? 'admin' : 'member'; // 首位用户自动成为管理员
     const row: typeof users.$inferInsert = {
       id: randomUUID(),

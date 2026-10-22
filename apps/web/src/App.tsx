@@ -306,6 +306,7 @@ function AppInner() {
         <div className="h-full text-slate-800 dark:text-slate-100">
           <AppShell
             sidebarWidth={224}
+            toolbarTitle={VIEW_LABELS[view]}
             sidebar={
               <SidebarContent
                 view={view}

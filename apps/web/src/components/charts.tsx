@@ -119,6 +119,15 @@ function normalizeDonutData(input: DonutDataPoint[] | undefined): DonutDataPoint
     .map((d) => ({ name: d.name || d.label || '', value: d.value, color: d.color }));
 }
 
+/**
+ * 圆环每段的填充色（纯函数，便于测试）。
+ * 关键语义：配色按「过滤零值后的有效分段顺序」分配 —— 只有「已定稿=1」时整环必须是
+ * 第 1 系列色，而不是按原始下标取到第 4 色（历史缺陷，实拍为紫色）。
+ */
+export function donutCellColors(chartData: DonutDataPoint[]): string[] {
+  return chartData.map((e, i) => e.color ?? SERIES[i % SERIES.length]);
+}
+
 export function Donut({ data, segments, size = 160, thickness = 24, centerLabel, centerValue }: DonutProps) {
   const chartData = normalizeDonutData(data || segments);
   if (!chartData.length) return <ChartEmpty message="暂无数据" />;
@@ -129,9 +138,10 @@ export function Donut({ data, segments, size = 160, thickness = 24, centerLabel,
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={size / 2 - thickness} outerRadius={size / 2} paddingAngle={2} stroke="none" isAnimationActive={false}>
-            {chartData.map((e, i) => (
-              <Cell key={`${e.name}-${i}`} fill={e.color ?? SERIES[i % SERIES.length]} />
-            ))}
+            {chartData.map((e, i) => {
+              const fills = donutCellColors(chartData);
+              return <Cell key={`${e.name}-${i}`} fill={fills[i]} />;
+            })}
             {centerLabel && <Label value={centerLabel} position="center" fill="var(--muted-foreground)" fontSize={11} />}
             {centerValue != null && <Label value={centerValue} position="center" fill="var(--foreground)" fontSize={20} fontWeight={500} dy={12} />}
           </Pie>

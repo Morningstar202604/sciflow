@@ -24,8 +24,12 @@ const updateProjectSchema = z.object({
 
 @Injectable()
 export class ProjectsService {
-  list() {
-    return db.select().from(projects).orderBy(projects.updatedAt).all();
+  list(ownerId = '') {
+    // ownerId 为空 = 本地/桌面模式：返回全部（历史行为）
+    // 非空 = 企业模式：只返回归属该用户的（含历史 owner_id 为空的公共项目？不给：
+    // 企业模式下未归属的项目一律不可见，避免跨用户数据泄露）
+    if (!ownerId) return db.select().from(projects).orderBy(projects.updatedAt).all();
+    return db.select().from(projects).where(eq(projects.ownerId, ownerId)).orderBy(projects.updatedAt).all();
   }
 
   get(id: string) {
@@ -34,7 +38,7 @@ export class ProjectsService {
     return row;
   }
 
-  create(input: { name: string; description?: string }) {
+  create(input: { name: string; description?: string }, ownerId = '') {
     const validated = createProjectSchema.parse(input);
     const now = Date.now();
     const row = {
@@ -44,6 +48,8 @@ export class ProjectsService {
       status: 'active',
       createdAt: now,
       updatedAt: now,
+      // 企业模式：记录归属；本地模式为空串（公共项目）
+      ownerId,
     };
     db.insert(projects).values(row).run();
     return row;

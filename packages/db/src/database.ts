@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS project (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   preface TEXT DEFAULT '',
-  templates TEXT DEFAULT '[]'
+  templates TEXT DEFAULT '[]',
+  owner_id TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS document (
@@ -497,6 +498,9 @@ ensureColumn('project', 'preface', "TEXT DEFAULT ''");
 ensureColumn('project', 'templates', "TEXT DEFAULT '[]'");
 // 调用类型：llm=模型调用，tool=工具调用（分开统计，避免工具污染 token 成本看板）
 ensureColumn('llm_call_log', 'kind', "TEXT DEFAULT 'llm'");
+// 企业模式（AUTH_MODE=jwt）：项目归属，用于按用户隔离数据（防 IDOR）
+ensureColumn('project', 'owner_id', "TEXT DEFAULT ''");
+sqlite.exec('CREATE INDEX IF NOT EXISTS idx_project_owner ON project(owner_id)');
 
 // ---------- 迁移：knowledge_chunk_fts 从 unicode61 升级到 trigram ----------
 // 原因：unicode61 不切分 CJK（整段中文是一个 token），中文短语检索永远命中不到；

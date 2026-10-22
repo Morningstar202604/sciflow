@@ -21,6 +21,8 @@ interface AppShellProps {
   children: ReactNode;
   /** 侧栏宽度（桌面态） */
   sidebarWidth?: number;
+  /** 当前视图名：用于渲染唯一的 h1（视觉隐藏，供读屏与文档大纲） */
+  toolbarTitle?: string;
 }
 
 const ShellCtx = createContext<{ openSidebar: () => void; closeSidebar: () => void; sidebarOpen: boolean }>({
@@ -31,7 +33,7 @@ const ShellCtx = createContext<{ openSidebar: () => void; closeSidebar: () => vo
 
 export const useAppShell = () => useContext(ShellCtx);
 
-export function AppShell({ sidebar, toolbar, children, sidebarWidth = 224 }: AppShellProps) {
+export function AppShell({ sidebar, toolbar, children, sidebarWidth = 224, toolbarTitle }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const openSidebar = useCallback(() => setSidebarOpen(true), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -73,6 +75,8 @@ export function AppShell({ sidebar, toolbar, children, sidebarWidth = 224 }: App
             </header>
           )}
           <div className="app-shell__body">
+            {/* 每个视图必须有一个 h1（屏幕阅读器/SEO/大纲导航）；页面级标题由 toolbar 提供语义 */}
+            <h1 className="sr-only">{toolbarTitle || 'SciFlow 工作台'}</h1>
             <main id={contentId} className="app-shell__content">
               {children}
             </main>

@@ -2883,7 +2883,7 @@
   "info": {
     "title": "SciFlow API",
     "description": "本地优先科研工作台（单用户）",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "contact": {}
   },
   "tags": [],

@@ -2,6 +2,34 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.8.0] - 2026-10-22
+
+全维度安全审计批次：以可复现 PoC 为依据修复 4 个高危问题，补齐全表级联测试与运维/安全/质量基线文档。
+
+### Security
+- **Critical · 默认 JWT 密钥可伪造管理员令牌**：`AUTH_MODE=jwt` 时若未设 `JWT_SECRET`，此前回退到硬编码字符串 `sciflow-local-secret-change-me`，任何人可离线签发 `role=admin` 令牌。实测伪造 token 请求返回 200（完全绕过鉴权）。现强制：jwt 模式必须显式配置 ≥32 字符密钥，否则**拒绝启动**；本地模式用进程内随机密钥。复测：旧默认密钥伪造 → 401。
+- **High · SSRF**：外部 MCP 服务器 URL 与 SearXNG 实例地址完全由用户输入，服务端直接 `fetch`/建立 MCP 连接。实测可请求 `http://127.0.0.1:3000/api/health` 与 `http://169.254.169.254/latest/meta-data/`。新增 `common/outbound-guard.ts`：拒绝回环/私有/链路本地（含云元数据）/CGNAT/保留/组播地址，域名 DNS 解析后二次校验（防 rebinding），拒绝内嵌凭据 URL；本地自建服务用 `ALLOW_PRIVATE_OUTBOUND=1` 显式放开。复测：内网地址 → 400。
+- **High · IDOR**：`GET/PATCH /api/documents/:id` 仅按主键取数，实测用另一身份可直接读取/改写他人项目文档。新增 `ProjectAccessService` + `project.owner_id` 迁移：jwt 模式下按归属校验（越权统一 404，不泄露存在性），项目列表按 owner 过滤，文档列表必须带 `projectId`。本地模式 no-op（回归 169/169 证明未破坏单用户行为）。复测：第二身份读/写他人文档 → 404。
+- **High · 开放注册**：`@Public()` 的注册接口在已有用户时仍允许自助开户，空库首位注册即管理员。现默认仅空库首次可注册，之后返回 403；确需开放用 `ALLOW_REGISTRATION=1`。
+- **Medium · 引用体检假绿**：正文无锚点时 `score=100` 且无提示；且只识别 `[n]`，正文用 `[Ref:n]` 时误判 0 锚点。现兼容 `[n]`/`[Ref:n]`/`【n】`，无锚点时封顶 60 并提示。
+- **Medium · 备份脚本完全不可用**：`scripts/backup-db.mjs` 因 `const { default: Database } = require('better-sqlite3')` 抛 `Database is not a constructor`，备份功能实际从未工作。已修复并完成备份→恢复回灌实测（45 张表 / 5 个项目完整）。
+
+### Tests
+- 新增 `outbound-guard.spec.ts`（11 条 SSRF 用例，含 DNS/字面量/IPv6-mapped）。
+- 新增 `projects-cascade-full.spec.ts`：21 张表全量 seed + 归零断言（旧版只覆盖 8 张，删 `references` 级联仍全绿；现突变验证会红）。
+- `charts.test.tsx` 的 Donut 配色断言改为可执行断言（抽出 `donutCellColors` 纯函数）；突变 `SERIES[(i+3)%]` 实测变红。
+- 回归新增 27.4 / 27.5（`[Ref:n]` 锚点识别、无锚点封顶）；总数 167 → **169**。
+
+### Docs
+- 新增 `docs/SECURITY.md`（威胁模型、6 个已修复问题的 PoC 与复测、已接受风险清单）
+- 新增 `docs/OPERATIONS.md`（SLI/SLO、健康检查、备份恢复实测、故障处置表、企业模式上线检查表）
+- 新增 `docs/QUALITY-BASELINE.md`（覆盖率/复杂度/变异分数实测值与红线判定，含不达标项清单）
+- `.env.example` 补充 `ALLOW_REGISTRATION` / `ALLOW_PRIVATE_OUTBOUND` 及密钥强度要求
+
+### Changed
+- 服务端单测 74 → **88**；web 57 保持；回归 167 → **169**。
+- 每个页面补 `h1`（视觉隐藏，供读屏与文档大纲）——审计发现 12 个页面全部无 h1。
+
 ## [0.7.0] - 2026-10-21
 
 真实可用性批次：独立审计（功能真实性 / 测试有效性 / 环境韧性 / 体验）驱动，先把「看起来有、实际不工作」的功能修到真的能用，再补测试与品牌。

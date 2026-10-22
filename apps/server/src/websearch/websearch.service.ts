@@ -23,6 +23,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
 import { sqlite } from '../db/database';
 import { webSearchCache } from '../db/schema';
+import { allowPrivateOutbound, checkOutboundUrl } from '../common/outbound-guard';
 
 export interface SearchResult {
   title: string;
@@ -274,6 +275,10 @@ export class WebSearchService {
   // ---------- 基础设施 ----------
 
   private async fetchJson(url: string, init: RequestInit = {}): Promise<any> {
+    // SSRF 防护：SearXNG 地址来自用户配置，可能指向内网/云元数据。
+    // 本地自建 SearXNG（127.0.0.1:8080）是主流用法，因此只需显式开关放行私有网段。
+    const guard = await checkOutboundUrl(url, { allowPrivate: allowPrivateOutbound() });
+    if (!guard.ok) throw new Error(`出站地址被拒绝：${guard.reason}`);
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 10_000);
     try {

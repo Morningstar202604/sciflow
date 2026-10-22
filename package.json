@@ -1,6 +1,6 @@
 {
   "name": "sciflow",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "SciFlow - 全自动 AI 科研助手（多 Agent 编排流水线）",
   "scripts": {
@@ -29,6 +29,7 @@
   "devDependencies": {
     "@playwright/test": "^1.64.0",
     "@resvg/resvg-js": "^2.6.2",
+    "@vitest/coverage-v8": "^5.0.5",
     "concurrently": "^10.0.5",
     "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",

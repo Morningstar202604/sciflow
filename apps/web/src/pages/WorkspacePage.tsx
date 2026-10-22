@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Brain, Check, Copy, ExternalLink, FilePlus2, Globe, Loader2, PlayCircle, RotateCcw, Send, Square, Trash2, Workflow } from 'lucide-react';
+import { Brain, Check, Copy, ExternalLink, FilePlus2, Globe, Loader2, PlayCircle, RotateCcw, Send, Sparkles, Square, Trash2, Workflow } from 'lucide-react';
 import { Streamdown } from 'streamdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -372,7 +372,36 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
         <div className="flex-1 min-w-0 flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
           <div ref={threadRef} data-testid="chat-thread" className="flex-1 overflow-y-auto p-3.5 space-y-3">
             {messages.length === 0 && (
-              <Empty text="开始与 SciFlow 对话" hint="让 AI 起草章节、润色、答疑；或点上方「运行流水线」一键成稿——产物可在预览中查看" />
+              <div className="pt-4">
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <div className="w-11 h-11 rounded-xl brand-logo flex items-center justify-center">
+                    <Sparkles size={19} className="text-white" aria-hidden="true" />
+                  </div>
+                  <div className="text-sm font-medium text-slate-600 dark:text-slate-300">开始与 SciFlow 对话</div>
+                  <div className="text-xs text-slate-400 dark:text-slate-500 max-w-md">
+                    让 AI 起草章节、润色、答疑；或点上方「运行流水线」一键成稿——产物可在预览中查看
+                  </div>
+                </div>
+                <div className="mt-5 grid sm:grid-cols-2 gap-2 max-w-2xl mx-auto">
+                  {[
+                    { t: '起草一段引言', d: '基于当前文档与知识库', q: '请基于当前文档和知识库资料，起草「引言」一节（600 字左右，学术风格，引用使用 [n] 锚点）。' },
+                    { t: '润色这段正文', d: '提升表达与逻辑', q: '请润色当前文档正文，提升学术表达与逻辑连贯性，并说明主要修改点。' },
+                    { t: '找研究空白', d: '从文献库归纳', q: '请基于我的文献库，找出该方向尚未被充分研究的问题，并给出 3 个可执行的选题。' },
+                    { t: '解释一个概念', d: '由浅入深 + 例子', q: '请由浅入深解释图神经网络的消息传递机制，并给一个直观例子。' },
+                  ].map((c) => (
+                    <button
+                      key={c.t}
+                      onClick={() => setInput(c.q)}
+                      className="text-left rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--card)] p-3 hover:border-teal-400 hover:bg-teal-50/40 dark:hover:bg-teal-900/10 transition-colors"
+                    >
+                      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                        <Sparkles size={12} className="text-teal-600" aria-hidden="true" /> {c.t}
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">{c.d}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             {messages.map((m, i) => (
               <div key={i}>

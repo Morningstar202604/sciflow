@@ -1,33 +1,50 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common';
 import { DocumentsService } from './documents.service';
+import { ProjectAccessService } from '../common/project-access.service';
+import type { AuthPayload } from '../auth/auth.service';
 
 @Controller('documents')
 export class DocumentsController {
-  constructor(private readonly documents: DocumentsService) {}
+  constructor(
+    private readonly documents: DocumentsService,
+    private readonly access: ProjectAccessService,
+  ) {}
 
   @Get()
-  list(@Query('projectId') projectId: string) {
+  list(@Query('projectId') projectId: string, @Req() req: { user?: AuthPayload }) {
+    // 历史行为：不传 projectId 返回全部（本地/桌面单用户，用于全局搜索等）。
+    // 企业模式必须显式指定项目，否则拒绝——避免一次请求拉走全库文档。
+    if (!projectId) {
+      if (this.access.enforced) throw new BadRequestException('企业模式必须指定 projectId');
+      return this.documents.listAll();
+    }
+    this.access.assertProject(projectId, req.user);
     return this.documents.list(projectId);
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
+  get(@Param('id') id: string, @Req() req: { user?: AuthPayload }) {
+    // 归属校验（企业模式防 IDOR；本地模式 no-op）——此前可直接按 id 读他人项目文档
+    this.access.assertDocument(id, req.user);
     return this.documents.get(id);
   }
 
   /** B-4.3 引用体检：锚点×落库交叉审计（幽灵引用/无 DOI 黄牌/绿牌） */
   @Get(':id/citation-audit')
-  citationAudit(@Param('id') id: string) {
+  citationAudit(@Param('id') id: string, @Req() req: { user?: AuthPayload }) {
+    this.access.assertDocument(id, req.user);
     return this.documents.citationAudit(id);
   }
 
   @Post()
-  create(@Body() body: { projectId: string; title: string }) {
+  create(@Body() body: { projectId: string; title: string }, @Req() req: { user?: AuthPayload }) {
+    this.access.assertProject(body.projectId, req.user);
     return this.documents.create(body.projectId, body);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: { title?: string; content?: string; outline?: string; status?: string }) {
+  update(@Param('id') id: string, @Body() body: { title?: string; content?: string; outline?: string; status?: string }, @Req() req: { user?: AuthPayload }) {
+    this.access.assertDocument(id, req.user);
     return this.documents.update(id, body);
   }
 

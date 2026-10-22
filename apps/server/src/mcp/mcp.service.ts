@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { allowPrivateOutbound, checkOutboundUrl } from '../common/outbound-guard';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { sqlite } from '../db/database';
 import { AiService } from '../ai/ai.service';
@@ -319,6 +320,12 @@ export class McpService {
   private async withExternalClient<T>(url: string, timeoutMs: number, fn: (client: Client) => Promise<T>): Promise<T> {
     const base = String(url || '').replace(/\/$/, '');
     if (!/^https?:\/\//.test(base)) throw new HttpException('URL 需以 http(s):// 开头', HttpStatus.BAD_REQUEST);
+    // SSRF 防护：外部 MCP 地址由用户输入，必须拒绝内网/元数据地址
+    // （本地自建 MCP 需显式 ALLOW_PRIVATE_OUTBOUND=1，见 docs/CONFIGURATION.md）
+    const guard = await checkOutboundUrl(base, { allowPrivate: allowPrivateOutbound() });
+    if (!guard.ok) {
+      throw new HttpException(`外部 MCP 地址被拒绝：${guard.reason}`, HttpStatus.BAD_REQUEST);
+    }
     const client = new Client({ name: 'sciflow', version: '0.4.0' });
     const transport = new StreamableHTTPClientTransport(new URL(base));
     let timer: ReturnType<typeof setTimeout> | undefined;
