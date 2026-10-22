@@ -65,3 +65,4 @@ npm-shrinkwrap.json
 
 # OpenAPI 生成中间库
 openapi.tmp.db*
+dist-release
