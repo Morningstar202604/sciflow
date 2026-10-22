@@ -49,6 +49,23 @@ function dirSizeLite(d) {
   return total;
 }
 
+/**
+ * 校验前端产物是否可用于 file:// 加载。
+ * 绝对路径（/assets/...）在 Electron 里会解析成 file:///C:/assets/... → 全部 404 → 白屏。
+ * 这是 0.7.0/0.8.0 桌面端「打开什么都没有」的根因，必须在此拦截而不是等用户看到白屏。
+ */
+function assertWebRelative() {
+  const indexHtml = path.join(repoRoot, 'apps', 'web', 'dist', 'index.html');
+  const html = fs.readFileSync(indexHtml, 'utf-8');
+  const bad = [...html.matchAll(/(?:src|href)="(\/[^"]*)"/g)].map((m) => m[1]);
+  if (bad.length) {
+    console.error('[prepare] 前端产物使用了绝对路径，Electron 用 file:// 加载会白屏：');
+    for (const b of bad.slice(0, 5)) console.error('  ' + b);
+    console.error('请用相对 base 构建：pnpm --filter @sciflow/web exec vite build --base=./');
+    process.exit(1);
+  }
+}
+
 function assertBuilt() {
   // tsc(rootDir=仓库根) 产物布局：dist/apps/server/src/main.js
   const serverDist = path.join(repoRoot, 'apps', 'server', 'dist', 'apps', 'server', 'src', 'main.js');
@@ -72,7 +89,8 @@ function cleanDir(dir) {
 async function main() {
   step('校验构建产物…');
   assertBuilt();
-  ok('后端 dist 与前端 dist 均就绪');
+  assertWebRelative();
+  ok('后端 dist 与前端 dist 均就绪（前端为相对路径，可用于 file:// 加载）');
 
   // ---------- 1. server bundle：pnpm deploy（pnpm 官方部署机制） ----------
   step('生成自包含 server bundle（pnpm deploy --prod）…');

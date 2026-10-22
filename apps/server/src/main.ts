@@ -95,7 +95,7 @@ async function bootstrap() {
   // OpenAPI 契约：本地文档端点（/api/docs）+ 供 openapi-typescript 生成前端类型（pnpm openapi:gen）
   const openapiDoc = SwaggerModule.createDocument(
     app,
-    new DocumentBuilder().setTitle('SciFlow API').setDescription('本地优先科研工作台（单用户）').setVersion('0.8.0').build(),
+    new DocumentBuilder().setTitle('SciFlow API').setDescription('本地优先科研工作台（单用户）').setVersion('0.8.1').build(),
   );
   SwaggerModule.setup('api/docs', app, openapiDoc);
   // 全局输入校验（轻量兜底，零新增依赖）：仅约束 @Body() 为 JSON 对象，不剥字段、不误伤现有端点

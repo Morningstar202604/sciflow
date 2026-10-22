@@ -2,6 +2,25 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.8.1] - 2026-10-22
+
+### Fixed
+- **桌面端打开后白屏（用户实测反馈「什么都没有」）**：两层根因叠加。
+  1. web 用默认 `base: '/'` 构建，`index.html` 里是 `/assets/*.js`；Electron 通过 `file://` 加载时
+     被解析成 `file:///C:/assets/...` → 全部 404。
+  2. 改成相对路径后仍白屏：`file://` 页面 origin 为 `null`，Chromium 按 CORS 拒绝加载
+     `<script type="module">`（`Access to script ... blocked by CORS policy`）。
+  修复：Electron 注册 `app://` 自定义协议（`standard+secure+corsEnabled`）从 `resources/web`
+  提供静态文件；桌面构建固定 `vite build --base=./`；`prepare-server.mjs` 增加 `assertWebRelative()`
+  打包前强校验；新增 `apps/desktop/src/desktop-assets.spec.ts`（5 条静态契约，突变验证有效）。
+- **桌面端错误不可观测**：新增 `desktop.log`（`%APPDATA%/@sciflow/desktop/logs/`），记录
+  `did-fail-load` / `render-process-gone` / 渲染进程 error 级 console，避免下次只能看到白屏。
+
+### Verified
+- 打包产物实测：窗口标题 `工作台 · SciFlow`；CDP 探针 `root children=2`、`apiBase` 已注入、
+  控制台 0 错误；`#/chat` `#/writing` `#/literature` `#/quality` `#/settings` 路由全部正常。
+- 安装包 `SciFlow-Setup-0.8.1-x64.exe` 662MB；`pnpm --filter @sciflow/desktop dist` 可复现。
+
 ## [0.8.0] - 2026-10-22
 
 全维度安全审计批次：以可复现 PoC 为依据修复 4 个高危问题，补齐全表级联测试与运维/安全/质量基线文档。

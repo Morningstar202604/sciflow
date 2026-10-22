@@ -5,14 +5,28 @@
  * 安全基线：contextIsolation + 无 nodeIntegration + 外链走系统浏览器 + 回环监听
  */
 
-import { app, BrowserWindow, ipcMain, shell, Menu, dialog, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { startServer, isDev, type ServerHandle } from './server-manager';
 import { initAutoUpdater } from './auto-updater';
 
 let serverHandle: ServerHandle | null = null;
 let mainWindow: BrowserWindow | null = null;
 let quitting = false;
+
+// ---------- 桌面端日志（渲染进程错误只在 DevTools 可见，用户看不到 → 落盘便于排查） ----------
+function desktopLog(line: string): void {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'desktop.log'), `[${new Date().toISOString()}] ${line}
+`);
+  } catch {
+    /* 日志失败不影响运行 */
+  }
+  console.log(`[SciFlow Desktop] ${line}`);
+}
 
 // ---------- 全局兜底：后端/更新类异步异常不崩窗口 ----------
 process.on('unhandledRejection', (reason) => {
@@ -21,6 +35,78 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
   console.error('[SciFlow Desktop] uncaughtException:', err.stack || err.message);
 });
+
+// ---------- 自定义协议：app:// ----------
+// 为什么不能用 file://（实测白屏根因）：
+//   1) index.html 里的 ES module 是 `<script type="module">`，Chromium 对 file:// 页面
+//      的模块请求按 CORS 处理，origin 为 null → 直接拒绝（Access to script ... blocked by CORS policy）；
+//   2) 即使改成相对路径，file:// 也不允许 modulepreload/CSS 跨目录加载。
+// 解法：注册一个 standard + secure 的自定义协议，从 resources/web 提供静态文件。
+// 这样页面有正常 origin（app://sciflow），ES module / fetch / localStorage 全部可用。
+const APP_SCHEME = 'app';
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
+  },
+]);
+
+/** resources/web 根目录（打包后 = process.resourcesPath/web；开发时不使用该协议） */
+function webRoot(): string {
+  return path.join(process.resourcesPath, 'web');
+}
+
+/** 注册 app:// 静态文件处理器（含路径穿越防护与 MIME） */
+function registerAppProtocol(): void {
+  const root = path.resolve(webRoot());
+  const MIME: Record<string, string> = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.map': 'application/json; charset=utf-8',
+  };
+
+  protocol.handle(APP_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url);
+      // app://sciflow/<path> → pathname
+      let rel = decodeURIComponent(url.pathname || '/');
+      if (rel === '/' || rel === '') rel = '/index.html';
+      const target = path.resolve(root, '.' + rel);
+      // 路径穿越防护：必须仍在 web 根目录内
+      if (target !== root && !target.startsWith(root + path.sep)) {
+        return new Response('Forbidden', { status: 403 });
+      }
+      if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+        // SPA 回退：未知路径交给 index.html（hash 路由不会触发，但静态资源拼错时更宽容）
+        const fallback = path.join(root, 'index.html');
+        return new Response(fs.readFileSync(fallback), {
+          status: 200,
+          headers: { 'Content-Type': MIME['.html'] },
+        });
+      }
+      const ext = path.extname(target).toLowerCase();
+      return new Response(fs.readFileSync(target), {
+        status: 200,
+        headers: { 'Content-Type': MIME[ext] || 'application/octet-stream' },
+      });
+    } catch (e) {
+      console.error('[SciFlow Desktop] app:// 读取失败:', e);
+      return new Response('Not Found', { status: 404 });
+    }
+  });
+}
 
 // ---------- 单实例锁：二次启动唤起已有窗口 ----------
 const gotLock = app.requestSingleInstanceLock();
@@ -108,6 +194,17 @@ function createWindow(apiBase: string) {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
 
+  // 加载失败/渲染崩溃必须留下证据（否则用户只看到白屏或「Error」页）
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    desktopLog(`did-fail-load code=${code} desc=${desc} url=${url}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    desktopLog(`render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+  mainWindow.webContents.on('console-message', (_e, level, message, line, source) => {
+    if (level >= 2) desktopLog(`renderer[${level}] ${String(message).slice(0, 400)} @${source}:${line}`);
+  });
+
   if (isDev) {
     const devUrl = process.env.SCIFLOW_DEV_WEB_URL || 'http://localhost:5173';
     mainWindow.loadURL(devUrl).catch(() => {
@@ -123,7 +220,11 @@ function createWindow(apiBase: string) {
     });
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    void mainWindow.loadFile(path.join(process.resourcesPath, 'web', 'index.html'));
+    // 走 app:// 而不是 file://：file:// 下 ES module 会被 CORS 拒绝（白屏根因）
+    desktopLog('load app://sciflow/index.html');
+    mainWindow.loadURL('app://sciflow/index.html').catch((e) => {
+      desktopLog(`loadURL 失败: ${e instanceof Error ? e.message : String(e)}`);
+    });
   }
 
   mainWindow.on('closed', () => {
@@ -135,6 +236,9 @@ function createWindow(apiBase: string) {
 // 单实例锁失败时 app.quit() 已触发，此处必须以 gotLock 收口：
 // 否则 quit 过程中 whenReady 仍可能 resolve，第二实例会重复 spawn 后端/开窗。
 async function bootstrap() {
+  // 自定义协议必须在 app ready 之后注册（registerSchemesAsPrivileged 则在模块顶层）
+  registerAppProtocol();
+
   // macOS 必须保留应用菜单：置 null 会导致 Cmd+C/V/Q 等标准编辑快捷键全部失效；
   // Windows/Linux 无菜单栏依赖，保持无菜单（应用内导航 + ⌘K 命令面板）。
   if (process.platform === 'darwin') {

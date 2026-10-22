@@ -7,6 +7,14 @@ import { fileURLToPath } from 'node:url';
 const coreSrc = fileURLToPath(new URL('../../packages/core/src', import.meta.url));
 
 export default defineConfig({
+  /**
+   * 资源基础路径。
+   *  - Web 部署（nginx / 根路径）：'/'，与历史行为一致
+   *  - 桌面端（Electron 用 file:// 加载 index.html）：必须是相对路径 './'
+   *    否则 index.html 里的 /assets/*.js 会被解析成 file:///C:/assets/... → 全部 404 → 白屏
+   *    构建时用 VITE_BASE=./ pnpm --filter @sciflow/web build
+   */
+  base: process.env.VITE_BASE || '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@sciflow/core': coreSrc },

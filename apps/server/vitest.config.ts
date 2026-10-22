@@ -24,7 +24,9 @@ export default defineConfig({
     // 同时扫描接口层(src)与能力层(packages)的测试。
     // 历史问题：只 include 'src/**/*.spec.ts'，导致 packages/ 下的测试从未被执行——
     // 写了等于没写（静默不被发现）。
-    include: ['src/**/*.spec.ts', '../../packages/*/src/**/*.spec.ts'],
+    // 同时扫描接口层(src)、能力层(packages)与桌面端契约测试(apps/desktop/src)。
+    // 桌面端白屏回归（2026-10-22）就是缺这层静态契约测试才漏到用户手里。
+    include: ['src/**/*.spec.ts', '../../packages/*/src/**/*.spec.ts', '../desktop/src/**/*.spec.ts'],
     environment: 'node',
     // 共享同一个 SQLite 文件的 spec 必须串行，否则 WAL 层并发写会随机 I/O error。
     // 单线程下总耗时仍在可接受范围（~15s）；优先保证确定性。
