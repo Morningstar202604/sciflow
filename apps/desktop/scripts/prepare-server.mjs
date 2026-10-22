@@ -55,7 +55,7 @@ function dirSizeLite(d) {
  * 这是 0.7.0/0.8.0 桌面端「打开什么都没有」的根因，必须在此拦截而不是等用户看到白屏。
  */
 function assertWebRelative() {
-  const indexHtml = path.join(repoRoot, 'apps', 'web', 'dist', 'index.html');
+  const indexHtml = path.join(repoRoot, 'apps', 'web', 'dist-desktop', 'index.html');
   const html = fs.readFileSync(indexHtml, 'utf-8');
   const bad = [...html.matchAll(/(?:src|href)="(\/[^"]*)"/g)].map((m) => m[1]);
   if (bad.length) {
@@ -69,7 +69,8 @@ function assertWebRelative() {
 function assertBuilt() {
   // tsc(rootDir=仓库根) 产物布局：dist/apps/server/src/main.js
   const serverDist = path.join(repoRoot, 'apps', 'server', 'dist', 'apps', 'server', 'src', 'main.js');
-  const webDist = path.join(repoRoot, 'apps', 'web', 'dist', 'index.html');
+  const WEB_DESKTOP_DIR = path.join(repoRoot, 'apps', 'web', 'dist-desktop');
+  const webDist = path.join(WEB_DESKTOP_DIR, 'index.html');
   if (!fs.existsSync(serverDist)) {
     console.error('\x1b[31m[prepare]\x1b[0m 缺少后端构建产物，请先执行：pnpm --filter @sciflow/server build');
     process.exit(1);
@@ -275,7 +276,7 @@ async function main() {
   // ---------- 2. web 静态产物 ----------
   step('复制前端产物…');
   cleanDir(webDir);
-  await fs.promises.cp(path.join(repoRoot, 'apps', 'web', 'dist'), webDir, { recursive: true });
+  await fs.promises.cp(path.join(repoRoot, 'apps', 'web', 'dist-desktop'), webDir, { recursive: true });
   ok(`web 资源就绪：${webDir}`);
 
   // ---------- 3. 体积报告 ----------

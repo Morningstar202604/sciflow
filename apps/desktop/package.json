@@ -19,7 +19,7 @@
     "dist:win": "pnpm build:main && pnpm prepare:resources && electron-builder --win --publish never",
     "dist:mac": "pnpm build:main && pnpm prepare:resources && electron-builder --mac --publish never",
     "dist:linux": "pnpm build:main && pnpm prepare:resources && electron-builder --linux --publish never",
-    "build:web": "pnpm --filter @sciflow/web exec vite build --base=./",
+    "build:web": "pnpm --filter @sciflow/web exec vite build --base=./ --outDir dist-desktop",
     "test": "vitest run --config ../../apps/server/vitest.config.ts src"
   },
   "dependencies": {

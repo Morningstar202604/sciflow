@@ -22,7 +22,8 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 
 describe('桌面端静态产物契约', () => {
   it('web 构建产物使用相对资源路径（无 /assets 绝对引用）', () => {
-    const indexPath = path.join(repoRoot, 'apps', 'web', 'dist', 'index.html');
+    // 桌面端专用产物目录（与 web 部署产物 dist/ 分离，避免 base 互相覆盖）
+    const indexPath = path.join(repoRoot, 'apps', 'web', 'dist-desktop', 'index.html');
     if (!existsSync(indexPath)) {
       // 未构建时跳过（CI 会在 build 之后跑该测试）
       return;

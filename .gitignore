@@ -32,6 +32,7 @@ secrets/
 
 # test coverage
 coverage/
+dist-desktop/
 
 # database (local dev)
 *.db
