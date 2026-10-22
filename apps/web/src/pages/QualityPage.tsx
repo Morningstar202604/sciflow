@@ -165,12 +165,12 @@ export function QualityPage({ project }: { project: Project }) {
   })();
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={error} />
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <Gauge size={16} className="brand-gradient-text" />
+          <Gauge size={16} className="text-teal-600 dark:text-teal-300" />
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 mr-2">选择文档进行 7 维质量评分</span>
           <Select
             className="w-full sm:w-64"
@@ -298,7 +298,7 @@ export function QualityPage({ project }: { project: Project }) {
           </Card>
         </div>
       ) : (
-          <Empty text="选择文档并点击「开始评分」后，雷达图、总分与改进建议将在这里展示" />
+          <Empty illustration="documents" text="选择一篇文档并开始评分" hint="评分后这里会显示 7 维雷达图、总分趋势与可执行的改进建议" />
       )}
     </div>
   );

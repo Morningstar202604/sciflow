@@ -55,6 +55,9 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const [doc, setDoc] = useState<Doc | null>(null);
   const [content, setContent] = useState('');
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'error'>('idle');
+  /** 保存失败时为 true：内容尚未落库，离开页面前必须提醒 */
+  const [dirty, setDirty] = useState(false);
   const [outline, setOutline] = useState<Outline | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [error, setError] = useState('');
@@ -177,10 +180,19 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
   const saveNow = useCallback(
     async (manual = false) => {
       if (!docId || content === doc?.content) return;
-      const updated = await api.documents.update(docId, { content });
-      setDoc(updated);
-      setSavedAt(Date.now());
-      if (manual) toast('success', '文档已保存');
+      setSaveState('saving');
+      try {
+        const updated = await api.documents.update(docId, { content });
+        setDoc(updated);
+        setSavedAt(Date.now());
+        setSaveState('idle');
+        setDirty(false);
+        if (manual) toast('success', '文档已保存');
+      } catch (e: unknown) {
+        setSaveState('error');
+        setDirty(true);
+        if (manual) toast('error', `保存失败：${errMsg(e)}`);
+      }
     },
     [docId, content, doc?.content, toast],
   );
@@ -195,6 +207,16 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, [content, docId, doc?.content, saveNow]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const onLeave = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onLeave);
+    return () => window.removeEventListener('beforeunload', onLeave);
+  }, [dirty]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -655,11 +677,21 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
   /* ============ 渲染 ============ */
 
+  if (docsQuery.isLoading && docs.length === 0) {
+    return (
+      <div className="max-w-2xl mx-auto space-y-3" role="status" aria-label="加载文档">
+        <div className="skeleton h-9 w-64 rounded-lg" />
+        <div className="skeleton h-[320px] rounded-xl" />
+        <div className="skeleton h-10 rounded-lg" />
+      </div>
+    );
+  }
+
   if (!doc) {
     return (
       <div className="max-w-2xl mx-auto">
         <Card className="p-6">
-          <Empty text="这里空空如也——新建一篇论文，或到「全自动流水线」一键生成初稿" hint="大纲生成 / 章节起草 / 润色 / 翻译 / 降重，全流程 AI 辅助" />
+          <Empty illustration="documents" text="还没有论文草稿" hint="新建一篇从大纲开始写，或到「全自动流水线」一键生成初稿" />
           <div className="flex justify-center">
             <Button onClick={() => setShowNewDoc(true)}>
               <Plus size={15} /> 新建文档
@@ -673,34 +705,36 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
 
   return (
     <div className="h-full flex flex-col">
-      {/* 文档标签栏 + AI 助手入口 */}
-      <div className="doc-tabbar mb-2 shrink-0">
-        {docs.map((d) => (
-          <div
-            key={d.id}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm whitespace-nowrap cursor-pointer border transition-colors ${
-              docId === d.id ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-teal-300'
-            }`}
-            onClick={() => setDocId(d.id)}
-          >
-            <FileText size={13} aria-hidden="true" />
-            {d.title}
-            <button
-              className="opacity-60 hover:opacity-100"
-              aria-label={`删除文档 ${d.title}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setDeletingDoc(d);
-              }}
+      {/* 文档标签栏 + AI 助手入口：操作按钮在滚动区外，窄屏不需要横向滚动才能看到 */}
+      <div className="mb-2 flex items-center gap-2 shrink-0">
+        <div className="doc-tabbar flex-1 min-w-0">
+          {docs.map((d) => (
+            <div
+              key={d.id}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm whitespace-nowrap cursor-pointer border transition-colors ${
+                docId === d.id ? 'bubble-user border-transparent' : 'bg-[var(--card)] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:border-teal-300'
+              }`}
+              onClick={() => setDocId(d.id)}
             >
-              <Trash2 size={12} aria-hidden="true" />
-            </button>
-          </div>
-        ))}
-        <Button variant="outline" onClick={() => setShowNewDoc(true)} className="px-2.5 py-1" title="新建文档">
-          <Plus size={14} aria-hidden="true" />
-        </Button>
-        <Button variant="outline" onClick={() => setChatOpen(true)} className="ml-auto px-2.5 py-1 shrink-0" title="打开 AI 写作助手">
+              <FileText size={13} aria-hidden="true" />
+              {d.title}
+              <button
+                className="opacity-70 hover:opacity-100 p-0.5"
+                aria-label={`删除文档 ${d.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeletingDoc(d);
+                }}
+              >
+                <Trash2 size={12} aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+          <Button variant="outline" onClick={() => setShowNewDoc(true)} className="px-2.5 py-1" title="新建文档" aria-label="新建文档">
+            <Plus size={14} aria-hidden="true" />
+          </Button>
+        </div>
+        <Button variant="outline" onClick={() => setChatOpen(true)} className="px-2.5 py-1 shrink-0" title="打开 AI 写作助手">
           <Sparkles size={13} aria-hidden="true" /> AI 助手
         </Button>
       </div>
@@ -719,12 +753,21 @@ export function WritingPage({ project, initialDocId }: { project: Project; initi
             content={content}
             editorMode={editorMode}
             savedAt={savedAt}
+            saveState={saveState}
+            onRetrySave={() => void saveNow(true)}
             onChangeContent={setContent}
             onTitleBlur={async (newTitle) => {
-              if (!docId) return;
-              const updated = await api.documents.update(docId, { title: newTitle });
-              setDoc(updated);
-              await loadDocs();
+              // 快照 docId：标题框 blur 可能发生在切换文档之后（历史缺陷：把 A 的标题写进 B）
+              const targetId = docId;
+              if (!targetId) return;
+              try {
+                const updated = await api.documents.update(targetId, { title: newTitle });
+                if (targetId !== docId) return;
+                setDoc(updated);
+                await loadDocs();
+              } catch (e: unknown) {
+                toast('error', `标题保存失败：${errMsg(e)}`);
+              }
             }}
             onModeChange={setEditorMode}
             renderPreview={previewSlot}

@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A520%20(CI%2022)-339933.svg)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-11.7.0-f69220.svg)](package.json)
-[![version](https://img.shields.io/badge/version-0.4.2-black.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.9.0-black.svg)](CHANGELOG.md)
 
 > **🌐 Language / 语言：[English](README.en.md) · [中文](README.md)**
 
@@ -21,19 +21,46 @@ SciFlow is a **local-first, single-machine** AI research assistant: give it a re
 
 ## 📸 Screenshots
 
-| Chat Workspace · default view | Pipeline · Agent Orchestration |
-| --- | --- |
-| ![Chat workspace](docs/screenshots/workspace.png) | ![Pipeline](docs/screenshots/pipeline.png) |
+> All screenshots are taken from the real running app (1600×1000, local mock gateway, demo data seeded by `scripts/seed-demo.mjs`) — no collage or retouching.
 
-| Writing · Outline + AI assistant + math | Quality · 7-Dimension Radar + Feedback |
-| --- | --- |
-| ![Writing](docs/screenshots/writing.png) | ![Quality](docs/screenshots/quality.png) |
+![Chat Workspace](docs/screenshots/workspace.png)
 
-| Literature Library · screening & coding matrix | Knowledge Base RAG · grounded Q&A |
+| Pipeline · multi-agent orchestration | Quality · 7-dimension radar |
 | --- | --- |
-| ![Literature](docs/screenshots/literature.png) | ![Knowledge](docs/screenshots/knowledge.png) |
+| ![Pipeline](docs/screenshots/pipeline.png) | ![Quality](docs/screenshots/quality.png) |
 
-> Screenshots come from the real running UI (local deployment, verified against the built-in AI gateway).
+| Writing · outline + split preview | Literature · screening & reading state |
+| --- | --- |
+| ![Writing](docs/screenshots/writing.png) | ![Literature](docs/screenshots/literature.png) |
+
+| Knowledge base · grounded Q&A | Dashboard · end-to-end todos |
+| --- | --- |
+| ![Knowledge](docs/screenshots/knowledge.png) | ![Dashboard](docs/screenshots/dash.png) |
+
+| Research chat · sessions & sources | Settings · usage & cost |
+| --- | --- |
+| ![Chat](docs/screenshots/chat.png) | ![Settings](docs/screenshots/settings.png) |
+
+| Experiments · local Python sandbox | Submission · journals / cover letter / tracking |
+| --- | --- |
+| ![Experiments](docs/screenshots/experiments.png) | ![Submission](docs/screenshots/submission.png) |
+
+| Memory center · episodic / procedural | Dark theme · follow system |
+| --- | --- |
+| ![Memory](docs/screenshots/memory.png) | ![Dark theme](docs/screenshots/settings-dark.png) |
+
+**24-second product tour**: [`docs/media/demo.mp4`](docs/media/demo.mp4) (recorded with Playwright against the real UI).
+
+### Design language
+
+| Dimension | Spec |
+| --- | --- |
+| Brand | One-stroke flowing "S" + research-fluid gradient (teal → cyan → sky), see [`docs/BRAND.md`](docs/BRAND.md) |
+| Color | All three gradient stops ≥ 4.5:1 with white text; `--on-brand` switches to deep ink in dark mode (≥ 6.8:1) |
+| Layout | One `--page-max: 1152px` container for all content pages |
+| Type | Body 14px / secondary 12px / minimum 11px; 1.6–1.75 line height for mixed CJK/Latin |
+| Theme | Light / Dark / Follow system (inline boot script, no white flash) |
+| A11y | Site-wide h1, focus rings, modal focus trap, Esc, touch-visible actions, confirm dialogs for destructive ops |
 
 ## ✨ Features
 
@@ -83,7 +110,7 @@ SciFlow is a **local-first, single-machine** AI research assistant: give it a re
 | Backend `apps/server` | NestJS 11 · TypeScript (strict) · Drizzle ORM · better-sqlite3 (WAL) · Vercel AI SDK (OpenAI-compatible) · LangGraph (orchestration / checkpoint resume / interrupts) · official MCP SDK · zod · helmet + pino · in-process MSW mock gateway |
 | Frontend `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · TanStack Query / Table · Recharts · sigma.js + graphology · streamdown (streaming Markdown) · CodeMirror 6 · react-markdown + KaTeX |
 | Desktop `apps/desktop` | Electron 41 (embedded Node 24, native `require(ESM)`) · embedded backend (`ELECTRON_RUN_AS_NODE`) · local SQLite (userData-isolated, native modules auto-rebuilt for the Electron ABI when packaging) · electron-builder · electron-updater (opt-in) |
-| Engineering | pnpm workspace · vitest (server 74 / web 57) · Playwright smoke · promptfoo prompt-contract evals · GitHub Actions with 3 jobs (types/unit/build · full regression · E2E+evals) · Python 3 regression script (167 checks) |
+| Engineering | pnpm workspace · vitest (server 99 / web 62) · Playwright smoke · promptfoo prompt-contract evals · GitHub Actions with 3 jobs (types/unit/build · full regression · E2E+evals) · Python 3 regression script (167 checks) |
 
 **Architecture overview**
 
@@ -173,7 +200,7 @@ Compatible endpoints (any of these, always `base_url` + model name): DeepSeek `h
 pnpm --filter @sciflow/server typecheck
 pnpm --filter @sciflow/web typecheck
 
-# Unit tests (vitest: server 68 + web 50)
+# Unit tests (vitest: server 99 + web 62)
 pnpm --filter @sciflow/server test
 pnpm --filter @sciflow/web test
 

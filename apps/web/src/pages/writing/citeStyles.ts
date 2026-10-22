@@ -13,7 +13,7 @@ export const CITE_STYLES: CiteStyleMeta[] = [
   { value: 'gbt', label: 'GB/T 7714', inText: '[n]', numbered: true },
   { value: 'nature', label: 'Nature', inText: '[n]', numbered: true },
   { value: 'chicago', label: 'Chicago 著者-年', inText: '(Surname Year)', numbered: false },
-  { value: 'springer', label: 'Springer', inText: '[n]', numbered: true },
+  { value: 'springer', label: 'Springer（著者-年）', inText: '(Surname Year)', numbered: false },
   { value: 'acs', label: 'ACS', inText: '[n]', numbered: true },
 ];
 

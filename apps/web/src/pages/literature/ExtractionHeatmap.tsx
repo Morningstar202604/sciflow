@@ -114,7 +114,7 @@ export function ExtractionHeatmap({
           })}
         </svg>
       </div>
-      <div className="mt-1.5 flex items-center gap-3 text-[10px] text-slate-400 dark:text-slate-500">
+      <div className="mt-1.5 flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500">
         <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'var(--viz-series-1)', opacity: 0.85 }} /> 已填写</span>
         <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'var(--muted)' }} /> 待补录</span>
         <span>列号对应文献顺序</span>

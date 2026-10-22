@@ -168,7 +168,7 @@ export function LiteraturePage({ project }: { project: Project }) {
   const hasRefs = refs.length > 0;
 
   return (
-    <div className="max-w-6xl mx-auto min-w-0">
+    <div className="page-container min-w-0">
       {/* min-w-0：网格子项默认 min-width:auto，窄屏下会被 828px 的卡片内容撑破并裁切（390 实测） */}
       <div className="grid lg:grid-cols-2 gap-4 min-w-0 items-start [&>*]:min-w-0">
         {/* Left column: search + library list + screening queue + extraction table */}

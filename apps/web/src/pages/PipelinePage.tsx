@@ -397,12 +397,12 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={error} />
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 mb-3 text-slate-700 dark:text-slate-200 font-semibold">
-          <Workflow size={16} className="brand-gradient-text" /> 一键全自动流水线
+          <Workflow size={16} className="text-teal-600 dark:text-teal-300" /> 一键全自动流水线
         </div>
         <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
           输入研究主题 → 多智能体自动完成 文献调研 → 大纲确认 → 分章起草 → 7 维质量门（&lt;80 自动回炉打磨）→ 润色定稿 → 引用格式化
@@ -433,7 +433,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                 }`}
               >
                 {tpl.label}
-                {!tpl.builtin && <span className="ml-1 text-[9px] opacity-60">自</span>}
+                {!tpl.builtin && <span className="ml-1 text-[11px] opacity-60">自</span>}
               </button>
             ))}
           </div>
@@ -479,7 +479,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
           hint="在上方输入研究主题启动自动流水线；或先选中大纲模板，点「一键套用为草稿」直接进入写作页。"
         />
       ) : (
-        <div className="grid lg:grid-cols-3 gap-4">
+        <div className="grid lg:grid-cols-3 gap-4 [&>*]:min-w-0">
           {/* 任务列表 */}
           <Card className="p-3 lg:col-span-1">
             <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">任务记录</div>
@@ -635,7 +635,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                         })()}
                         {activeTrace.map((t, i) => (
                           <div key={i} className="flex items-start gap-2 text-xs">
-                            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 text-[10px]">
+                            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 text-[11px]">
                               {t.round}
                             </span>
                             <div className="flex-1 min-w-0">
@@ -677,7 +677,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                 {active.status === 'awaiting_confirmation' && (
                   <Card className="p-3 bg-amber-50 border-amber-200">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-amber-800">大纲已生成，请确认后继续起草（Human-in-the-loop）</span>
+                      <span className="text-sm font-medium text-amber-800">大纲已生成，请确认后继续起草（人工确认）</span>
                       <Button variant="success" className="text-xs" onClick={openConfirm}>
                         查看 / 编辑大纲
                       </Button>

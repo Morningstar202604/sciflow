@@ -7,10 +7,10 @@ import { ReferenceNetwork } from './ForceGraph';
 export type Tool = 'summary' | 'extract' | 'evidence' | 'deepdive' | 'gap' | 'compare' | 'graph';
 
 export const TOOLS: { key: Tool; label: string; icon: typeof ListChecks; hint: string }[] = [
-  { key: 'summary', label: '文献综述', icon: Download, hint: 'STORM 式结构化综述' },
-  { key: 'extract', label: '结构化提取', icon: ListChecks, hint: 'Elicit 式对比表' },
-  { key: 'evidence', label: '证据综合', icon: GitCompareArrows, hint: 'Consensus 式共识度' },
-  { key: 'deepdive', label: '单篇精读', icon: BookOpenCheck, hint: 'Lateral 式论文解剖' },
+  { key: 'summary', label: '文献综述', icon: Download, hint: '结构化综述' },
+  { key: 'extract', label: '结构化提取', icon: ListChecks, hint: '跨文献对比表' },
+  { key: 'evidence', label: '证据综合', icon: GitCompareArrows, hint: '证据共识度' },
+  { key: 'deepdive', label: '单篇精读', icon: BookOpenCheck, hint: '论文精读解剖' },
   { key: 'gap', label: '研究缺口', icon: Lightbulb, hint: '科研选题定位' },
   { key: 'compare', label: '文献对比', icon: Table2, hint: '多篇横向对比表' },
   { key: 'graph', label: '引用网络', icon: Network, hint: '共引/去重关系图' },
@@ -72,17 +72,19 @@ export function LiteratureTools(props: LiteratureToolsProps) {
 
   // Export tabs bar
   const tabsBar = (
-    <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto min-w-0">
+    <div role="tablist" aria-label="文献研究工具" className="flex flex-wrap gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 min-w-0">
       {TOOLS.map((t) => (
         <button
           key={t.key}
+          role="tab"
+          aria-selected={tool === t.key}
+          title={t.hint}
           onClick={() => setTool(t.key)}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 -mb-px whitespace-nowrap shrink-0 ${
-            tool === t.key ? 'border-teal-600 text-teal-700 font-medium' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800'
+          className={`flex items-center gap-1.5 px-2.5 py-2 text-xs border-b-2 -mb-px whitespace-nowrap ${
+            tool === t.key ? 'border-teal-600 text-teal-700 dark:text-teal-300 font-medium' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
-          <t.icon size={14} /> {t.label}
-          <span className="text-[10px] text-slate-400 dark:text-slate-500 hidden lg:inline">({t.hint})</span>
+          <t.icon size={13} aria-hidden="true" /> {t.label}
         </button>
       ))}
     </div>

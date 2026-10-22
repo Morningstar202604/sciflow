@@ -163,7 +163,9 @@ export class ReferencesService {
     // 空元数据守卫：无作者且无年份的条目（如 Agentic RAG 补检的纯标题）不进文献库，
     // 避免污染引用池导致 [Unknown n.d.] / 佚名
     const authorsOk = authorsNorm.length > 0;
-    if (!authorsOk && !hit.year) return null;
+    if (!authorsOk && !hit.year) {
+      throw new BadRequestException('文献元数据不足：作者与年份至少填写一项（避免收录无法引用的空条目）');
+    }
     // 标题归一化指纹去重：命中同项目已存在文献时，新条目标记为其重复（保留两条记录供筛选流程核对）
     const fp = fingerprint(hit.title);
     const dupOf = fp
@@ -202,7 +204,13 @@ export class ReferencesService {
 
   remove(id: string) {
     this.get(id);
-    db.delete(references).where(eq(references.id, id)).run();
+    // 无外键库必须显式清理：citation 孤儿会让 citation-audit 假绿，筛选队列/编码值也会残留
+    db.transaction((tx) => {
+      tx.delete(references).where(eq(references.id, id)).run();
+      tx.delete(citations).where(eq(citations.referenceId, id)).run();
+      tx.delete(screeningQueue).where(eq(screeningQueue.referenceId, id)).run();
+      tx.delete(extractionValues).where(eq(extractionValues.referenceId, id)).run();
+    });
     return { ok: true };
   }
 

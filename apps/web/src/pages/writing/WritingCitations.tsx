@@ -154,7 +154,7 @@ export function WritingCitations({
           const meta = CITE_STYLES.find((s) => s.value === exportFormat);
           if (!meta) return null;
           return (
-            <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+            <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
               文中引用：<span className="font-mono text-slate-500 dark:text-slate-400">{meta.inText}</span>
               {!meta.numbered && '（锚点仍为 [n]，列表按引用序渲染）'}
             </div>
@@ -233,7 +233,7 @@ function CitationPickerModal({
                     {cited && <span className="font-mono text-teal-600 dark:text-teal-400 mr-1">[{citedIdx + 1}]</span>}
                     {r.title}
                   </div>
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500">{[r.year, r.venue].filter(Boolean).join(' · ')}</div>
+                  <div className="text-[11px] text-slate-400 dark:text-slate-500">{[r.year, r.venue].filter(Boolean).join(' · ')}</div>
                 </div>
                 <Button
                   variant="outline"

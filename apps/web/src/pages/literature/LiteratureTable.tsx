@@ -3,7 +3,7 @@ import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type Col
 import { ExtractionHeatmap } from './ExtractionHeatmap';
 import { BookOpenCheck, FileDown, FlaskConical, Loader2, ShieldCheck, StickyNote, Trash2, Upload } from 'lucide-react';
 import type { EvidenceResult, PaperComparisonResult, Project, Reference, ReferenceGraph, DeepDiveResult, GapResult, ExtractedPaper, ExtractionField, ExtractionTableResult, ScreeningItem } from '../../types';
-import { Badge, Button, Card, CollapsibleCard, Empty, ErrorBox, Input, Spinner, Textarea, jsonText, errMsg } from '../../components/ui';
+import { Badge, Button, Card, CollapsibleCard, ConfirmDialog, Empty, ErrorBox, Input, Spinner, Textarea, jsonText, errMsg } from '../../components/ui';
 import { ChartEmpty, Donut, HBar } from '../../components/charts';
 import { ToastContext } from '../../App';
 import { api } from '../../api/client';
@@ -226,9 +226,18 @@ export function LiteratureTable(props: LiteratureTableProps) {
     }
   };
 
-  const removeRef = async (id: string) => {
-    await api.references.remove(id);
-    setRefs((s: Reference[]) => s.filter((r) => r.id !== id));
+  const [deletingRef, setDeletingRef] = useState<{ id: string; title: string } | null>(null);
+  const confirmRemoveRef = async () => {
+    if (!deletingRef) return;
+    try {
+      await api.references.remove(deletingRef.id);
+      setRefs((s: Reference[]) => s.filter((r) => r.id !== deletingRef.id));
+      toast('info', `已移除文献「${deletingRef.title}」`);
+    } catch (e: unknown) {
+      setError(errMsg(e));
+    } finally {
+      setDeletingRef(null);
+    }
   };
 
   // BibTeX/RIS export
@@ -597,7 +606,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
       {/* 检索区 */}
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 mb-2.5 text-slate-700 dark:text-slate-200 font-semibold">
-          <FlaskConical size={15} className="brand-gradient-text" /> 文献调研
+          <FlaskConical size={15} className="text-teal-600 dark:text-teal-300" /> 文献调研
         </div>
         <div className="flex gap-2 flex-wrap">
           <Input
@@ -802,7 +811,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
                       )}
                       {/* 阅读状态机（差距#1）：未读/在读/已读/已引 */}
                       <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                        <span className="text-[10px] text-slate-400 mr-0.5">阅读</span>
+                        <span className="text-[11px] text-slate-400 mr-0.5">阅读</span>
                         {READING_ORDER.map((st) => {
                           const active = (r.readingStatus || 'unread') === st;
                           return (
@@ -811,7 +820,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
                               onClick={() => setReadingStatus(r, st)}
                               className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
                                 active
-                                  ? 'bg-teal-600 text-white border-teal-600'
+                                  ? 'bubble-user border-transparent'
                                   : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-teal-300 hover:text-teal-600'
                               }`}
                               title={`标记为${READING_LABEL[st]}`}
@@ -859,7 +868,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
                     >
                       <BookOpenCheck size={14} />
                     </button>
-                    <button className="text-slate-300 hover:text-rose-500" onClick={() => removeRef(r.id)}>
+                    <button className="p-1 text-slate-400 hover:text-rose-500" aria-label={`删除文献 ${r.title}`} onClick={() => setDeletingRef({ id: r.id, title: r.title })}>
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -1103,6 +1112,15 @@ export function LiteratureTable(props: LiteratureTableProps) {
           </div>
         )}
       </CollapsibleCard>
+      <ConfirmDialog
+        open={!!deletingRef}
+        title="移除文献"
+        description={`确定从文献库移除「${deletingRef?.title ?? ''}」？该文献的引用与编码数据会一并删除，无法恢复。`}
+        confirmText="移除"
+        danger
+        onConfirm={confirmRemoveRef}
+        onClose={() => setDeletingRef(null)}
+      />
     </>
   );
 }

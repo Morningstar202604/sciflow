@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, inArray, asc } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import { Cite } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
 import '@citation-js/plugin-csl';
 import './csl-register'; // 注册官方补缺样式（IEEE/GB-T 7714/Nature/Chicago/Springer/ACS），必须在 Cite 使用前导入
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { documents, citations, references, polishRecords } from '../db/schema';
+import { documents, citations, references, polishRecords, qualityReports, reviewComments, experiments, pipelineTasks } from '../db/schema';
 import { Document, Packer, Paragraph, HeadingLevel, AlignmentType } from 'docx';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService } from '../references/references.service';
@@ -58,21 +58,27 @@ export class DocumentsService {
   }
 
   /** 更新文档；内容变化时自动保存历史版本（commitMessage 可选，用于手动触发时注入提交信息） */
-  update(id: string, patch: { title?: string; content?: string; outline?: string; status?: string; commitMessage?: string }) {
+  update(id: string, patch: Record<string, unknown>) {
     const existing = this.get(id);
     const baseVersion = existing.version ?? 1;
     let versions = parseJson<{ version: number; content: string; updatedAt: number; name?: string; commitMessage?: string }[]>(existing.versions, []);
-    if (patch.content !== undefined && patch.content !== existing.content && existing.content) {
+    // 只允许白名单字段：历史上整包展开会让 PATCH 改写 id/projectId/version 等（越权 + 数据损坏）
+    const allowed = ['title', 'content', 'outline', 'status'] as const;
+    const safe: Record<string, unknown> = {};
+    for (const k of allowed) if (patch[k] !== undefined) safe[k] = patch[k];
+    const commitMessage = typeof patch.commitMessage === 'string' ? patch.commitMessage : undefined;
+    const nextContent = safe.content as string | undefined;
+    if (nextContent !== undefined && nextContent !== existing.content && existing.content) {
       versions = [
         ...versions,
-        { version: baseVersion, content: existing.content, updatedAt: existing.updatedAt ?? Date.now(), commitMessage: patch.commitMessage },
+        { version: baseVersion, content: existing.content, updatedAt: existing.updatedAt ?? Date.now(), commitMessage },
       ].slice(-MAX_VERSIONS);
     }
     const row = {
       ...existing,
-      ...patch,
+      ...safe,
       versions: JSON.stringify(versions),
-      version: patch.content !== undefined && patch.content !== existing.content ? baseVersion + 1 : baseVersion,
+      version: nextContent !== undefined && nextContent !== existing.content ? baseVersion + 1 : baseVersion,
       updatedAt: Date.now(),
     };
     db.update(documents).set(row).where(eq(documents.id, id)).run();
@@ -81,9 +87,16 @@ export class DocumentsService {
 
   remove(id: string) {
     this.get(id);
-    db.delete(documents).where(eq(documents.id, id)).run();
-    db.delete(citations).where(eq(citations.documentId, id)).run();
-    db.delete(polishRecords).where(eq(polishRecords.documentId, id)).run();
+    // 无外键的库靠 service 级联：漏表会留下孤儿质量报告/审稿意见/实验结果（citation-audit 还会假绿）
+    db.transaction((tx) => {
+      tx.delete(documents).where(eq(documents.id, id)).run();
+      tx.delete(citations).where(eq(citations.documentId, id)).run();
+      tx.delete(polishRecords).where(eq(polishRecords.documentId, id)).run();
+      tx.delete(qualityReports).where(eq(qualityReports.documentId, id)).run();
+      tx.delete(reviewComments).where(eq(reviewComments.documentId, id)).run();
+      tx.delete(experiments).where(eq(experiments.documentId, id)).run();
+      tx.update(pipelineTasks).set({ documentId: null }).where(eq(pipelineTasks.documentId, id)).run();
+    });
     return { ok: true };
   }
 
@@ -125,13 +138,14 @@ export class DocumentsService {
    */
   createSnapshot(id: string, commitMessage?: string) {
     const existing = this.get(id);
-    const baseVersion = existing.version ?? 1;
     const versions = parseJson<{ version: number; content: string; updatedAt: number; name?: string; commitMessage?: string }[]>(existing.versions, []);
     // 与最新快照内容对比：相同则跳过（幂等）
     const latest = versions[versions.length - 1];
     if (latest && latest.content === existing.content) return versions;
     const msg = commitMessage?.trim() || `手动快照 · ${new Date().toLocaleString('zh-CN')}`;
-    const entry: { version: number; content: string; updatedAt: number; name?: string; commitMessage?: string } = { version: baseVersion, content: existing.content ?? '', updatedAt: Date.now(), commitMessage: msg };
+    // 快照号取「历史最大版本号 + 1」：直接复用 baseVersion 会与 update 自动快照产生同号重复（历史缺陷）
+    const nextVersion = versions.reduce((m, v) => Math.max(m, v.version), 0) + 1;
+    const entry: { version: number; content: string; updatedAt: number; name?: string; commitMessage?: string } = { version: nextVersion, content: existing.content ?? '', updatedAt: Date.now(), commitMessage: msg };
     versions.push(entry);
     const trimmed = versions.slice(-MAX_VERSIONS);
     db.update(documents).set({ versions: JSON.stringify(trimmed), updatedAt: Date.now() }).where(eq(documents.id, id)).run();
@@ -182,7 +196,8 @@ export class DocumentsService {
     // 不再手动补编号（官方 IEEE/Vancouver/GB-T/Nature/ACS 均自带 [n]/n. 前缀，手动补会双编号）
     if (!isAuthorYear) {
       const references = renderCitationsAsBibliography(
-        refs.map((r) => ({ reference: { id: 'entry', ...r } })),
+        // id 必须唯一：citation-js 按 id 去重，全用 'entry' 会导致只渲染最后一条（历史 Critical）
+        refs.map((r, i) => ({ reference: { id: `entry-${i + 1}`, ...r } })),
         style,
       );
       return { content, references, style, changed: false };
@@ -369,9 +384,8 @@ export class DocumentsService {
   exportMarkdown(id: string) {
     const doc = this.get(id);
     const outline = parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline, EMPTY_OUTLINE);
-    const citeRows = db.select().from(citations).where(eq(citations.documentId, id)).all();
-    const refIds = citeRows.map((c) => c.referenceId).filter(Boolean);
-    const refList = refIds.length ? db.select().from(references).where(inArray(references.id, refIds)).all() : [];
+    // 按 citation 插入序（= 正文 [n] 编号）取文献；直接 inArray 的返回顺序不可依赖，会导致导出编号错位
+    const refList = this.listCitations(id).map((r) => r.reference);
     const lines: string[] = [];
     lines.push(`# ${doc.title}`);
     lines.push('');
@@ -446,8 +460,12 @@ export class DocumentsService {
       if (n > 0) anchorNums.add(n);
     }
     const rows = db.select().from(citations).where(eq(citations.documentId, documentId)).all();
+    // 可解析引用 = 能 join 到 reference 的行；孤儿 citation（文献已删除）不能算作「已绑定」，
+    // 否则 citationRows 虚高、audit 假绿（历史缺陷）。
+    const orphanRows = rows.filter((r) => !r.referenceId || !db.select({ id: references.id }).from(references).where(eq(references.id, r.referenceId)).get());
+    const resolvable = rows.length - orphanRows.length;
     const maxAnchor = anchorNums.size > 0 ? Math.max(...anchorNums) : 0;
-    const ghost = maxAnchor > rows.length ? maxAnchor - rows.length : 0;
+    const ghost = maxAnchor > resolvable ? maxAnchor - resolvable : 0;
     const noDoi = rows.filter((r) => {
       if (r.verified) return false;
       const ref = r.referenceId ? db.select().from(references).where(eq(references.id, r.referenceId)).get() : null;
@@ -455,7 +473,8 @@ export class DocumentsService {
     }).length;
     const issues: string[] = [];
     if (ghost > 0) issues.push(`红牌：${ghost} 个锚点编号超出已落库引用（幽灵引用），请重跑引用渲染或检查文献库`);
-    if (rows.length === 0 && anchorNums.size > 0) issues.push('红牌：正文有锚点但 citation 表为空——文档未经引用渲染流程');
+    if (resolvable === 0 && anchorNums.size > 0) issues.push('红牌：正文有锚点但无可用引用——文档未经引用渲染流程或引用的文献已删除');
+    if (orphanRows.length > 0) issues.push(`红牌：${orphanRows.length} 条引用指向已删除文献（孤儿引用），请重新渲染引用`);
     if (noDoi > 0) issues.push(`黄牌：${noDoi} 条已绑定引用无 DOI，可信度待核`);
     if (issues.length === 0 && anchorNums.size > 0) issues.push('绿牌：全部锚点已绑定且具备 DOI 可信度');
     // 无锚点不再直接算「满分」：此前 0 锚点 → issues 为空 + score=100，用户会误以为引用体检通过。
@@ -479,9 +498,8 @@ export class DocumentsService {
   async exportDocx(id: string) {
     const doc = this.get(id);
     const outline = parseJson<{ title: string; sections: { title: string; subsections: string[] }[] }>(doc.outline, EMPTY_OUTLINE);
-    const citeRows = db.select().from(citations).where(eq(citations.documentId, id)).all();
-    const refIds = citeRows.map((c) => c.referenceId).filter(Boolean);
-    const refList = refIds.length ? db.select().from(references).where(inArray(references.id, refIds)).all() : [];
+    // 按 citation 插入序（= 正文 [n] 编号）取文献；直接 inArray 的返回顺序不可依赖，会导致导出编号错位
+    const refList = this.listCitations(id).map((r) => r.reference);
 
     const children: Paragraph[] = [
       new Paragraph({ text: doc.title || '未命名论文', heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }),

@@ -248,7 +248,7 @@ export function WritingToolsPanel(props: WritingToolsPanelProps) {
                           <button
                             key={st}
                             onClick={() => onChangeCommentStatus(c, st)}
-                            className={`rounded px-1.5 py-0.5 text-[10px] ${c.status === st ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800'}`}
+                            className={`rounded px-1.5 py-0.5 text-[11px] ${c.status === st ? 'bubble-user' : 'bg-slate-100 text-slate-500 dark:bg-slate-800'}`}
                           >
                             {COMMENT_STATUS[st].label}
                           </button>
@@ -316,7 +316,7 @@ export function WritingToolsPanel(props: WritingToolsPanelProps) {
                         {exp.status === 'ok' ? '成功' : exp.status === 'error' ? '失败' : '超时'}
                       </Badge>
                     </div>
-                    <div className="mb-1 text-[10px] text-slate-400">{(exp.runtimeMs / 1000).toFixed(1)}s · {new Date(exp.createdAt).toLocaleDateString()}</div>
+                    <div className="mb-1 text-[11px] text-slate-400">{(exp.runtimeMs / 1000).toFixed(1)}s · {new Date(exp.createdAt).toLocaleDateString()}</div>
                     {exp.figures?.[0] && <img src={exp.figures[0]} alt="实验结果图" className="mb-1 h-auto w-24 rounded border border-slate-100 dark:border-slate-800" />}
                     {exp.conclusion && <div className="leading-relaxed">{exp.conclusion}</div>}
                     {(exp.conclusion || exp.figures?.[0]) && (

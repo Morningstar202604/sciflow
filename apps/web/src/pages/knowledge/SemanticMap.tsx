@@ -78,7 +78,7 @@ export function SemanticMap({
   if (points.length === 0) {
     return (
       <div className="chart-empty" role="status">
-        暂无向量数据：知识库为空，或嵌入模型未配置（未配置时检索走全文，不生成向量）。
+        暂无向量数据：知识库还没有资料，或尚未生成向量（未配置嵌入模型时检索自动走全文，不影响问答）。
       </div>
     );
   }

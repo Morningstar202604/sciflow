@@ -129,7 +129,7 @@ export function PipelineDag({ steps, currentStep }: { steps: PipelineStep[]; cur
               </span>
               <div className="min-w-0 flex-1 overflow-hidden">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className={`text-xs font-medium truncate ${isCurrent ? 'text-[var(--brand-500)]' : ''}`}>{s.label}</span>
+                  <span className={`text-xs font-medium truncate ${isCurrent ? 'text-[var(--brand-700)]' : ''}`}>{s.label}</span>
                   {(s.retryCount ?? 0) > 0 && <span className="dag-retry-badge">回炉 ×{s.retryCount}</span>}
                   {s.status === 'skipped' && <span className="text-small text-muted">已跳过</span>}
                 </div>

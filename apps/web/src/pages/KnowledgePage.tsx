@@ -23,7 +23,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 /* =====================================================================
- * 差距#24：NotebookLM 式学习/复盘（轻量版，纯前端规则生成，零依赖）
+ * 差距#24：资料内问答学习/复盘（轻量版，纯前端规则生成，零依赖）
  * ---------------------------------------------------------------------
  * 后端未暴露「按文档取 chunk 正文 / outline」的读接口（knowledge 仅
  * upload/list/query/bind/remove，且 query 无 AI key 时 503）。故本卡片：
@@ -196,7 +196,7 @@ function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
         </span>
       </SectionTitle>
       <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
-        选一份资料，前端规则生成复习卡 + 思维导图（NotebookLM 式）。已接入分块取数：挖空来自原文句子，思维导图优先用真实章节标题；无 AI key 也可用。
+        选一份资料，前端规则生成复习卡 + 思维导图（资料内问答）。已接入分块取数：挖空来自原文句子，思维导图优先用真实章节标题；无 AI key 也可用。
       </div>
       <div className="max-w-md">
         <select
@@ -227,7 +227,7 @@ function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
                 onClick={() => setRevealed((m) => ({ ...m, [i]: !m[i] }))}
                 className="cursor-pointer rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-900/50 hover:border-teal-300 transition-colors"
               >
-                <div className="text-[10px] text-teal-600 dark:text-teal-400 mb-1">{revealed[i] ? '答案' : '问题/填空'}</div>
+                <div className="text-[11px] text-teal-600 dark:text-teal-400 mb-1">{revealed[i] ? '答案' : '问题/填空'}</div>
                 <div className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
                   {revealed[i] ? c.a : c.q}
                 </div>
@@ -433,7 +433,7 @@ export function KnowledgePage({ project }: { project: Project }) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={error} />
 
       {/* 上传区 */}
@@ -473,7 +473,7 @@ export function KnowledgePage({ project }: { project: Project }) {
           />
           <FileText size={28} className="mx-auto text-slate-400 dark:text-slate-500 mb-2" />
           <div className="text-sm text-slate-600 dark:text-slate-300">点击选择或拖拽 PDF / TXT / Markdown 到此处</div>
-          <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">支持 PDF 解析与自动分块（NotebookLM 式 RAG）</div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">支持 PDF 解析与自动分块（基于资料的可溯源问答）</div>
           {busy.startsWith('upload:') && (
             <div className="mt-2">
               <Spinner label={`解析 ${busy.slice(7)}…`} />
@@ -533,7 +533,7 @@ export function KnowledgePage({ project }: { project: Project }) {
         <div className="mt-4">
           <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">知识库（{docs.length} 份资料）</div>
           {docs.length === 0 ? (
-            <Empty text="暂无资料，上传后即可基于资料问答" />
+            <Empty illustration="knowledge" text="知识库还没有资料" hint="上传 PDF / Markdown / 文本后即可基于资料提问" />
           ) : (
             <div className="space-y-2">
               {docs.map((d) => (
@@ -577,7 +577,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                                 >
                                   <div className="text-[12px] text-slate-700 dark:text-slate-200 truncate">{r.title}</div>
                                   {(r.year || r.venue) && (
-                                    <div className="text-[10px] text-slate-400 truncate">
+                                    <div className="text-[11px] text-slate-400 truncate">
                                       {[r.venue, r.year].filter(Boolean).join(' · ')}
                                     </div>
                                   )}
@@ -623,7 +623,7 @@ export function KnowledgePage({ project }: { project: Project }) {
       <Card className="p-4 sm:p-5">
         <SectionTitle>
           <span className="flex items-center gap-2">
-            <MessageSquare size={16} className="brand-gradient-text" /> 基于资料问答
+            <MessageSquare size={16} className="text-teal-600 dark:text-teal-300" /> 基于资料问答
           </span>
         </SectionTitle>
         <div className="flex flex-col sm:flex-row gap-2">
@@ -632,7 +632,7 @@ export function KnowledgePage({ project }: { project: Project }) {
             {busy === 'query' ? <Loader2 size={15} className="animate-spin" /> : <MessageSquare size={15} />} 提问
           </Button>
         </div>
-        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">答案严格来自你的资料（NotebookLM 式），不依赖外部知识</div>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">答案严格来自你的资料（资料内问答），不依赖外部知识</div>
 
         {busy === 'query' && (
           <div className="mt-4">
@@ -666,7 +666,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-slate-600 dark:text-slate-300 font-medium">「{s.docName}」</span>
                           {chunkNo !== null && (
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500">
                               分块 {chunkNo}{totalChunks ? `/${totalChunks}` : ''}
                             </span>
                           )}

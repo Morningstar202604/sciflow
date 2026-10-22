@@ -102,8 +102,16 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
       }
       await deps.notify(s.taskId, 'literature', 'running');
       const enriched = await deps.crossEnrich(s.task.projectId, s.task.topic, s.plan);
+      // ReAct 轨迹（think → act → observe）：由本轮真实跨库命中派生，落 pipeline_task.trace 供前端展示
+      const keywords = (s.plan.searchStrategy?.keywords || [s.task.topic]).filter(Boolean).slice(0, 4);
+      const allHits = [...enriched.libraryHits, ...enriched.knowledgeHits];
+      const researchTrace = keywords.map((q, i) => {
+        const needle = q.toLowerCase();
+        const found = allHits.filter((h) => `${h.title} ${h.abstract || ''}`.toLowerCase().includes(needle)).length;
+        return { round: i + 1, thought: `围绕「${q}」检索本地文献库与知识库`, action: 'search', query: q, found };
+      });
       db.update(pipelineTasks)
-        .set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), updatedAt: Date.now() })
+        .set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), trace: JSON.stringify(researchTrace), updatedAt: Date.now() })
         .where(eq(pipelineTasks.id, s.taskId))
         .run();
       await deps.notify(s.taskId, 'literature', 'done', enriched.summary.split('\n')[0]);
@@ -111,6 +119,7 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
         enrichedLibHits: enriched.libraryHits,
         enrichedKnHits: enriched.knowledgeHits,
         researchNotice: enriched.notice ?? undefined,
+        researchTrace,
         literatureSummary: enriched.summary,
       };
     })

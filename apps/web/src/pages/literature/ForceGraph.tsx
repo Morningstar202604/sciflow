@@ -203,7 +203,7 @@ export function ReferenceNetwork({ graph, onViewRef }: { graph: ReferenceGraph; 
           <RotateCcw size={12} />
         </Button>
       </div>
-      <div className="absolute bottom-2 left-2 flex items-center gap-3 text-[10px] text-slate-500 dark:text-slate-400 bg-white/85 dark:bg-slate-900/85 backdrop-blur rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1">
+      <div className="absolute bottom-2 left-2 flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 bg-white/85 dark:bg-slate-900/85 backdrop-blur rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1">
         <span className="flex items-center gap-1">
           <Network size={10} /> {graph.nodes.length} 文献 · {graph.edges.length} 关系
         </span>

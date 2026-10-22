@@ -10,7 +10,7 @@ import 'katex/dist/katex.min.css';
 import { api, streamChat } from '../api/client';
 import { ToastContext } from '../App';
 import type { ChatSource, IntentResult, KnowledgeDoc, Project } from '../types';
-import { Card, ErrorBox, Modal, errMsg } from '../components/ui';
+import { Card, ConfirmDialog, ErrorBox, Input, Modal, errMsg } from '../components/ui';
 import {
   createSession, deriveTitle, loadActiveSessionId, loadDraft, loadSessions, saveActiveSessionId, saveDraft, saveSessions,
   type ChatSession, type StoredMessage,
@@ -101,6 +101,8 @@ export function ChatPage({ project }: { project: Project }) {
   const [citeSource, setCiteSource] = useState<ChatSource | null>(null);
   const [citing, setCiting] = useState(false);
   const [citedKeys, setCitedKeys] = useState<Record<string, boolean>>({});
+  const [renamingSession, setRenamingSession] = useState<{ id: string; title: string } | null>(null);
+  const [deletingSession, setDeletingSession] = useState<{ id: string; title: string } | null>(null);
   const [openSrc, setOpenSrc] = useState<Record<string, boolean>>({});
 
   /* 项目切换：整体重置会话状态，杜绝跨项目串话与错误项目写入（历史缺陷） */
@@ -428,7 +430,7 @@ export function ChatPage({ project }: { project: Project }) {
       {/* 会话侧栏：新建 / 搜索 / 重命名 / 删除 */}
       <aside className={`${showSessions ? 'flex' : 'hidden'} lg:flex w-full lg:w-56 shrink-0 flex-col rounded-xl border border-slate-200 dark:border-slate-800 bg-[var(--card)] min-h-0`} aria-label="会话列表">
         <div className="p-2.5 border-b border-slate-100 dark:border-slate-800 space-y-2">
-          <button onClick={startNewSession} className="w-full flex items-center justify-center gap-1.5 rounded-lg brand-btn text-white text-xs font-medium py-2">
+          <button onClick={startNewSession} className="w-full flex items-center justify-center gap-1.5 rounded-lg brand-btn text-xs font-medium py-2">
             <Plus size={13} /> 新对话
           </button>
           <div className="relative">
@@ -452,19 +454,18 @@ export function ChatPage({ project }: { project: Project }) {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    const t = window.prompt('重命名会话', s.title);
-                    if (t && t.trim()) renameSession(s.id, t.trim());
+                    setRenamingSession({ id: s.id, title: s.title });
                   }}
-                  className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-teal-600"
+                  className="p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 text-slate-400 hover:text-teal-600"
                   aria-label="重命名会话"
                 ><Pencil size={11} /></button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500"
+                  onClick={(e) => { e.stopPropagation(); setDeletingSession({ id: s.id, title: s.title }); }}
+                  className="p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 text-slate-400 hover:text-rose-500"
                   aria-label="删除会话"
                 ><Trash2 size={11} /></button>
               </div>
-              <div className="text-[10px] text-slate-400 mt-0.5 pl-4">{new Date(s.updatedAt).toLocaleDateString('zh-CN')} · {s.messages.length} 条</div>
+              <div className="text-[11px] text-slate-400 mt-0.5 pl-4">{new Date(s.updatedAt).toLocaleDateString('zh-CN')} · {s.messages.length} 条</div>
             </div>
           ))}
         </div>
@@ -527,9 +528,9 @@ export function ChatPage({ project }: { project: Project }) {
               m.role === 'user' ? (
                 <div key={i} className="flex justify-end group page-in">
                   <div className="max-w-[85%] min-w-0">
-                    <div className="rounded-2xl rounded-br-sm px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words bg-teal-600 text-white">{m.content}</div>
-                    <div className="mt-1 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                      <span className="text-[10px] text-slate-400 mr-1">{fmtTime(m.createdAt)}</span>
+                    <div className="rounded-2xl rounded-br-sm px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words bubble-user">{m.content}</div>
+                    <div className="mt-1 flex items-center justify-end gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <span className="text-[11px] text-slate-400 mr-1">{fmtTime(m.createdAt)}</span>
                       <button onClick={() => copyMsg(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600" title="复制" aria-label="复制提问">
                         {copiedIdx === i ? <Check size={12} /> : <Copy size={12} />}
                       </button>
@@ -609,7 +610,7 @@ export function ChatPage({ project }: { project: Project }) {
                     )}
 
                     {m.usage && !m.streaming && (
-                      <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-2">
+                      <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 flex items-center gap-2">
                         {m.model && <span className="truncate max-w-[120px]">{m.model}</span>}
                         <span>↑{fmtNum(m.usage.prompt_tokens)} ↓{fmtNum(m.usage.completion_tokens)} tokens</span>
                         <span>{fmtTime(m.createdAt)}</span>
@@ -627,7 +628,7 @@ export function ChatPage({ project }: { project: Project }) {
                     )}
 
                     {!m.streaming && (
-                      <div className="mt-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity lg:opacity-0" role="toolbar" aria-label="消息操作">
+                      <div className="mt-1.5 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity" role="toolbar" aria-label="消息操作">
                         {m.stopped && (
                           <button onClick={() => cont(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600" title="继续生成" aria-label="继续生成"><PlayCircle size={13} /></button>
                         )}
@@ -637,7 +638,7 @@ export function ChatPage({ project }: { project: Project }) {
                         </button>
                         <button onClick={() => sendToWriting(i)} className="p-1 rounded-md text-slate-400 hover:text-teal-600" title="发送到写作页" aria-label="发送到写作页"><FileText size={13} /></button>
                         <button onClick={() => deleteMsg(i)} className="p-1 rounded-md text-slate-400 hover:text-rose-500" title="删除这条回答" aria-label="删除回答"><Trash2 size={13} /></button>
-                        {m.error && <span role="alert" className="text-[10px] text-rose-500 ml-1">{m.error}</span>}
+                        {m.error && <span role="alert" className="text-[11px] text-rose-500 ml-1">{m.error}</span>}
                       </div>
                     )}
                     {m.error && !m.streaming && (
@@ -700,7 +701,7 @@ export function ChatPage({ project }: { project: Project }) {
                 rows={1}
                 aria-label="输入科研问题"
                 className="w-full resize-none bg-transparent outline-none text-sm leading-relaxed max-h-40 min-h-[24px] placeholder:text-slate-400"
-                placeholder='问任何科研问题…（"/" 快捷指令，Shift+Enter 换行）'
+                placeholder='问任何科研问题…（/ 唤起指令）'
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
@@ -718,14 +719,14 @@ export function ChatPage({ project }: { project: Project }) {
                 >
                   <Globe size={12} /> 联网{webSearch ? '已开' : ''}
                 </button>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 hidden sm:inline">Enter 发送 · Shift+Enter 换行 · Esc 停止</span>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:inline">Enter 发送 · Shift+Enter 换行 · Esc 停止</span>
                 <div className="ml-auto flex items-center gap-1.5">
                   {busy ? (
                     <button onClick={stop} className="rounded-lg bg-rose-500 text-white px-3 py-1.5 flex items-center gap-1.5 hover:bg-rose-600 text-xs" title="停止生成（Esc）">
                       <Square size={12} /> 停止
                     </button>
                   ) : (
-                    <button onClick={send} disabled={!input.trim()} className="rounded-lg brand-btn text-white px-3 py-1.5 flex items-center gap-1.5 text-xs disabled:opacity-50" title="发送（Enter）">
+                    <button onClick={send} disabled={!input.trim()} className="rounded-lg brand-btn px-3 py-1.5 flex items-center gap-1.5 text-xs disabled:opacity-50" title="发送（Enter）">
                       <Send size={13} /> 发送
                     </button>
                   )}
@@ -735,6 +736,40 @@ export function ChatPage({ project }: { project: Project }) {
           </div>
         </Card>
       </div>
+
+      <Modal open={!!renamingSession} title="重命名会话" onClose={() => setRenamingSession(null)} width="max-w-md">
+        <Input
+          aria-label="会话名称"
+          value={renamingSession?.title ?? ''}
+          onChange={(e) => setRenamingSession((r) => (r ? { ...r, title: e.target.value } : r))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && renamingSession?.title.trim()) {
+              renameSession(renamingSession.id, renamingSession.title.trim());
+              setRenamingSession(null);
+            }
+          }}
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button className="text-sm text-slate-500 px-3 py-1.5" onClick={() => setRenamingSession(null)}>取消</button>
+          <button
+            className="text-sm brand-btn rounded-lg px-3 py-1.5 disabled:opacity-50"
+            disabled={!renamingSession?.title.trim()}
+            onClick={() => {
+              if (renamingSession?.title.trim()) renameSession(renamingSession.id, renamingSession.title.trim());
+              setRenamingSession(null);
+            }}
+          >保存</button>
+        </div>
+      </Modal>
+      <ConfirmDialog
+        open={!!deletingSession}
+        title="删除会话"
+        description={`确定删除会话「${deletingSession?.title ?? ''}」？该会话的全部消息将从本机移除，无法恢复。`}
+        confirmText="删除"
+        danger
+        onConfirm={() => { if (deletingSession) deleteSession(deletingSession.id); setDeletingSession(null); }}
+        onClose={() => setDeletingSession(null)}
+      />
 
       <Modal open={!!citeSource} onClose={() => !citing && setCiteSource(null)} title="引用到论文">
         <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">把来源「{citeSource?.docName}」引用进哪篇论文草稿？</div>

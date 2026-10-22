@@ -2,6 +2,60 @@
 
 本项目格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，语义化版本号。以下按 `git log` 自底向上归纳历轮功能与修复，未含真实密钥。
 
+## [0.9.0] - 2026-10-23
+
+品牌与体验打磨批次 + 全维度审查驱动的数据完整性修复。审查报告见 [`docs/AUDIT-2026-10-23.md`](docs/AUDIT-2026-10-23.md)（35 条发现、具名竞品矩阵、路线图）。
+
+### Security
+- **Critical · PATCH 可越权改写非白名单字段**：`PATCH /documents/:id` 曾把整个 body 展开进 `db.update().set()`，实测可改写 `id / projectId / version / versions`（企业模式下等于绕过项目归属边界）。改为白名单 `{title, content, outline, status}`，其余字段一律丢弃。
+
+### Fixed（数据完整性）
+- **Critical · 顺序编码样式只渲染 1 条参考文献**：`renderCitations` 给每条文献同一个 CSL id `'entry'`，citation-js 按 id 去重，IEEE / Vancouver / GB-T / Nature / ACS 只输出最后一条。改为唯一 id，新增 5 样式「条数=引用数」断言。
+- **删文档级联漏表**：只清 `citation / polish_record`，漏 `quality_report / review_comment / experiment` 且 `pipeline_task.documentId` 悬空。改为事务内清 6 张表并置空。
+- **删文献不级联**：`citation / screening_queue / extraction_value` 残留，孤儿引用让 `citation-audit` 假绿（`citationRows` 仍计孤儿）。改为事务级联；audit 只计可解析引用并显式报孤儿。
+- **删流水线残留 LangGraph 断点**：`reflexion_log / checkpoints / writes` 不清理，且运行中任务可被删除后继续写库。改为事务清理 + 运行中禁止删除。
+- **手动快照版本号重复**：快照复用当前版本号，下一次保存再 push 同号快照。改为 `max(history)+1`。
+- **导出参考文献顺序错位**：按 `inArray` 库序而非 citation 插入序，正文 `[n]` 与文末编号不一致。统一走 `listCitations()`。
+- **引用体检假绿**：孤儿 citation 计入 `citationRows`，删除文献后仍报 ghost=0。现在按可解析引用计数并单独报孤儿。
+
+### Fixed（功能与契约）
+- **ReAct 检索轨迹恒空**：`pipeline_task.trace` 全库无写入点，前端面板永不显示。literature 节点现在按真实跨库命中写入轨迹（本轮演示 4 步）。
+- **入参缺失返回 500**：`POST /documents {}` / `POST /pipeline {}` / `POST /references/search {}` 直接 500；文献空元数据 201 + 空 body。统一 400 校验。
+- **写接口不校验项目存在**：流水线、知识库上传、投稿登记可挂到不存在的 `projectId`。三入口统一校验。
+- **质量评分不校验文档存在**：可给不存在的 documentId 落报告。补存在性 404。
+- **6 个自定义提示词配置不生效**：polish / translate / writeOutline / draftSection / cover_letter / response_letter 接入 `getCustomPrompt`（此前 listTools 可配但运行时不读）。
+- **Agent token 统计恒 0**：`finishRun` 从不传 totalTokens。按时间窗聚合 `llm_call_log` 回填。
+- **springer 样式前后端判定不一致**：前端当顺序编码制拦截「无需重排」，后端按著者-年改写正文。统一为著者-年。
+- **性能**：Dashboard 计数改 `COUNT(*)`；投稿列表由 2N 次逐行查询改为批量 `IN`。
+
+### Fixed（品牌与体验）
+- **写作页三条数据损坏路径**：切文档标题串档（失焦写到错误文档）、切项目后仍编辑上一项目文档并写回、自动保存失败静默仍显示「已保存」。分别改为 `key={doc.id}` + docId 快照校验、项目级页面 `key={project.id}` 重挂载、保存中/已保存/失败重试三态 + 离开提醒。
+- **写作页加载态误报空态**：文档列表未返回前先渲染「空空如也」，改为骨架屏。
+- **触屏操作不可达**：消息操作、项目改名/删除等 hover-only 入口在触屏永久不可见，改为触屏常显 + 桌面 hover。
+- **危险操作无确认**：文献删除、期刊移除、投稿记录删除、会话删除均改为 `ConfirmDialog`。
+- **品牌对比度不达 WCAG AA**：品牌渐变首段白字仅 3.31:1、teal-600 按钮 3.74:1、暗色渐变白字 1.8:1。渐变改为 4.80/5.07/5.14:1，新增 `--brand-700` 与 `--on-brand`（暗色深墨字 6.8–9.4:1）。
+- **页面标题图标不可见**：`brand-gradient-text`（background-clip:text）套在 SVG 上导致图标透明，6 处改为实色。
+- **导航命名与图标统一**：`NAV_GROUPS` 直接引用 `VIEW_LABELS`（消除「长文写作/论文写作」等三套叫法）；文献 Library、实验 Beaker、总览 LayoutGrid，消除同图标表达不同功能。
+- **页面容器与字号统一**：4 种最大宽度收敛为 `--page-max: 1152px`；9–10px 正文级文字统一提升到 11px。
+- **390 横向溢出**：dashboard / pipeline grid 子项补 `min-w-0`，文献 7 个工具 Tab 改换行（1440 下最右从 1623px 收回屏内），写作页 AI 助手按钮移出滚动区。
+- **主题三态 + 无闪白**：新增「跟随系统」，`index.html` 内联脚本预置 `.dark`，暗色刷新不再闪白。
+- **空态与文案**：空态补插图/下一步 CTA；「STORM 式 / Elicit 式 / NotebookLM 式」等内部术语与竞品名改为能力描述；设置页不再暴露 `apps/server/.env` 路径；投稿状态下拉不再直出内部枚举。
+- **字数统计失真**：`0.1K 字` / `0K 字` 改为精确字符数（<1000 显示原值）。
+- **会话重命名**：原生 `window.prompt` 改为应用内 Modal。
+
+### Added
+- `apps/server/src/documents/documents-integrity.spec.ts`：6 条真实 SQLite 完整性回归（白名单/级联/快照/导出/引用渲染），突变验证有效（回退修复必红）。
+- `apps/web/src/lib/{format,theme}.ts` + 测试：字数格式化与主题解析纯函数。
+- `scripts/seed-demo.mjs`：可重复执行的演示数据种子（只走 REST API，库非空自动跳过，`RUN_PIPELINE=1` 可跑通流水线）。
+- `docs/AUDIT-2026-10-23.md`：全维度审查与对标报告。
+- `docs/media/demo.mp4`：24 秒真实操作导览视频。
+- README 中英文版：12 张实机截图 + 视频 + 设计语言规范表。
+
+### Verified
+- typecheck 双端 0 error；eslint 0 error / 1 warning（TanStack Table 已知不兼容）；server **99** / web **62** 用例全绿；回归 **167/167**；双端 build 成功。
+- Playwright 12 页 × 1440/390 + 明暗双主题 36 张截图，**0 pageerror、0 横向溢出**。
+- 覆盖率（v0.9 末态）：server 行 36.94% / 分支 21.63%，web 行 43.12% / 分支 38.91%（仍低于红线，见 QUALITY-BASELINE）。
+
 ## [0.8.1] - 2026-10-22
 
 ### Fixed

@@ -203,7 +203,7 @@ function PipelineEditor() {
               <span className="text-xs text-slate-700 dark:text-slate-200">{st.label}</span>
               <span className="text-[11px] text-slate-400 flex-1">{st.key}</span>
               {!st.configurable ? (
-                <span className="text-[10px] text-slate-400">骨架</span>
+                <span className="text-[11px] text-slate-400">骨架</span>
               ) : st.enabled ? (
                 <Badge tone="teal">启用</Badge>
               ) : (
@@ -311,7 +311,7 @@ function SettingsLayout() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={state.error} />
 
       {/* AI 配置总览 */}
@@ -337,7 +337,7 @@ function SettingsLayout() {
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">API Key 状态</div>
               <div className="text-sm flex items-center gap-1.5">
                 <ModelIcon ok={state.settings.ai.configured} />
-                {state.settings.ai.configured ? '已配置（apps/server/.env）' : '未配置 → 编辑 apps/server/.env'}
+                {state.settings.ai.configured ? '已配置' : '未配置（请在服务端环境变量中填写）'}
               </div>
             </div>
             <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-4">

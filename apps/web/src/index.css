@@ -11,11 +11,18 @@
   /* 对比度修正：默认 slate-400 (#94a3b8) 在白底上仅 2.6:1，达不到 WCAG AA。
      辅助文字统一提升到 slate-500 档（4.6:1），深色模式保持原亮度。 */
   --color-slate-400: #5b6b82;
+  /* 品牌青绿：Tailwind 默认 teal-600 (#0d9488) 白底仅 3.7:1；正文一律走加深档 */
+  --color-teal-600: #0b7f78;
+  --color-teal-500: #0f9e94;
   /* ---- SciFlow 品牌 token（科研流体：teal → cyan → sky） ---- */
   --brand-400: #14b8a6;
   --brand-500: #0f9e94;
   --brand-600: #0b7f78;
-  --brand-grad: linear-gradient(135deg, #0f9e94 0%, #0b8fb4 52%, #0b6fc4 100%);
+  /* 正文级品牌文字色：≥4.5:1（白底 4.86:1），--brand-500 仅用于图形填充 */
+  --brand-700: #0b6f68;
+  /* 品牌渐变：三档均保证白字 ≥4.5:1（4.80 / 5.07 / 5.14），深色模式沿用提亮版 */
+  --brand-grad: linear-gradient(135deg, #0b8079 0%, #0a7896 52%, #0b6fc4 100%);
+  --on-brand: #ffffff;
   --brand-grad-soft: linear-gradient(135deg, rgba(15, 158, 148, 0.10), rgba(11, 143, 180, 0.08) 52%, rgba(11, 111, 196, 0.06));
   --brand-glow: 0 8px 28px rgba(11, 143, 180, 0.22), 0 2px 8px rgba(15, 158, 148, 0.18);
   --card-shadow: 0 1px 2px rgba(15, 118, 110, 0.04), 0 8px 24px -12px rgba(15, 118, 110, 0.10);
@@ -63,6 +70,9 @@
   --viz-series-5: #ea580c;
   --viz-series-6: #64748b;
 
+  /* 布局节奏：内容页统一最大宽度，避免切页时左右边界跳动 */
+  --page-max: 1152px;
+
   /* 动效时长（统一节奏，避免各页面各写一套） */
   --dur-fast: 120ms;
   --dur-base: 180ms;
@@ -72,7 +82,12 @@
 .dark {
   color-scheme: dark;
   --color-slate-400: #94a3b8;
+  --color-teal-600: #2dd4bf;
+  --color-teal-500: #14b8a6;
+  --brand-700: #5eead4;
   --brand-grad: linear-gradient(135deg, #2dd4bf 0%, #22d3ee 52%, #38bdf8 100%);
+  /* 提亮渐变上白字仅 1.8:1，改用深墨字（6.8–9.4:1） */
+  --on-brand: #04211f;
   --brand-grad-soft: linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(6, 182, 212, 0.09) 55%, rgba(14, 165, 233, 0.06));
   --brand-glow: 0 8px 30px rgba(20, 184, 166, 0.20), 0 2px 8px rgba(6, 182, 212, 0.18);
   --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px -14px rgba(6, 182, 212, 0.14);
@@ -260,6 +275,13 @@ select:focus-visible {
   border-radius: 6px;
 }
 
+/* 内容页统一容器（宽度/留白一处定义） */
+.page-container { width: 100%; max-width: var(--page-max); margin-inline: auto; }
+
+/* 用户气泡：teal-600 白字仅 3.7:1，改用品牌 600 深一档（4.86:1） */
+.bubble-user { background: var(--brand-600); color: #fff; }
+.dark .bubble-user { background: #0f766e; }
+
 /* 品牌渐变文字/图标辅助 */
 .brand-gradient-text {
   background: var(--brand-grad);
@@ -271,7 +293,7 @@ select:focus-visible {
 /* 品牌渐变按钮底色（primary Button 用） */
 .brand-btn {
   background-image: var(--brand-grad);
-  color: #fff;
+  color: var(--on-brand);
   box-shadow: var(--brand-glow);
   transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
 }
@@ -286,13 +308,14 @@ select:focus-visible {
 /* 侧边栏/导航活跃项渐变高亮（2026 桌面工具标准） */
 .nav-active {
   background-image: var(--brand-grad);
-  color: #fff;
+  color: var(--on-brand);
   box-shadow: var(--brand-glow);
 }
 
 /* Logo 徽标：渐变底 + 内发光 */
 .brand-logo {
   background-image: var(--brand-grad);
+  color: var(--on-brand);
   box-shadow: var(--brand-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
   position: relative;
 }
@@ -564,7 +587,7 @@ kbd {
 .shell-nav-group { padding: 8px 10px 2px; }
 .shell-nav-group__label {
   padding: 4px 8px;
-  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--muted-foreground);
 }
 .shell-nav-item {

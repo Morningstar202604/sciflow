@@ -281,7 +281,7 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
       {/* 顶栏：文档流 & 流水线入口 */}
       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
         <select
-          className="rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 text-sm bg-white dark:bg-slate-900 outline-none max-w-[180px] sm:max-w-[280px] min-w-0"
+          className="rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 text-sm bg-white dark:bg-slate-900 outline-none max-w-[min(60vw,220px)] sm:max-w-[280px] min-w-0"
           value={effectiveDocId ?? ''}
           onChange={(e) => setDocId(e.target.value || null)}
         >
@@ -341,7 +341,7 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
                 onClick={() => setSessionContext(sessionContext === sess.summary ? null : sess.summary)}
               >
                 <div className="text-slate-700 dark:text-slate-200 line-clamp-2">{sess.summary || '（无摘要）'}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">
+                <div className="text-[11px] text-slate-400 mt-0.5">
                   {new Date(sess.createdAt).toLocaleString()} · {sess.messageCount} 条消息 · {sess.totalTokens} tokens
                 </div>
               </button>
@@ -407,10 +407,10 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
               <div key={i}>
                 {m.role === 'user' ? (
                   <div className="group ml-auto max-w-[85%] w-fit flex flex-col items-end">
-                    <div className="rounded-2xl bg-teal-600/10 dark:bg-teal-400/10 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words">
+                    <div className="rounded-2xl bg-teal-600/10 dark:bg-teal-400/10 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words" data-testid="user-message">
                       {m.content}
                     </div>
-                    <div className="mt-0.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <div className="mt-0.5 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       <button onClick={() => copyMsg(i)} className="p-1 rounded text-slate-400 hover:text-teal-600" title="复制" aria-label="复制提问">
                         {copiedIdx === i ? <Check size={11} /> : <Copy size={11} />}
                       </button>
@@ -433,17 +433,17 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
                     {m.sources && m.sources.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {m.sources.slice(0, 4).map((s, k) => (
-                          <span key={k} className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-slate-400" title={s.chunkText?.slice(0, 200)}>
+                          <span key={k} className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-500 dark:text-slate-400" title={s.chunkText?.slice(0, 200)}>
                             📄 {s.docName} · {(s.score ?? 0).toFixed?.(0) ?? s.score}
                           </span>
                         ))}
                       </div>
                     )}
                     {m.usage && !m.streaming && (
-                      <div className="mt-1 text-[10px] text-slate-400">↑{m.usage.prompt_tokens} ↓{m.usage.completion_tokens}</div>
+                      <div className="mt-1 text-[11px] text-slate-400">↑{m.usage.prompt_tokens} ↓{m.usage.completion_tokens}</div>
                     )}
                     {!m.streaming && (
-                      <div className="mt-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <div className="mt-1 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                         <button onClick={() => copyMsg(i)} className="p-1 rounded text-slate-400 hover:text-teal-600" title="复制回答" aria-label="复制回答">
                           {copiedIdx === i ? <Check size={12} className="text-teal-600" /> : <Copy size={12} />}
                         </button>
@@ -453,7 +453,7 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
                         <button onClick={() => deleteMsg(i)} className="p-1 rounded text-slate-400 hover:text-rose-500" title="删除这条回答" aria-label="删除回答">
                           <Trash2 size={12} />
                         </button>
-                        {m.stopped && <span className="text-[10px] text-amber-600 dark:text-amber-400 ml-1">已停止</span>}
+                        {m.stopped && <span className="text-[11px] text-amber-600 dark:text-amber-400 ml-1">已停止</span>}
                       </div>
                     )}
                   </div>
@@ -475,7 +475,7 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
                   {task.steps.map((s) => (
                     <span
                       key={s.key}
-                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] ${
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] ${
                         s.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
                         : s.status === 'failed' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
                         : s.status === 'running' || s.status === 'scored' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300'
@@ -538,7 +538,7 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
               >
                 <Globe size={12} /> 联网{webSearch ? '已开' : ''}
               </button>
-              <span className="text-[10px] text-slate-400">⌘/Ctrl+Enter 发送 · Esc 停止</span>
+              <span className="text-[11px] text-slate-400">⌘/Ctrl+Enter 发送 · Esc 停止</span>
             </div>
             <div className="flex items-end gap-2">
               <textarea
@@ -577,7 +577,7 @@ ${(activeDoc.content || '').slice(0, 1500)}` : undefined,
             {activeDoc ? (
               <WritingPreview content={activeDoc.content || ''} editorMode="preview" exported={[]} />
             ) : (
-              <Empty text="暂无文档" hint="在下方对话让 AI 起草，或运行流水线自动成稿" />
+              <Empty illustration="documents" text="还没有文档" hint="在下方对话让 AI 起草，或运行流水线自动成稿" />
             )}
           </div>
         </div>

@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { DashboardOverview, Project } from '../types';
 import { Button, Card, Empty, Skeleton, Badge, jsonText, SectionTitle, Textarea, errMsg } from '../components/ui';
 import { Donut, HBar, MetricCard } from '../components/charts';
+import { formatWordCount } from '../lib/format';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { View } from '../App';
@@ -43,13 +44,21 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
   const [prefaceSaving, setPrefaceSaving] = useState(false);
   const toast = useContext(ToastContext);
 
+  const [creatingDoc, setCreatingDoc] = useState(false);
   const createDoc = async () => {
-    if (!newTitle.trim()) return;
-    const doc = await api.documents.create(project.id, newTitle.trim());
-    void qc.invalidateQueries({ queryKey: ['dash', project.id] });
-    setNewTitle('');
-    toast('success', `草稿「${doc.title}」已创建`);
-    openDoc(doc.id);
+    if (!newTitle.trim() || creatingDoc) return;
+    setCreatingDoc(true);
+    try {
+      const doc = await api.documents.create(project.id, newTitle.trim());
+      void qc.invalidateQueries({ queryKey: ['dash', project.id] });
+      setNewTitle('');
+      toast('success', `草稿「${doc.title}」已创建`);
+      openDoc(doc.id);
+    } catch (e: unknown) {
+      toast('error', errMsg(e) || '创建草稿失败');
+    } finally {
+      setCreatingDoc(false);
+    }
   };
 
   /** 差距#22：保存项目级系统提示（每轮写作自动注入；注入逻辑在 AI 域，这里只落字段） */
@@ -76,7 +85,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
   ];
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="page-container">
       {/* 项目总览（大厂式：白底 + 数据统计，去渐变去重色） */}
       <Card className="p-4 sm:p-6 mb-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -231,7 +240,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
               onChange={(e) => setNewTitle(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && createDoc()}
             />
-            <Button onClick={createDoc} disabled={!newTitle.trim()}>
+            <Button onClick={createDoc} disabled={!newTitle.trim()} loading={creatingDoc}>
               <Plus size={15} /> 新建
             </Button>
           </div>
@@ -248,12 +257,12 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
       ) : docs.length === 0 ? (
         <Empty text="暂无草稿，新建一篇开始写作，或到「全自动流水线」一键生成" />
       ) : (
-        <div className="grid md:grid-cols-2 gap-3">
+        <div className="grid md:grid-cols-2 gap-3 [&>*]:min-w-0">
           {docs.map((d) => {
             const outline = jsonText<{ title: string; sections: { title: string }[] }>(d.outline, { title: '', sections: [] });
             const totalSec = outline.sections?.length || 0;
             const writtenSec = totalSec ? outline.sections.filter((s) => (d.content || '').includes(s.title)).length : 0;
-            const wordK = Math.round((d.content?.length || 0) / 100) / 10;
+            const words = formatWordCount(d.content?.length || 0);
             return (
               <Card key={d.id} className="p-4 cursor-pointer card-lift hover:border-teal-300 dark:hover:border-teal-700" onClick={() => openDoc(d.id)}>
                 <div className="flex items-start justify-between gap-2">
@@ -262,13 +271,13 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
                     {d.status === 'final' ? '已定稿' : d.status === 'polished' ? '已润色' : '草稿'}
                   </Badge>
                 </div>
-                <div className="flex items-center gap-3 mt-2 text-xs text-slate-400 dark:text-slate-500">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-slate-500 dark:text-slate-400">
                   <span className="flex items-center gap-1">
                     <FileText size={12} /> v{d.version}
                   </span>
                   <span>大纲 {totalSec} 章</span>
-                  <span>{wordK}K 字</span>
-                  <span className="ml-auto">{new Date(d.updatedAt).toLocaleString()}</span>
+                  <span>{words}</span>
+                  <span className="w-full sm:w-auto sm:ml-auto">{new Date(d.updatedAt).toLocaleString()}</span>
                 </div>
                 {totalSec > 0 && (
                   <div className="mt-2.5">
@@ -279,7 +288,7 @@ export function DashboardPage({ project, onNavigate, openDoc }: {
                           label: '写作进度',
                           value: writtenSec,
                           sub: `${writtenSec}/${totalSec} 章`,
-                          hint: `v${d.version} · 已写 ${writtenSec}/${totalSec} 章 · ${wordK}K 字`,
+                          hint: `v${d.version} · 已写 ${writtenSec}/${totalSec} 章 · ${words}`,
                         },
                       ]}
                     />

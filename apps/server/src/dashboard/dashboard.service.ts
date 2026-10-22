@@ -79,7 +79,9 @@ export class DashboardService {
   }
 
   private countRows(table: SQLiteTable): number {
-    return db.select().from(table).all().length;
+    // COUNT(*) 而非 select().all().length：后者把整表拉进内存（文档/文献多时纯浪费）
+    const row = db.select({ n: sql<number>`COUNT(*)` }).from(table).get();
+    return Number(row?.n ?? 0);
   }
 
   /**

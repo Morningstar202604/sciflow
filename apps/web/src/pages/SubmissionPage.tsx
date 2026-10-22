@@ -6,7 +6,7 @@ import {
 import { api } from '../api/client';
 import { ToastContext } from '../App';
 import type { Doc, Journal, JournalMatchResult, ParseEmailResult, Project, ReviewComment, SubmissionStatus, SubmissionTrack } from '../types';
-import { Badge, Button, Card, ErrorBox, Input, Select, Spinner, Textarea, errMsg } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, ErrorBox, Input, Select, Spinner, Textarea, errMsg } from '../components/ui';
 import { HBar } from '../components/charts';
 
 type Tab = 'journals' | 'cover' | 'reply' | 'track';
@@ -29,7 +29,7 @@ const STATUS_META: Record<SubmissionStatus, { label: string; tone: 'slate' | 'gr
 };
 const STATUS_OPTIONS = (Object.keys(STATUS_META) as SubmissionStatus[]).map((s) => ({
   value: s,
-  label: `${STATUS_META[s].label}（${s}）`,
+  label: STATUS_META[s].label,
 }));
 /** 活跃链路 Stepper 节点（终态不展示步进条） */
 const STEPPER_CHAIN: SubmissionStatus[] = ['submitted', 'initial_review', 'external_review', 'review_returned', 'minor_revision', 're_review', 'final_review', 'accepted', 'in_production'];
@@ -52,6 +52,8 @@ function revisionBadge(deadline: number | null): ReactNode {
 export function SubmissionPage({ project }: { project: Project }) {
   const [tab, setTab] = useState<Tab>('journals');
   const [loadErr, setLoadErr] = useState('');
+  const [removingJournal, setRemovingJournal] = useState<Journal | null>(null);
+  const [removingTrack, setRemovingTrack] = useState<SubmissionTrack | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [selDoc, setSelDoc] = useState('');
   const [busy, setBusy] = useState(false);
@@ -414,7 +416,7 @@ export function SubmissionPage({ project }: { project: Project }) {
   return (
     <>
       <ErrorBox message={loadErr} />
-    <div className="max-w-4xl mx-auto">
+    <div className="page-container">
       <div className="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-800 overflow-x-auto">
         {TABS.map((t) => (
           <button
@@ -613,13 +615,13 @@ export function SubmissionPage({ project }: { project: Project }) {
                         <div className="mt-2 flex items-center gap-2">
                           <button
                             onClick={() => pickJournalToSubmit(j)}
-                            className="inline-flex items-center gap-1 text-xs rounded-md bg-teal-600 text-white px-2.5 py-1 hover:bg-teal-700"
+                            className="inline-flex items-center gap-1 text-xs rounded-md bubble-user px-2.5 py-1 hover:brightness-110"
                             title="把这本期刊带入「投稿跟踪」登记表单"
                           >
                             <Send size={12} /> 投它
                           </button>
                           {!j.isInLibrary && (
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500">未入期刊库，登记时可手动补录以获取一审周期</span>
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500">未入期刊库，登记时可手动补录以获取一审周期</span>
                           )}
                         </div>
                       </div>
@@ -661,7 +663,7 @@ export function SubmissionPage({ project }: { project: Project }) {
                     {j.if2024 ? <Badge tone="teal">IF {j.if2024}</Badge> : null}
                     {j.quartile ? <Badge tone="slate">{j.quartile}</Badge> : null}
                     {j.firstDecisionWeeks ? <span className="text-[11px] text-slate-400 dark:text-slate-500">{j.firstDecisionWeeks} 周一审</span> : null}
-                    <button className="text-slate-300 hover:text-rose-500 shrink-0" title="移除" onClick={async () => { await api.submission.removeJournal(j.id); loadLib(); }}>
+                    <button className="p-1 text-slate-400 hover:text-rose-500 shrink-0" title="移除期刊" aria-label={`移除期刊 ${j.name}`} onClick={() => setRemovingJournal(j)}>
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -719,7 +721,7 @@ export function SubmissionPage({ project }: { project: Project }) {
                     >
                       <MessageSquareReply size={11} className="inline mr-0.5" />审稿→事件{openCounts[t.id] ? `（${openCounts[t.id]}）` : ''}
                     </button>
-                    <button className="text-slate-300 hover:text-rose-500" title="删除" onClick={() => removeTrack(t.id)}>
+                    <button className="p-1 text-slate-400 hover:text-rose-500" title="删除投稿记录" aria-label="删除投稿记录" onClick={() => setRemovingTrack(t)}>
                       <Trash2 size={13} />
                     </button>
                   </div>
@@ -765,7 +767,7 @@ export function SubmissionPage({ project }: { project: Project }) {
                               i <= stepIdx ? (i === stepIdx ? 'bg-teal-600 ring-4 ring-teal-100 dark:ring-teal-900/40' : 'bg-teal-400') : 'bg-slate-200 dark:bg-slate-700'
                             }`}
                           />
-                          <span className={`text-[9px] mt-0.5 ${i === stepIdx ? 'text-teal-700 font-medium' : 'text-slate-400'}`}>{STATUS_META[s].label}</span>
+                          <span className={`text-[11px] mt-0.5 ${i === stepIdx ? 'text-teal-700 font-medium' : 'text-slate-400'}`}>{STATUS_META[s].label}</span>
                         </div>
                         {i < STEPPER_CHAIN.length - 1 && <div className={`h-px flex-1 mx-0.5 mb-3 ${i < stepIdx ? 'bg-teal-400' : 'bg-slate-200 dark:bg-slate-700'}`} />}
                       </div>
@@ -831,7 +833,7 @@ export function SubmissionPage({ project }: { project: Project }) {
                           <Badge tone={(STATUS_META[ev.toStatus as SubmissionStatus] || STATUS_META.submitted).tone}>
                             {(STATUS_META[ev.toStatus as SubmissionStatus] || STATUS_META.submitted).label}
                           </Badge>
-                          {ev.source === 'email_ai' && <span className="text-[10px] text-slate-400">AI 邮件解析</span>}
+                          {ev.source === 'email_ai' && <span className="text-[11px] text-slate-400">AI 邮件解析</span>}
                         </div>
                         {ev.note && <div className="text-slate-500 dark:text-slate-400 mt-0.5">{ev.note}</div>}
                       </div>
@@ -859,6 +861,28 @@ export function SubmissionPage({ project }: { project: Project }) {
         )
       )}
     </div>
+      <ConfirmDialog
+        open={!!removingJournal}
+        title="移除期刊"
+        description={`确定从期刊库移除「${removingJournal?.name ?? ''}」？已记录的投稿跟踪不受影响。`}
+        confirmText="移除"
+        danger
+        onConfirm={async () => {
+          if (!removingJournal) return;
+          try { await api.submission.removeJournal(removingJournal.id); loadLib(); } catch (e: unknown) { setError(errMsg(e)); }
+          setRemovingJournal(null);
+        }}
+        onClose={() => setRemovingJournal(null)}
+      />
+      <ConfirmDialog
+        open={!!removingTrack}
+        title="删除投稿记录"
+        description={`确定删除「${removingTrack?.journalName ?? ''}」这条投稿记录？状态历史会一并删除，无法恢复。`}
+        confirmText="删除"
+        danger
+        onConfirm={() => { if (removingTrack) void removeTrack(removingTrack.id); setRemovingTrack(null); }}
+        onClose={() => setRemovingTrack(null)}
+      />
     </>
   );
 }

@@ -7,7 +7,8 @@ export class ReferencesController {
 
   /** 文献库内检索（不自动入库；projectId 可选，用于限定当前项目） */
   @Post('search')
-  search(@Body() body: { query: string; limit?: number; projectId?: string }) {
+  search(@Body() body: { query?: string; limit?: number; projectId?: string }) {
+    if (!body?.query?.trim()) return [];
     return this.references.search(body.query, body.limit || 8, body.projectId);
   }
 

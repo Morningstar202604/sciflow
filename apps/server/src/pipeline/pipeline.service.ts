@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql, gte } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import pLimit from 'p-limit';
 import { Command } from '@langchain/langgraph';
 import { db } from '../db/database';
-import { pipelineTasks, documents, pipelineConfigs, appSettings } from '../db/schema';
+import { pipelineTasks, documents, pipelineConfigs, appSettings, projects, llmCallLogs } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 import { ReferencesService, PaperHit } from '../references/references.service';
 import { parseJson, parseStringList } from '../common/json-guard';
@@ -12,6 +12,7 @@ import { PIPELINE_UI_STEPS, PIPELINE_STEP_KEYS } from '../common/pipeline-steps'
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { CitationRenderer } from './citation-renderer';
 import { AgentTraceService } from '../agent/agent-trace.service';
+import { reflexionLogs } from '../db/schema';
 import { buildPipelineGraph, type PipelineGraphDeps, type StepStatusWire } from './pipeline.graph';
 import type { Outline, PipelineTaskRow, ResearchPlan } from './pipeline-state';
 import { envInt } from '../../../../packages/core/src/env';
@@ -44,6 +45,8 @@ export class PipelineService implements OnModuleInit {
 
   /** taskId → agent_execution runId（每次图调用一次执行记录，断点续跑开新记录） */
   private readonly traceRuns = new Map<string, string>();
+  /** runId → 本轮图调用开始时间（按时间窗聚合 LLM token，避免 total_tokens 恒 0） */
+  private readonly runStartedAt = new Map<string, number>();
 
   constructor(
     private readonly ai: AiService,
@@ -129,7 +132,10 @@ export class PipelineService implements OnModuleInit {
   }
 
   create(projectId: string, topic: string) {
-    if (!topic.trim()) throw new BadRequestException('请先输入研究主题');
+    if (!projectId?.trim()) throw new BadRequestException('projectId 必填');
+    if (!topic?.trim()) throw new BadRequestException('请先输入研究主题');
+    const project = db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId.trim())).get();
+    if (!project) throw new BadRequestException('项目不存在');
     if (!this.ai.configured) throw new BadRequestException('AI 服务未配置：请在 apps/server/.env 设置 AI_API_KEY 后再运行流水线');
     // 项目级并发互斥（H5）：同项目同时只允许一条 running 流水线。
     // 背景：起草并行池 p-limit(3) 全局共享，双任务并行=6 路并发 → 429 风暴 + 成本翻倍；
@@ -166,8 +172,17 @@ export class PipelineService implements OnModuleInit {
   }
 
   remove(id: string) {
-    this.get(id);
-    db.delete(pipelineTasks).where(eq(pipelineTasks.id, id)).run();
+    const task = this.get(id);
+    if (task.status === 'running') throw new BadRequestException('流水线正在运行，请等待完成或先停止后再删除');
+    db.transaction((tx) => {
+      tx.delete(pipelineTasks).where(eq(pipelineTasks.id, id)).run();
+      tx.delete(reflexionLogs).where(eq(reflexionLogs.taskId, id)).run();
+      // LangGraph checkpoint 表：thread_id = taskId（不清理会在断点续跑时复活已删任务）
+      try {
+        tx.run(sql`DELETE FROM writes WHERE thread_id = ${id}`);
+        tx.run(sql`DELETE FROM checkpoints WHERE thread_id = ${id}`);
+      } catch { /* 旧库可能没有 checkpoint 表 */ }
+    });
     return { ok: true };
   }
 
@@ -218,15 +233,17 @@ export class PipelineService implements OnModuleInit {
       const task = this.getTaskRow(taskId);
       runId = this.trace.startRun({ projectId: task.projectId, source: resume ? 'pipeline-resume' : 'pipeline', input: task.topic, model: this.ai.config.model });
       this.traceRuns.set(taskId, runId);
+      this.runStartedAt.set(runId, Date.now());
       const cfg = { configurable: { thread_id: taskId } };
       const result = await this.graph.invoke(input as never, cfg as never);
       const interrupts = (result as { __interrupt__?: unknown[] } | undefined)?.__interrupt__;
+      const tokens = this.tokensSince(this.runStartedAt.get(runId) || Date.now());
       if (interrupts && interrupts.length > 0) {
         this.setStatus(taskId, 'awaiting_confirmation', 'outline');
-        this.trace.finishRun(runId, { status: 'done', outputSummary: '大纲待人工确认（interrupt 挂起）' });
+        this.trace.finishRun(runId, { status: 'done', outputSummary: '大纲待人工确认（interrupt 挂起）', totalTokens: tokens });
       } else {
         this.setStatus(taskId, 'completed', 'complete');
-        this.trace.finishRun(runId, { status: 'done', outputSummary: '流水线完成' });
+        this.trace.finishRun(runId, { status: 'done', outputSummary: '流水线完成', totalTokens: tokens });
       }
     } catch (e: any) {
       this.logger.error(`流水线 ${taskId} 执行失败: ${e.message}`);
@@ -235,9 +252,10 @@ export class PipelineService implements OnModuleInit {
       if (cur) cur.status = 'failed';
       this.saveSteps(taskId, steps);
       this.setStatus(taskId, 'failed', cur?.key || '', e.message || String(e));
-      if (runId) this.trace.finishRun(runId, { status: 'error', error: e.message || String(e) });
+      if (runId) this.trace.finishRun(runId, { status: 'error', error: e.message || String(e), totalTokens: this.tokensSince(this.runStartedAt.get(runId) || Date.now()) });
     } finally {
       this.traceRuns.delete(taskId);
+      if (runId) this.runStartedAt.delete(runId);
     }
   }
 
@@ -289,6 +307,19 @@ export class PipelineService implements OnModuleInit {
         toolName: key,
         status: status === 'failed' ? 'error' : 'ok',
       });
+    }
+  }
+
+  /** 时间窗内 LLM token 合计（用于把 Agent 执行与真实成本对上，历史恒 0） */
+  private tokensSince(since: number): number {
+    try {
+      const row = db.select({ total: sql<number>`COALESCE(SUM(${llmCallLogs.totalTokens}), 0)` })
+        .from(llmCallLogs)
+        .where(and(gte(llmCallLogs.createdAt, since), eq(llmCallLogs.kind, 'llm')))
+        .get();
+      return Number(row?.total || 0);
+    } catch {
+      return 0;
     }
   }
 

@@ -97,15 +97,15 @@ export function MemoryPage() {
   const maxKw = topKws.length ? topKws[0][1] : 1;
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={error || listError} />
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200 font-semibold">
-          <Brain size={16} className="brand-gradient-text" /> 记忆中心
+          <Brain size={16} className="text-teal-600 dark:text-teal-300" /> 记忆中心
         </div>
         <div className="text-xs text-slate-400 dark:text-slate-500 mt-1 mb-3">
-          Agentic Memory：情景记忆自动沉淀每次完成的研究任务；程序记忆保存写作风格指令，起草时自动注入（对标 NotebookLM / Agentic Memory）
+          情景记忆自动沉淀每次完成的研究任务；程序记忆保存写作风格指令，起草时自动注入
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
@@ -176,7 +176,7 @@ export function MemoryPage() {
                       style={{ fontSize: `${11 + t * 4}px`, opacity: 0.55 + t * 0.45, fontWeight: t > 0.7 ? 600 : 400 }}
                     >
                       {kw}
-                      <span className="ml-1 text-[10px] text-slate-400">{n}</span>
+                      <span className="ml-1 text-[11px] text-slate-400">{n}</span>
                     </button>
                   );
                 })}
@@ -214,7 +214,7 @@ export function MemoryPage() {
           <Spinner label="加载记忆…" />
         </div>
       ) : items.length === 0 ? (
-        <Empty text="暂无记忆。运行一次全自动流水线会自动沉淀情景记忆；或点击「新增写作指令」保存写作风格" />
+        <Empty illustration="chat" text="还没有记忆" hint="运行一次全自动流水线会自动沉淀情景记忆；也可以新增写作指令" />
       ) : (
         <div className="space-y-2">
           {items.map((m) => (

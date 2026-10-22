@@ -37,9 +37,11 @@ export class DocumentsController {
   }
 
   @Post()
-  create(@Body() body: { projectId: string; title: string }, @Req() req: { user?: AuthPayload }) {
+  create(@Body() body: { projectId?: string; title?: string }, @Req() req: { user?: AuthPayload }) {
+    if (!body?.projectId?.trim()) throw new BadRequestException('projectId 必填');
+    if (!body?.title?.trim()) throw new BadRequestException('文档标题必填');
     this.access.assertProject(body.projectId, req.user);
-    return this.documents.create(body.projectId, body);
+    return this.documents.create(body.projectId, { title: body.title });
   }
 
   @Patch(':id')

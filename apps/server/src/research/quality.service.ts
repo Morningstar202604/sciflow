@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { eq, desc, and, gte } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/database';
-import { qualityReports, reviewComments } from '../db/schema';
+import { qualityReports, reviewComments, documents } from '../db/schema';
 import { AiService, ReviewResult } from '../ai/ai.service';
 import { parseJson } from '../common/json-guard';
 
@@ -23,6 +23,9 @@ export class QualityService {
 
   /** 对文档执行 7 维质量评分并落库（借鉴 ARS 0-100 质量关卡） */
   async review(documentId: string, title: string, content: string) {
+    if (!documentId?.trim()) throw new BadRequestException('documentId 必填');
+    const doc = db.select({ id: documents.id }).from(documents).where(eq(documents.id, documentId)).get();
+    if (!doc) throw new NotFoundException('文档不存在');
     if (!content || content.length < 50) {
       throw new BadRequestException('文档内容过短，暂无法评分（至少 50 字）');
     }

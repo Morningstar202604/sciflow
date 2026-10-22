@@ -54,20 +54,22 @@ Logo 主体为**一笔流线 "S"**：起笔于右上、收笔于左下，三段�
 ### 3.1 品牌渐变（主视觉）
 
 ```
-teal  #0d9488  →  cyan #0891b2  →  sky #0284c7    （135° 线性）
+teal  #0b8079  →  cyan #0a7896  →  sky #0b6fc4    （135° 线性）
 ```
 
 暗色模式下整体提亮一档：
 
 ```
-teal  #14b8a6  →  cyan #06b6d4  →  sky #0ea5e9    （135° 线性）
+teal  #2dd4bf  →  cyan #22d3ee  →  sky #38bdf8    （135° 线性）
 ```
 
 ### 3.2 Token 对照表（与 `apps/web/src/index.css` 一一对应）
 
 | Token | 亮色 | 暗色 | 用途 |
 |---|---|---|---|
-| `--brand-400/500/600` | #14b8a6 / #0d9488 / #0f766e | — | 强调色、聚焦环、边框辉光 |
+| `--brand-400/500/600` | #14b8a6 / #0f9e94 / #0b7f78 | — | 强调色、聚焦环、边框辉光 |
+| `--brand-700` | #0b6f68 | #5eead4 | 正文级品牌文字（白底 4.86:1，达 WCAG AA） |
+| `--on-brand` | #ffffff | #04211f | 品牌渐变上的文字色（亮色 4.8–5.1:1，暗色 6.8–9.4:1） |
 | `--brand-grad` | teal→cyan→sky 135° | 提亮版 | 主按钮、导航高亮、Logo 底、渐变文字 |
 | `--brand-grad-soft` | 8%–10% 透明度 | 9%–12% | 页面区块氛围底、选中态淡底 |
 | `--brand-glow` | teal/cyan 双层投影 | 提亮版 | `brand-btn` / `brand-logo` / `nav-active` |

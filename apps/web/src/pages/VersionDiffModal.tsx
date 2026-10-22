@@ -173,7 +173,7 @@ export function VersionDiffModal({
             <div key={side} className="flex-1 min-w-[180px] flex items-center gap-1.5">
               <span className="text-slate-400 shrink-0">{side} · v{s.version}</span>
               {s.current ? (
-                <span className="text-[10px] text-slate-300 dark:text-slate-600 shrink-0">（当前内容，不可命名）</span>
+                <span className="text-[11px] text-slate-300 dark:text-slate-600 shrink-0">（当前内容，不可命名）</span>
               ) : (
                 <input
                   key={`${s.version}-${getVName(s.version)}`}
@@ -184,7 +184,7 @@ export function VersionDiffModal({
                 />
               )}
               {!s.current && (
-                <Button variant="outline" className="text-[10px] px-1.5 py-0.5 shrink-0" onClick={() => onRestore(s)}>
+                <Button variant="outline" className="text-[11px] px-1.5 py-0.5 shrink-0" onClick={() => onRestore(s)}>
                   恢复此版
                 </Button>
               )}
@@ -207,7 +207,7 @@ export function VersionDiffModal({
           </div>
         ))}
       </div>
-      <div className="mt-2 text-[10px] text-slate-400 dark:text-slate-500">
+      <div className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
         红 = 左栏独有（相对删除） · 绿 = 右栏独有（新增） · 按行 LCS 对比（≤{MAX_DIFF_LINES} 行完整对比）。
         版本名保存在后端；浏览器本地旧命名已自动迁移。
         {diffResult.truncated && (

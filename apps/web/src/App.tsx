@@ -3,14 +3,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageErrorBoundary } from './components/PageErrorBoundary';
 import {
-  BookOpen, Brain, Beaker, FlaskConical, LayoutDashboard, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, MessageSquare as MessageSquareIcon, XCircle as XCircleIcon,
+  BookOpen, Brain, Beaker, LayoutDashboard, Plus, RefreshCw, Search, Send, Settings, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, MessageSquare as MessageSquareIcon, XCircle as XCircleIcon, Gauge, Library, LayoutGrid,
 } from 'lucide-react';
 import { api } from './api/client';
 import { isNetworkError } from './api/core';
 import type { KnowledgeDoc, Project, Reference } from './types';
 import { errMsg } from './components/ui';
+import { applyTheme, readStoredTheme, resolveTheme, systemPrefersDark, THEME_OPTIONS, type ThemeMode } from './lib/theme';
 import { AuthGate } from './components/AuthGate';
 import { AppShell, ShellNavGroup, ShellNavItem, useAppShell } from './components/AppShell';
+import { BrandLockup } from './components/BrandMark';
 import { Button, Input, Modal, Spinner, ErrorBox, ToastViewport, ConfirmDialog, type ToastItem, type ToastKind } from './components/ui';
 // 路由级代码分割：所有页面懒加载（首屏只加载当前视图，大厂 SPA 标准）
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
@@ -59,38 +61,12 @@ export type View =
   | 'settings';
 
 /** 全部视图键（由类型收敛而来，作为路径解析的单一白名单来源） */
+/** 平台修饰键显示文案（Windows 上不显示 ⌘） */
+const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+
 const VIEW_KEYS: readonly View[] = ['workspace', 'dashboard', 'writing', 'literature', 'experiments', 'pipeline', 'quality', 'chat', 'submission', 'knowledge', 'memory', 'settings'];
 
 /** 功能导航分组（大厂式：按工作流分组，设置独立收纳到底部） */
-const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: typeof LayoutDashboard }[] }[] = [
-  {
-    label: '核心工作',
-    items: [
-      { key: 'workspace', label: '工作台', icon: LayoutDashboard },
-      { key: 'chat', label: '科研问答', icon: MessageSquareIcon },
-      { key: 'writing', label: '长文写作', icon: BookOpen },
-      { key: 'literature', label: '文献库', icon: FlaskConical },
-      { key: 'knowledge', label: '知识库', icon: BookMarked },
-    ],
-  },
-  {
-    label: '自动化',
-    items: [
-      { key: 'pipeline', label: '流水线', icon: Workflow },
-      { key: 'quality', label: '质量评分', icon: Sparkles },
-      { key: 'memory', label: '记忆中心', icon: Brain },
-    ],
-  },
-  {
-    label: '辅助',
-    items: [
-      { key: 'dashboard', label: '项目总览', icon: LayoutDashboard },
-      { key: 'experiments', label: '实验记录', icon: Beaker },
-      { key: 'submission', label: '投稿辅助', icon: Send },
-    ],
-  },
-];
-
 const VIEW_LABELS: Record<View, string> = {
   workspace: '工作台',
   dashboard: '项目总览',
@@ -105,6 +81,37 @@ const VIEW_LABELS: Record<View, string> = {
   submission: '投稿辅助',
   settings: '设置',
 };
+
+/** 功能导航分组（大厂式：按工作流分组，设置独立收纳到底部）；名称唯一来源 = VIEW_LABELS */
+const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: typeof LayoutDashboard }[] }[] = [
+  {
+    label: '核心工作',
+    items: [
+      { key: 'workspace', label: VIEW_LABELS.workspace, icon: LayoutDashboard },
+      { key: 'chat', label: VIEW_LABELS.chat, icon: MessageSquareIcon },
+      { key: 'writing', label: VIEW_LABELS.writing, icon: BookOpen },
+      { key: 'literature', label: VIEW_LABELS.literature, icon: Library },
+      { key: 'knowledge', label: VIEW_LABELS.knowledge, icon: BookMarked },
+    ],
+  },
+  {
+    label: '自动化',
+    items: [
+      { key: 'pipeline', label: VIEW_LABELS.pipeline, icon: Workflow },
+      { key: 'quality', label: VIEW_LABELS.quality, icon: Gauge },
+      { key: 'memory', label: VIEW_LABELS.memory, icon: Brain },
+    ],
+  },
+  {
+    label: '辅助',
+    items: [
+      { key: 'dashboard', label: VIEW_LABELS.dashboard, icon: LayoutGrid },
+      { key: 'experiments', label: VIEW_LABELS.experiments, icon: Beaker },
+      { key: 'submission', label: VIEW_LABELS.submission, icon: Send },
+    ],
+  },
+];
+
 
 /** 页面级留白：全屏型页面（写作/工作台）自己管内边距，列表型页面统一留白 */
 const PAGE_PADDING: Partial<Record<View, string>> = {
@@ -127,7 +134,7 @@ const PAGE_RENDERERS: Record<View, (ctx: PageRenderCtx) => ReactNode> = {
   workspace: ({ project, openDoc, initialDocId }) =>
     project ? (
       <PageErrorBoundary pageName="工作台">
-        <SuspensePage>
+        <SuspensePage name="工作台">
           {/* key=project.id：切项目必须整页重挂载，否则旧项目的消息会被写进新项目的 localStorage（跨项目串话） */}
           <WorkspacePage key={project.id} project={project} initialDocId={initialDocId} onOpenFullEditor={openDoc} />
         </SuspensePage>
@@ -137,27 +144,29 @@ const PAGE_RENDERERS: Record<View, (ctx: PageRenderCtx) => ReactNode> = {
   dashboard: ({ project, onNavigate, openDoc }) =>
     project ? <PageErrorBoundary pageName="工作台"><SuspensePage name="项目总览"><DashboardPage project={project} onNavigate={onNavigate} openDoc={openDoc} /></SuspensePage></PageErrorBoundary> : null,
   writing: ({ project, initialDocId }) =>
-    project ? <PageErrorBoundary pageName="论文写作"><SuspensePage name="论文写作"><WritingPage project={project} initialDocId={initialDocId} /></SuspensePage></PageErrorBoundary> : null,
-  literature: ({ project }) => (project ? <PageErrorBoundary pageName="文献调研"><SuspensePage name="文献调研"><LiteraturePage project={project} /></SuspensePage></PageErrorBoundary> : null),
-  experiments: ({ project }) => (project ? <PageErrorBoundary pageName="实验记录"><SuspensePage name="实验记录"><ExperimentsPage project={project} /></SuspensePage></PageErrorBoundary> : null),
-  knowledge: ({ project }) => (project ? <PageErrorBoundary pageName="知识库"><SuspensePage name="知识库"><KnowledgePage project={project} /></SuspensePage></PageErrorBoundary> : null),
-  memory: ({ project }) => (project ? <PageErrorBoundary pageName="记忆中心"><SuspensePage name="记忆中心"><MemoryPage /></SuspensePage></PageErrorBoundary> : null),
+    project ? <PageErrorBoundary pageName="论文写作"><SuspensePage name="论文写作"><WritingPage key={project.id} project={project} initialDocId={initialDocId} /></SuspensePage></PageErrorBoundary> : null,
+  literature: ({ project }) => (project ? <PageErrorBoundary pageName="文献调研"><SuspensePage name="文献调研"><LiteraturePage key={project.id} project={project} /></SuspensePage></PageErrorBoundary> : null),
+  experiments: ({ project }) => (project ? <PageErrorBoundary pageName="实验记录"><SuspensePage name="实验记录"><ExperimentsPage key={project.id} project={project} /></SuspensePage></PageErrorBoundary> : null),
+  knowledge: ({ project }) => (project ? <PageErrorBoundary pageName="知识库"><SuspensePage name="知识库"><KnowledgePage key={project.id} project={project} /></SuspensePage></PageErrorBoundary> : null),
+  memory: ({ project }) => (project ? <PageErrorBoundary pageName="记忆中心"><SuspensePage name="记忆中心"><MemoryPage key={project.id} /></SuspensePage></PageErrorBoundary> : null),
   pipeline: ({ project, openDoc }) =>
-    project ? <PageErrorBoundary pageName="全自动流水线"><SuspensePage name="流水线"><PipelinePage project={project} onOpenDoc={openDoc} /></SuspensePage></PageErrorBoundary> : null,
+    project ? <PageErrorBoundary pageName="全自动流水线"><SuspensePage name="全自动流水线"><PipelinePage key={project.id} project={project} onOpenDoc={openDoc} /></SuspensePage></PageErrorBoundary> : null,
   quality: ({ project }) =>
     project ? (
       <PageErrorBoundary pageName="质量评分">
         <Suspense fallback={<div className="p-8 text-sm text-slate-400" role="status" aria-label="加载质量评分">加载质量评分…</div>}>
-          <QualityPage project={project} />
+          <QualityPage key={project.id} project={project} />
         </Suspense>
       </PageErrorBoundary>
     ) : null,
   chat: ({ project }) => (project ? <PageErrorBoundary pageName="科研问答"><SuspensePage name="科研问答"><ChatPage key={project.id} project={project} /></SuspensePage></PageErrorBoundary> : null),
-  submission: ({ project }) => (project ? <PageErrorBoundary pageName="投稿辅助"><SuspensePage name="投稿辅助"><SubmissionPage project={project} /></SuspensePage></PageErrorBoundary> : null),
+  submission: ({ project }) => (project ? <PageErrorBoundary pageName="投稿辅助"><SuspensePage name="投稿辅助"><SubmissionPage key={project.id} project={project} /></SuspensePage></PageErrorBoundary> : null),
 };
 
-export const ThemeContext = createContext<{ theme: 'light' | 'dark'; toggle: () => void }>({
+export const ThemeContext = createContext<{ theme: 'light' | 'dark'; mode: ThemeMode; setMode: (m: ThemeMode) => void; toggle: () => void }>({
   theme: 'light',
+  mode: 'system',
+  setMode: () => undefined,
   toggle: () => undefined,
 });
 
@@ -177,7 +186,10 @@ function AppInner() {
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [projectQuery, setProjectQuery] = useState('');
   const [commandOpen, setCommandOpen] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('sciflow-theme') as 'light' | 'dark') || 'light');
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredTheme());
+  /** 系统偏好单独存 state，主题在渲染期派生（避免 effect 里 setState 造成级联渲染） */
+  const [systemDark, setSystemDark] = useState<boolean>(() => systemPrefersDark());
+  const theme: 'light' | 'dark' = themeMode === 'system' ? (systemDark ? 'dark' : 'light') : themeMode;
 
   // ---- 全局 Toast 反馈 ----
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -199,9 +211,22 @@ function AppInner() {
   );
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('sciflow-theme', theme);
+    localStorage.setItem('sciflow-theme', themeMode);
+  }, [themeMode]);
+
+  // 主题落到 <html>（唯一外部副作用）；theme 为派生值
+  useEffect(() => {
+    applyTheme(theme);
   }, [theme]);
+
+  // 跟随系统：系统主题变化时更新 systemDark（仅订阅，不在回调外 setState）
+  useEffect(() => {
+    if (typeof matchMedia === 'undefined') return;
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // 路由级标题：浏览器标签/历史记录可区分（此前全站恒为默认标题，多标签时无法辨认）
   useEffect(() => {
@@ -299,7 +324,7 @@ function AppInner() {
   }
 
   return (
-    <ThemeContext.Provider value={{ theme, toggle: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')) }}>
+    <ThemeContext.Provider value={{ theme, mode: themeMode, setMode: setThemeMode, toggle: () => setThemeMode((m) => (resolveTheme(m) === 'dark' ? 'light' : 'dark')) }}>
       <ToastContext.Provider value={toast}>
         {/* 全局登录门：仅 AUTH_MODE=jwt 企业模式可见，本地/桌面模式零干扰 */}
         <AuthGate />
@@ -322,7 +347,8 @@ function AppInner() {
                 onDeleteProject={setDeletingProject}
                 aiReady={aiReady}
                 theme={theme}
-                onToggleTheme={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+                themeMode={themeMode}
+                onSetThemeMode={setThemeMode}
                 onOpenCommand={() => setCommandOpen(true)}
                 loading={loading}
               />
@@ -441,7 +467,8 @@ function SidebarContent({
   onDeleteProject,
   aiReady,
   theme,
-  onToggleTheme,
+  themeMode,
+  onSetThemeMode,
   onOpenCommand,
   loading,
 }: {
@@ -458,7 +485,8 @@ function SidebarContent({
   onDeleteProject: (p: Project) => void;
   aiReady: boolean | null;
   theme: 'light' | 'dark';
-  onToggleTheme: () => void;
+  themeMode: ThemeMode;
+  onSetThemeMode: (m: ThemeMode) => void;
   onOpenCommand: () => void;
   loading: boolean;
 }) {
@@ -466,18 +494,8 @@ function SidebarContent({
   return (
     <>
       {/* 品牌区 */}
-      <div className="flex items-center gap-2.5 px-4 pb-2 pt-4">
-        <div className="brand-logo flex h-7 w-7 items-center justify-center rounded-lg text-white">
-          <svg viewBox="0 0 64 64" className="h-5 w-5" aria-hidden="true">
-            <path d="M 46.2 16.8 C 40.4 11.0, 28.2 10.5, 22.8 16.4 C 17.1 22.6, 23.2 29.3, 32.0 31.4 C 40.7 33.5, 47.0 36.9, 44.8 43.4 C 42.5 49.9, 31.3 52.4, 20.6 46.8" fill="none" stroke="currentColor" strokeWidth="5.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <div className="leading-tight">
-          <div className="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-            Sci<span className="brand-gradient-text">Flow</span>
-          </div>
-          <div className="-mt-0.5 text-[10px] text-slate-400">让科研从想法到成文</div>
-        </div>
+      <div className="px-4 pb-2 pt-4">
+        <BrandLockup />
       </div>
 
       {/* 导航 */}
@@ -537,10 +555,11 @@ function SidebarContent({
             {currentProjectId === p.id && <span className="brand-logo absolute left-0 top-1/2 h-4 w-1 -translate-y-1/2 rounded-full" />}
             <div className="flex items-center justify-between gap-1">
               <span className="truncate">{p.name}</span>
-              <span className="hidden items-center gap-1 group-hover:flex">
+              <span className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                 <button
-                  className="text-[11px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                  title="重命名"
+                  className="flex h-7 w-7 items-center justify-center rounded text-[11px] text-slate-400 hover:bg-slate-200/70 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                  title="重命名项目"
+                  aria-label={`重命名项目 ${p.name}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     onRenameProject(p);
@@ -549,14 +568,15 @@ function SidebarContent({
                   改
                 </button>
                 <button
-                  className="text-[11px] text-slate-400 hover:text-rose-600"
-                  title="删除"
+                  className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30"
+                  title="删除项目"
+                  aria-label={`删除项目 ${p.name}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     onDeleteProject(p);
                   }}
                 >
-                  <Trash2 size={12} aria-hidden="true" />
+                  <Trash2 size={13} aria-hidden="true" />
                 </button>
               </span>
             </div>
@@ -570,12 +590,20 @@ function SidebarContent({
           设置
         </ShellNavItem>
         <div className="mt-2 flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1 text-[11px] dark:bg-slate-800">
-          <button onClick={onOpenCommand} className="flex flex-1 items-center gap-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-300" title="命令面板 (Ctrl+K)">
+          <button onClick={onOpenCommand} className="flex flex-1 items-center gap-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-300" title={`命令面板 (${MOD_KEY}+K)`}>
             <Command size={11} aria-hidden="true" /> 命令面板
-            <kbd className="ml-auto rounded border border-slate-200 px-1 text-[9px] text-slate-400 dark:border-slate-700">⌘K</kbd>
+            <kbd className="ml-auto rounded border border-slate-200 px-1 text-[11px] text-slate-400 dark:border-slate-700">{MOD_KEY} K</kbd>
           </button>
-          <button onClick={onToggleTheme} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" title={theme === 'light' ? '切换暗色模式' : '切换亮色模式'}>
-            {theme === 'light' ? <Moon size={13} aria-hidden="true" /> : <Sun size={13} aria-hidden="true" />}
+          <button
+            onClick={() => {
+              const order: ThemeMode[] = ['light', 'dark', 'system'];
+              onSetThemeMode(order[(order.indexOf(themeMode) + 1) % order.length]);
+            }}
+            className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+            title={`外观：${THEME_OPTIONS.find((t) => t.value === themeMode)?.label ?? '跟随系统'}（点击切换 浅色/深色/跟随系统）`}
+            aria-label="切换外观模式"
+          >
+            {themeMode === 'system' ? <Monitor size={13} aria-hidden="true" /> : theme === 'light' ? <Moon size={13} aria-hidden="true" /> : <Sun size={13} aria-hidden="true" />}
           </button>
         </div>
         <div
@@ -595,15 +623,17 @@ function SidebarContent({
 /** Cmd+K 命令面板：搜索导航项 + 快捷动作 + 内容搜索（文献/知识库） */
 function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onClose: () => void; onNavigate: (v: View) => void; onNewProject: () => void; projectId: string | null }) {
   const [q, setQ] = useState('');
-  const { theme, toggle } = useContext(ThemeContext);
+  const { setMode } = useContext(ThemeContext);
   const commands = useMemo(() => {
     const nav = NAV_GROUPS.flatMap((g) => g.items).map((n) => ({ id: `nav-${n.key}`, label: n.label, group: g(n.key), run: () => onNavigate(n.key) }));
     return [
       ...nav,
-      { id: 'theme', label: theme === 'light' ? '切换到暗色模式' : '切换到亮色模式', group: '外观', run: toggle },
+      { id: 'theme-light', label: '外观：浅色', group: '外观', run: () => setMode('light') },
+      { id: 'theme-dark', label: '外观：深色', group: '外观', run: () => setMode('dark') },
+      { id: 'theme-system', label: '外观：跟随系统', group: '外观', run: () => setMode('system') },
       { id: 'new-project', label: '新建研究项目', group: '项目', run: onNewProject },
     ];
-  }, [onNavigate, onNewProject, theme, toggle]);
+  }, [onNavigate, onNewProject, setMode]);
 
   const filtered = commands.filter((c) => !q.trim() || c.label.toLowerCase().includes(q.trim().toLowerCase()));
   const [active, setActive] = useState(0);
@@ -677,9 +707,9 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
             onChange={(e) => { setQ(e.target.value); setActive(0); }}
             onKeyDown={onKeyDown}
           />
-          <kbd className="text-[10px] text-slate-400 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5">Esc</kbd>
+          <kbd className="text-[11px] text-slate-400 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5">Esc</kbd>
         </div>
-        <div className="max-h-96 overflow-y-auto py-2">
+        <div className="max-h-[min(60vh,420px)] overflow-y-auto py-2">
           {filtered.length === 0 && shownDocHits.length === 0 && shownKbHits.length === 0 && !shownSearching && (
             <div className="px-4 py-6 text-center text-sm text-slate-400">没有匹配的命令或内容</div>
           )}
@@ -699,7 +729,7 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
           {searching && <div className="px-4 py-2 text-[11px] text-slate-400">搜索内容…</div>}
           {!shownSearching && searchActive && (shownDocHits.length > 0 || shownKbHits.length > 0) && (
             <>
-              <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800 px-4 text-[10px] font-medium uppercase tracking-wider text-slate-400">
+              <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800 px-4 text-[11px] font-medium uppercase tracking-wider text-slate-400">
                 内容
               </div>
               {shownDocHits.map((r) => (
@@ -712,7 +742,7 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
                     <span className="text-slate-700 dark:text-slate-200 truncate block">{r.title}</span>
                     <span className="text-[11px] text-slate-400">{[r.venue, r.year].filter(Boolean).join(' · ')}</span>
                   </span>
-                  <span className="text-[10px] text-teal-500 shrink-0">文献 → 文献调研</span>
+                  <span className="text-[11px] text-teal-500 shrink-0">文献 → 文献调研</span>
                 </button>
               ))}
               {shownKbHits.map((d) => (
@@ -725,7 +755,7 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
                     <span className="text-slate-700 dark:text-slate-200 truncate block">{d.name}</span>
                     <span className="text-[11px] text-slate-400">{d.type} · {d.chunkCount} 分块</span>
                   </span>
-                  <span className="text-[10px] text-sky-500 shrink-0">知识库 → 知识库</span>
+                  <span className="text-[11px] text-sky-500 shrink-0">知识库 → 知识库</span>
                 </button>
               ))}
             </>
@@ -734,8 +764,8 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
         <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 flex items-center gap-3">
           <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">↑↓</kbd> 选择</span>
           <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">Enter</kbd> 执行</span>
-          <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">⌘N</kbd> 新建项目</span>
-          <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">⌘S</kbd> 写作页保存</span>
+          <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">{MOD_KEY} N</kbd> 新建项目</span>
+          <span><kbd className="border border-slate-200 dark:border-slate-700 rounded px-1">{MOD_KEY} S</kbd> 写作页保存</span>
           <span className="ml-auto flex items-center gap-1"><Monitor size={11} /> SciFlow Command</span>
         </div>
       </div>
