@@ -20,6 +20,8 @@
 - 打包产物实测：窗口标题 `工作台 · SciFlow`；CDP 探针 `root children=2`、`apiBase` 已注入、
   控制台 0 错误；`#/chat` `#/writing` `#/literature` `#/quality` `#/settings` 路由全部正常。
 - 安装包 `SciFlow-Setup-0.8.1-x64.exe` 662MB；`pnpm --filter @sciflow/desktop dist` 可复现。
+- 桌面端产物独立到 `apps/web/dist-desktop/`（`base=./`），网页部署仍用 `apps/web/dist/`（`base=/`）；
+  两者不再互相覆盖（此前共用 dist 导致「刚修好又被 web build 覆盖回绝对路径」）。
 
 ## [0.8.0] - 2026-10-22
 
