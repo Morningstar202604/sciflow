@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 /**
  * 真实模型端到端冒烟（需真实 AI 端点；CI 默认跳过）。
  * 运行前置：
- *   1) 真实 key 启动后端：AI_BASE_URL=... AI_API_KEY=... AI_MODEL=... node apps/server/dist/main.js
+ *   1) 真实 key 启动后端：AI_BASE_URL=... AI_API_KEY=... AI_MODEL=... node apps/server/dist/apps/server/src/main.js
  *   2) 前端 dev：VITE_API_TARGET=<真实后端> vite
  *   3) E2E_REAL=1 E2E_BASE=http://localhost:<web> npx playwright test e2e/real-chat.spec.ts
  * 成本控制：本规格仅发 1 次聊天调用（短问题），不触发流水线。

@@ -18,6 +18,21 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { randomUUID } from 'node:crypto';
 
+/**
+ * mock 大纲的确定性内容（单一来源）。
+ * 回归与契约测试从这里取期望值，避免"测试自己写一份、实现另有副本"的漂移。
+ */
+export const MOCK_OUTLINE = {
+  title: '图神经网络研究综述：从消息传递到几何深度学习',
+  sections: [
+    { title: '引言', subsections: ['研究背景', '本文贡献'] },
+    { title: '相关工作', subsections: ['图表示学习', '消息传递范式'] },
+    { title: '方法', subsections: ['GCN', 'GraphSAGE', 'GAT'] },
+    { title: '结果与讨论', subsections: ['节点分类任务表现', '局限与挑战'] },
+    { title: '结论', subsections: ['总结', '未来方向'] },
+  ],
+} as const;
+
 /** 是否处于 mock 模式（与 ai.service.ts 同一判定） */
 export function isMockMode(): boolean {
   return process.env.AI_MOCK === '1';
@@ -79,7 +94,7 @@ const ROUTE_TABLE: RouteRule[] = [
   // 1) Planner 研究计划
   { matches: (p) => p.includes('科研规划专家') && p.includes('researchQuestions'), respond: () => j({ objective: '围绕给定主题完成一篇系统性综述，覆盖方法演进、代表工作与应用前景。', researchQuestions: ['该主题的核心方法演进脉络是什么？', '代表性模型/工作有哪些共性与差异？', '在目标场景下的应用价值与局限如何？'], searchStrategy: { keywords: ['graph neural network', '图神经网络', '消息传递', 'node classification'], minPapers: 8, depth: 'overview' }, draftingPlan: { sections: ['引言', '相关工作', '方法', '结果与讨论', '结论'], wordCount: 5000 }, risks: ['公开文献时效性不足', '跨领域术语口径差异'] }) },
   // 2) 论文大纲
-  { matches: (p) => p.includes('设计论文大纲') && p.includes('"sections"'), respond: () => j({ title: '图神经网络研究综述：从消息传递到几何深度学习', sections: [{ title: '引言', subsections: ['研究背景', '本文贡献'] }, { title: '相关工作', subsections: ['图表示学习', '消息传递范式'] }, { title: '方法', subsections: ['GCN', 'GraphSAGE', 'GAT'] }, { title: '结果与讨论', subsections: ['节点分类任务表现', '局限与挑战'] }, { title: '结论', subsections: ['总结', '未来方向'] }] }) },
+  { matches: (p) => p.includes('设计论文大纲') && p.includes('"sections"'), respond: () => j(MOCK_OUTLINE) },
   // 3) ReAct 思考步 —— 一律 done
   { matches: (p) => p.includes('自主研究执行器') && p.includes('action'), respond: () => j({ thought: '信息已基本覆盖，进入综合写作阶段。', action: 'done', query: '', coverage: 90 }) },
   // 4) Reflexion 反思
@@ -124,8 +139,36 @@ const ROUTE_TABLE: RouteRule[] = [
   { matches: (p) => p.includes('把以下研究主题提炼为一句可执行的研究题目'), respond: (p) => extractTopic(p) },
 ];
 
-/** 默认兜底回复 */
-const FALLBACK_REPLY = '这是本地 mock AI 网关的确定性回复：已收到请求。请检查 prompt 路由关键词是否需要补充。';
+/**
+ * 默认兜底回复（通用科研问答）。
+ * 用途仅限 mock 演示/测试；带 Markdown 结构以便验证前端渲染（标题/列表/公式/代码块/表格）。
+ */
+const FALLBACK_REPLY = [
+  '这是 **本地 mock 网关** 的示例回复（未接入真实模型）。接上任意 OpenAI 兼容端点后即为真实回答。',
+  '',
+  '### 消息传递（Message Passing）三步',
+  '1. **消息生成**：每条边 (i→j) 上计算 m_ij = φ(h_i, h_j, e_ij)',
+  '2. **聚合**：节点 j 汇总邻居消息 a_j = ⊕_{i∈N(j)} m_ij（sum / mean / max / attention）',
+  '3. **更新**：h_j′ = ψ(h_j, a_j)',
+  '',
+  '$$h_j^{(l+1)} = \\sigma\\Big(W\\sum_{i \\in \\mathcal{N}(j)} \\frac{1}{c_{ij}} h_i^{(l)}\\Big)$$',
+  '',
+  '```python',
+  'import torch',
+  'from torch_geometric.nn import GCNConv',
+  '',
+  'conv = GCNConv(in_channels=64, out_channels=32)',
+  'h = conv(x, edge_index)   # 一次消息传递',
+  '```',
+  '',
+  '| 变体 | 聚合方式 | 特点 |',
+  '| --- | --- | --- |',
+  '| GCN | 归一化求和 | 简单、稳定 |',
+  '| GAT | 多头注意力 | 区分邻居重要性 |',
+  '| E(3)-GNN | 等变聚合 | 三维分子适用 |',
+  '',
+  '> 提示：以上内容由本地 mock 生成，仅用于界面演示。',
+].join('\n');
 
 /** OpenAI 兼容模型列表响应体（MSW 拦截与 HTTP 包装脚本共用） */
 export const MOCK_MODELS_BODY = {

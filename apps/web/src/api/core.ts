@@ -21,22 +21,51 @@ const API_BASE: string =
 /** 统一拼 API 地址：p 必须以 / 开头 */
 export const u = (p: string) => `${API_BASE}${p}`;
 
-/** 友好错误转译：后端中文业务错误原样保留；英文/状态码/网络错误转为清晰中文提示 */
+/** 友好错误转译：后端中文业务错误原样保留；英文/状态码/网络错误转为清晰中文提示
+ *  注意：只做「从无到有」的翻译——已经是中文业务文案时原样返回，绝不再二次改写。
+ *  （历史 bug：request() 的 catch 用字符类正则判断是否需要透传，导致 74/87 条后端
+ *   中文错误被覆盖成"无法连接服务器"。现在由 ApiError 携带 alreadyTranslated 标记，结构性杜绝。） */
 const statusText: Record<number, string> = {
   400: '请求参数有误，请检查后重试',
   401: '未授权访问，请检查服务配置',
   403: '没有操作权限',
   404: '请求的内容不存在或已被删除',
   409: '操作冲突，请刷新后重试',
+  413: '上传内容过大，请压缩后重试',
+  422: '请求参数校验未通过，请检查后重试',
   429: '请求过于频繁，请稍后再试',
   500: '服务内部错误，请稍后重试',
   502: '网关异常，请稍后重试',
   503: '服务暂时不可用，请稍后重试',
 };
+const NETWORK_ERROR = '无法连接服务器，请确认服务已启动';
+
+/** 是否已经是中文业务文案（含任一汉字即视为已翻译，直接透传给用户） */
+function isTranslated(raw: unknown): raw is string {
+  return typeof raw === 'string' && /[\u4e00-\u9fa5]/.test(raw);
+}
+
 export function friendlyError(raw: unknown, status?: number): string {
-  if (typeof raw === 'string' && /[\u4e00-\u9fa5]/.test(raw)) return raw;
+  if (isTranslated(raw)) return raw;
   if (status && statusText[status]) return statusText[status];
-  return status ? `请求失败（${status}），请稍后重试` : '无法连接服务器，请确认服务已启动';
+  return status ? `请求失败（${status}），请稍后重试` : NETWORK_ERROR;
+}
+
+/** API 错误：自带 status 与「已翻译」标记，供上层区分业务失败 / 网络失败 */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly translated: boolean;
+  constructor(message: string, status = 0, translated = false) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.translated = translated;
+  }
+}
+
+/** 是否为网络层失败（fetch 本身抛错 / 无响应），用于页面区分「配置错误」与「服务没起」 */
+export function isNetworkError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 0;
 }
 
 /** 当前登录令牌（AUTH_MODE=jwt 企业模式用；本地模式恒为空） */
@@ -66,13 +95,14 @@ function onUnauthorized(): void {
 }
 
 export async function request<T>(url: string, opts?: RequestInit): Promise<T> {
-  // 默认 60s 超时兜底：AI 网关限流/卡死时前端不无限等待（可被 opts.signal 覆盖）
+  // 默认超时兜底（AI 网关限流/卡死时前端不无限等待）。AI 长任务由调用方传 signal 自行控制。
   const timeoutMs = opts?.signal ? 0 : 60000;
   const ctrl = new AbortController();
   const timer = timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   const token = getToken();
+  let res: Response;
   try {
-    const res = await fetch(u(url), {
+    res = await fetch(u(url), {
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -81,24 +111,45 @@ export async function request<T>(url: string, opts?: RequestInit): Promise<T> {
       signal: opts?.signal ?? ctrl.signal,
       ...opts,
     });
-    if (!res.ok) {
-      if (res.status === 401 && !url.startsWith('/api/auth/')) onUnauthorized();
-      let raw: unknown;
-      try {
-        const data = await res.json();
-        raw = data.message ?? data.error;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(friendlyError(raw, res.status));
-    }
-    return res.json() as Promise<T>;
   } catch (e: unknown) {
-    if (typeof e === 'object' && e !== null && 'name' in e && e.name === 'AbortError') throw new Error('请求超时（AI 响应较慢），请稍后重试');
-    if (e instanceof Error && /^[请求服务网络未授权没有操作]/.test(e.message)) throw e;
-    throw new Error(friendlyError(undefined));
-  } finally {
     if (timer) clearTimeout(timer);
+    // 只在这里处理「没有拿到响应」：超时 / 断网 / 服务未启动
+    if (typeof e === 'object' && e !== null && 'name' in e && e.name === 'AbortError') {
+      throw new ApiError('请求超时（服务响应较慢），请稍后重试', 0, true);
+    }
+    throw new ApiError(NETWORK_ERROR, 0, true);
+  }
+  if (timer) clearTimeout(timer);
+
+  if (!res.ok) {
+    if (res.status === 401 && !url.startsWith('/api/auth/')) onUnauthorized();
+    let raw: unknown;
+    try {
+      const data = await res.json();
+      raw = data?.message ?? data?.error;
+    } catch {
+      /* 非 JSON 响应体：交给状态码映射 */
+    }
+    // 业务错误：中文文案原样透传（translated=true），英文则按状态码翻译
+    throw new ApiError(friendlyError(raw, res.status), res.status, isTranslated(raw));
+  }
+  // 空响应体（204 / SSE 之外的 void 端点）不强行 parse
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  // 纯文本端点（投稿信/回复信/期刊推荐/文献综述等 Nest 直接返回字符串）：
+  // 按文本原样交给调用方，不再把合法文本误判为「无法解析的数据」。
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  const isPlainText =
+    contentType.includes('text/plain') || contentType.includes('text/html') || contentType.includes('text/markdown');
+  if (isPlainText) return text as unknown as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // 未声明 Content-Type 但确为纯文本：同样按文本返回（宁可展示原文，也不误报版本不匹配）
+    const head = text.trimStart()[0];
+    if (head !== '{' && head !== '[') return text as unknown as T;
+    throw new ApiError('服务返回了无法解析的数据，请检查后端版本是否匹配', res.status, true);
   }
 }
 
@@ -116,11 +167,15 @@ export function streamChat(opts: {
   docContext?: string;
   model?: string;
   enableThinking?: boolean;
+  /** 本轮强制联网搜索（输入区「联网」开关） */
+  webSearch?: boolean;
   signal?: AbortSignal;
   onDelta?: (text: string) => void;
   onReasoning?: (text: string) => void;
   onSources?: (sources: ChatSource[]) => void;
   onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
+  /** Agent 工具调用（模型决定调用某个工具时触发；用于在对话里展示"正在检索…"） */
+  onToolCall?: (call: { id?: string; name: string; arguments: string }) => void;
   onDone?: (full: string) => void;
   onError?: (msg: string) => void;
 }): () => void {
@@ -141,6 +196,7 @@ export function streamChat(opts: {
       docContext: opts.docContext,
       model: opts.model,
       enableThinking: opts.enableThinking,
+      webSearch: opts.webSearch,
     }),
     signal,
   })
@@ -149,11 +205,11 @@ export function streamChat(opts: {
         let raw: unknown;
         try {
           const data = await res.json();
-          raw = data.message ?? data.error;
+          raw = data?.message ?? data?.error;
         } catch {
-          /* ignore */
+          /* 非 JSON 错误体 */
         }
-        throw new Error(friendlyError(raw, res.status));
+        throw new ApiError(friendlyError(raw, res.status), res.status, isTranslated(raw));
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -169,37 +225,47 @@ export function streamChat(opts: {
           const t = line.trim();
           if (!t.startsWith('data:')) continue;
           const payload = t.slice(5).trim();
+          if (!payload) continue;
           if (payload === '[DONE]') {
             finish();
             return;
           }
+          let json: Record<string, unknown>;
           try {
-            const json = JSON.parse(payload) as Record<string, unknown>;
-            if (json.error) throw new Error(String(json.error));
-            if (json.sources) {
-              opts.onSources?.(json.sources as unknown as ChatSource[]);
-              continue;
+            json = JSON.parse(payload) as Record<string, unknown>;
+          } catch {
+            // 坏行（网络截断/非 JSON 事件）：跳过，不中断整个流
+            continue;
+          }
+          // 服务端显式错误事件：终止并上报（这是真错误，不是坏行）
+          if (typeof json.error === 'string' && json.error) {
+            opts.onError?.(friendlyError(json.error));
+            opts.onDone?.(full);
+            return;
+          }
+          if (json.sources) {
+            opts.onSources?.(json.sources as unknown as ChatSource[]);
+            continue;
+          }
+          if (json.usage) {
+            opts.onUsage?.(json.usage as unknown as { prompt_tokens: number; completion_tokens: number; total_tokens: number });
+            continue;
+          }
+          // Agent 工具调用：模型决定检索文献/查知识库时下发，供 UI 展示进度
+          if (Array.isArray(json.tool_calls)) {
+            for (const raw of json.tool_calls as Array<{ id?: string; function?: { name?: string; arguments?: string } }>) {
+              const name = raw?.function?.name;
+              if (name) opts.onToolCall?.({ id: raw.id, name, arguments: raw.function?.arguments ?? '{}' });
             }
-            if (json.usage) {
-              opts.onUsage?.(json.usage as unknown as { prompt_tokens: number; completion_tokens: number; total_tokens: number });
-              continue;
-            }
-            if (typeof json.delta === 'string') {
-              full += json.delta;
-              opts.onDelta?.(full);
-            }
-            if (typeof json.reasoning === 'string') {
-              reasoning += json.reasoning;
-              opts.onReasoning?.(reasoning);
-            }
-          } catch (e: unknown) {
-            const msg = extractErrMsg(e);
-            if (msg) {
-              opts.onError?.(friendlyError(/[\u4e00-\u9fa5]/.test(msg) ? msg : undefined));
-              opts.onDone?.(full);
-              return;
-            }
-            /* 忽略无法解析的行 */
+            continue;
+          }
+          if (typeof json.delta === 'string') {
+            full += json.delta;
+            opts.onDelta?.(full);
+          }
+          if (typeof json.reasoning === 'string') {
+            reasoning += json.reasoning;
+            opts.onReasoning?.(reasoning);
           }
         }
       }
@@ -211,8 +277,12 @@ export function streamChat(opts: {
         finish();
         return;
       }
-      const msg = extractErrMsg(e);
-      opts.onError?.(friendlyError(msg && /^[请求服务网络未授权没有操作]/.test(msg) ? msg : undefined));
+      // 已经是中文业务文案的 ApiError 原样透传；其余交给 friendlyError 按状态码翻译
+      if (e instanceof ApiError) {
+        opts.onError?.(e.message);
+        return;
+      }
+      opts.onError?.(friendlyError(extractErrMsg(e)));
     });
   return () => ctrl.abort();
 }

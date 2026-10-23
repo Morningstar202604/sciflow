@@ -72,7 +72,7 @@ cp apps/server/.env.example apps/server/.env
 pnpm --filter @sciflow/server build
 
 # 4. 启动后端（:3000）
-node apps/server/dist/main.js
+node apps/server/dist/apps/server/src/main.js
 #    首次启动自动建表；日志见 [SciFlow] API 已启动: http://localhost:3000/api/health
 
 # 5. 另起终端启动前端开发服务器（:5173）
@@ -87,7 +87,7 @@ pnpm --filter @sciflow/web build     # 产物在 apps/web/dist，纯静态文件
 # 用任意静态服务器托管 dist，并把 /api 反代到后端 :3000（可参考 apps/web/nginx.conf）
 ```
 
-> 后端 `main.ts` 会显式加载 `apps/server/.env`（`loadEnv({ path: join(__dirname,'..','.env') })`），因此即使从仓库根目录执行 `node apps/server/dist/main.js` 也能正确读到配置，不会漏读。
+> 后端 `main.ts` 会显式加载 `apps/server/.env`（多路径探测（cwd 的 apps/server/.env、.env，以及从 __dirname 逐级向上）），因此即使从仓库根目录执行 `node apps/server/dist/apps/server/src/main.js` 也能正确读到配置，不会漏读。
 
 ## 4. 环境变量全表
 
@@ -141,7 +141,7 @@ cp apps/server/data/sciflow.db  /备份路径/sciflow-$(date +%F).db
 cp apps/server/data/sciflow.db-wal /备份路径/  2>/dev/null || true
 cp apps/server/data/sciflow.db-shm /备份路径/ 2>/dev/null || true
 
-# 3. 重启：docker compose start server  /  node apps/server/dist/main.js
+# 3. 重启：docker compose start server  /  node apps/server/dist/apps/server/src/main.js
 ```
 
 - **恢复**：停后端 → 用备份文件覆盖 `DATABASE_PATH` 指向的文件 → 启动即可。

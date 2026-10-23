@@ -20,3 +20,35 @@
 - 遵循用户全局 AGENTS.md 全部纪律（最小改动、做完必验证、不主动 commit、诚实反幻觉）。
 - 涉及代码改动前走 `aqg-code-construction` 六步；触及鉴权/加密/数据模型/CI 的按 deep 处理。
 - 分阶段推进以 ARCHITECTURE.md §5 为准，每阶段验收门通过才算完成，禁止跳期（P0→P1→P2 串行）。
+
+## 第一优先（v0.6 新增契约，违反即回归）
+
+1. **布局只在骨架层定义**：页面不得自行决定分栏/断点/溢出策略。用 `components/AppShell.tsx`；
+   `min-w-0` 只出现在骨架。历史事故：写作页五栏挤一行，1024px 下编辑器被压到 2px。
+2. **图表不接受高度参数**：`components/charts.tsx` 的 `HBar` 内部自适应，禁止传 `height`/`barHeight`
+   （这两个参数造成过两次事故）。颜色一律用 `--viz-series-*` / `--foreground` / `--border`，禁止写死 hex。
+3. **错误只翻译一次**：`api/core.ts` 的 `request()` 抛 `ApiError`；页面只 catch，不拼文案。
+   业务错误（含中文）原样透传，只有真正的网络失败才提示"无法连接服务器"。
+   历史事故：字符类正则误判，74/87 条后端中文错误被覆盖成网络错误。
+4. **流式回调参数是累积值**：`onDelta`/`onReasoning` 必须用 `api/stream-accumulator.ts` 的 `applyStreamDelta`
+   覆盖，禁止字符串追加。历史事故：工作台输出平方膨胀。
+5. **步骤清单单一来源**：`packages/core/src/pipeline-steps.ts`。新增步骤必须声明 `configurable` 与 `uiStep`；
+   graph 的 `stepEnabled` 只接受注册过的 key（未注册会 warn 并放行）。
+6. **流水线写正文必须走 `writeDocumentContent`**（`pipeline.graph.ts`），它负责版本递增与快照。
+7. **引用契约**：正文只放 `[n]` 锚点；参考文献列表由前端按 CSL 样式渲染，服务端不内嵌列表。
+8. **Agent 工具**：新增 MCP 工具会自动进入 `AgentToolBridge`（受 `AGENT_TOOLS_ALLOW` 白名单约束）。
+   工具调用有次数上限与超时，轨迹落 `llm_call_log`（`caller=tool:*`）。
+9. **`@Public()` 白名单**：只允许 `auth.controller.ts`（登录/注册）与 `health.controller.ts`（探活）。
+   其余 controller 一律不得标注；`apps/server/src/auth/auth-surface.spec.ts` 会扫描全目录并红。
+   历史事故：agent-trace 类级 `@UseGuards` 配方法级 `@Public()`，企业模式下轨迹与 token 用量完全裸奔。
+10. **数值型环境变量必须走 `envInt`/`envFloat`**（`packages/core/src/env.ts`），禁止 `Number(process.env.X)`。
+    非法值必须回落默认并夹取区间；NaN 穿透会让 `pLimit()` 失去并发闸门、`setTimeout()` 变成 0。
+11. **列表型 UI 不得直接渲染原始 JSON**：流水线步骤明细用 `PipelineDag.summarizeStepOutput`。
+    历史事故：大纲 JSON 把 DAG 行高撑成多行并在窄列横向溢出。
+   部分网关流式不支持标准 tool_calls，传输层会回退到非流式工具循环（`AI_TOOLS_NONSTREAM=off` 可关闭）。
+
+## 验证纪律
+
+- 回归脚本必须用**全新数据库**：脏库会让指纹去重、字段唯一性等用例误报失败。
+- 修改契约（如引用渲染方式）时，必须同步更新 `scripts/full_regression.py` 里对应断言，
+  并在 `docs/RUNTIME-FINDINGS.md` 记录「为什么改」。不允许只让测试变绿而不说明契约变化。

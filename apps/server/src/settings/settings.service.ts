@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { AiService } from '../ai/ai.service';
-import { DB_PATH, sqlite } from '../db/database';
+import { DB_PATH, sqlite, vecLoaded } from '../db/database';
 import { encryptSecret, decryptSecret } from '../common/secret-crypto';
 
 export interface AppSettings {
@@ -77,9 +77,28 @@ export class SettingsService {
       }
     })();
     const aiTest = await this.ai.testConnection();
+    // 检索栈能力：向量扩展 / 嵌入模型 / 全文索引，逐项给出「可用 or 降级原因 + 修复指引」
+    const retrieval = (() => {
+      const vector = vecLoaded;
+      const model = Boolean(process.env.EMBEDDING_MODEL_PATH);
+      const fts = (() => {
+        try {
+          sqlite.prepare("SELECT rowid FROM knowledge_chunk_fts LIMIT 1").get();
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      const notes: string[] = [];
+      if (!vector) notes.push('sqlite-vec 扩展未加载：向量检索将降级为全文检索（排查 SCIFLOW_NO_VEC / 原生扩展兼容性）');
+      if (!model) notes.push('未配置本地嵌入模型：仅使用全文检索（设置 EMBEDDING_MODEL_PATH 指向 GGUF 文件即可启用语义检索）');
+      if (!fts) notes.push('全文索引表不可用：检索会回退 LIKE 扫描，长文档下速度较慢');
+      return { vector, embeddingModel: model, fullText: fts, ok: fts, notes };
+    })();
     return {
       database: { ok: dbOk, path: DB_PATH },
       ai: { configured: this.ai.configured, ok: aiTest.ok, model: aiTest.model, latencyMs: aiTest.latencyMs, detail: aiTest.reply },
+      retrieval,
       timestamp: Date.now(),
     };
   }

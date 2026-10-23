@@ -178,7 +178,7 @@ export function ChatPanel({
         className="flex items-center gap-1.5 px-3 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer shrink-0"
         onClick={() => setOpen((v) => !v)}
       >
-        <Bot size={14} className="brand-gradient-text" />
+        <Bot size={14} className="text-teal-600 dark:text-teal-300" />
         <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex-1">AI 写作助手</span>
         {open ? <ChevronDown size={13} className="text-slate-400" /> : <ChevronUp size={13} className="text-slate-400" />}
       </div>
@@ -198,16 +198,16 @@ export function ChatPanel({
                   <div className="text-xs leading-relaxed text-slate-600 dark:text-slate-300 chat-md">
                     {m.reasoning ? (
                       <details open={m.streaming} className="mb-1.5">
-                        <summary className="cursor-pointer select-none text-[10px] font-medium text-teal-700 dark:text-teal-300 flex items-center gap-1 list-none marker:hidden">
+                        <summary className="cursor-pointer select-none text-[11px] font-medium text-teal-700 dark:text-teal-300 flex items-center gap-1 list-none marker:hidden">
                           <Brain size={10} /> 思考{m.streaming ? '（进行中）' : ''}
                         </summary>
-                        <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500 border-l-2 border-teal-300 dark:border-teal-700 pl-2 leading-relaxed max-h-28 overflow-y-auto">{m.reasoning}</div>
+                        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 border-l-2 border-teal-300 dark:border-teal-700 pl-2 leading-relaxed max-h-28 overflow-y-auto">{m.reasoning}</div>
                       </details>
                     ) : null}
                     {m.content ? <Streamdown mode={m.streaming ? 'streaming' : 'static'}>{m.content}</Streamdown> : m.streaming ? <Loader2 size={12} className="animate-spin text-teal-500" /> : null}
                     {m.streaming && <span className="inline-block w-1 h-3 bg-current opacity-60 ml-0.5 align-middle pulse-dot" />}
                     {m.usage && !m.streaming && (
-                      <div className="mt-0.5 text-[9px] text-slate-400 dark:text-slate-500">↑{fmtNum(m.usage.prompt_tokens)} ↓{fmtNum(m.usage.completion_tokens)}</div>
+                      <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">↑{fmtNum(m.usage.prompt_tokens)} ↓{fmtNum(m.usage.completion_tokens)}</div>
                     )}
                     {!m.streaming && (
                       <div className="mt-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -249,7 +249,7 @@ export function ChatPanel({
                     className="w-full text-left px-2.5 py-1.5 hover:bg-teal-50 dark:hover:bg-teal-500/10 flex items-center gap-2"
                   >
                     <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-300 w-16 shrink-0">/{c.name}</span>
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{c.desc}</span>
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{c.desc}</span>
                   </button>
                 ))}
               </div>
@@ -309,7 +309,7 @@ export function ChatPanel({
                 <button
                   onClick={send}
                   disabled={busy || !input.trim()}
-                  className="rounded-md bg-teal-600 hover:bg-teal-700 text-white px-2 py-1.5 disabled:opacity-50"
+                  className="rounded-md bubble-user hover:brightness-110 px-2 py-1.5 disabled:opacity-50"
                   title="发送"
                 >
                   <Send size={12} />

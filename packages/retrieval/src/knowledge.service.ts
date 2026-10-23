@@ -10,6 +10,7 @@ import { fingerprint } from '../../core/src/fingerprint';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import * as unpdf from 'unpdf';
 import { parseAuthors } from '../../core/src/authors';
+import { projectTo2D, blobToVector, downsampleIndices } from './projection';
 
 const CHUNK_SIZE = 800; // 每块约 800 字（段落聚合，与文档切分逻辑保持一致）
 const CHUNK_OVERLAP = 120; // 15% 重叠：块边界处上下文连续，RAG 检索质量关键参数（不可为 0）
@@ -429,6 +430,56 @@ export class KnowledgeService {
     add(a);
     add(b);
     return [...byId.values()].sort((x, y) => y.rrf - x.rrf).map((e) => ({ ...e.row, rrf: e.rrf }));
+  }
+
+  /**
+   * 知识库语义地图（F-2.2）：把所有分块的 embedding 投影到 2D，供前端散点图渲染。
+   *
+   * - 只用已有向量，不调用嵌入模型（无需 AI Key）
+   * - 按文档聚簇着色所需的元信息（docId/docName）
+   * - 超过 limit 时分档下采样，并返回 sampled 标记供前端提示
+   */
+  semanticMap(projectId: string, limit = 5000) {
+    const docs = db.select().from(knowledgeDocs).where(eq(knowledgeDocs.projectId, projectId)).all();
+    if (docs.length === 0) return { points: [], total: 0, sampled: false, limit };
+    const docMap = new Map(docs.map((d) => [d.id, d]));
+
+    const rows = sqlite
+      .prepare(
+        `SELECT c.id AS chunk_id, c.doc_id, c.seq, c.content, c.embedding
+           FROM knowledge_chunk c
+           JOIN knowledge_doc d ON d.id = c.doc_id
+          WHERE d.project_id = ? AND c.embedding IS NOT NULL
+          ORDER BY c.doc_id, c.seq`,
+      )
+      .all(projectId) as Array<{ chunk_id: string; doc_id: string; seq: number; content: string; embedding: Buffer }>;
+
+    if (rows.length === 0) return { points: [], total: 0, sampled: false, limit };
+
+    const idx = downsampleIndices(rows.length, Math.max(1, limit));
+    const picked = idx.map((i) => rows[i]);
+    const vectors = picked.map((r) => blobToVector(r.embedding));
+    // 向量维度可能不一致（换过嵌入模型）——过滤掉与首个不同的，避免投影失真
+    const dim = vectors[0]?.length ?? 0;
+    const usable = vectors.map((v, i) => ({ v, i })).filter((e) => e.v.length === dim && dim > 0);
+    if (usable.length === 0) return { points: [], total: rows.length, sampled: idx.length < rows.length, limit };
+
+    const projected = projectTo2D(usable.map((e) => e.v));
+    const points = projected.map((pt, k) => {
+      const row = picked[usable[k].i];
+      const doc = docMap.get(row.doc_id);
+      return {
+        id: row.chunk_id,
+        docId: row.doc_id,
+        docName: doc?.name ?? '未命名',
+        seq: row.seq,
+        x: Math.round(pt.x * 10000) / 10000,
+        y: Math.round(pt.y * 10000) / 10000,
+        // 预览文本：只给前 160 字，完整内容由 /api/knowledge/:id 取
+        snippet: (row.content || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+      };
+    });
+    return { points, total: rows.length, sampled: idx.length < rows.length, limit };
   }
 
   /** RAG 问答：检索 + LLM 基于资料回答（Contextual Retrieval：块前带文档上下文前缀） */

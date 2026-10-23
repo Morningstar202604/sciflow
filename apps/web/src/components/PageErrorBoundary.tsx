@@ -70,7 +70,7 @@ function ErrorCard({ pageName, error, onRetry }: { pageName: string; error: Erro
         )}
         <button
           onClick={handleRetry}
-          className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium brand-btn text-white"
+          className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium brand-btn"
         >
           <RefreshCw size={14} />
           重试

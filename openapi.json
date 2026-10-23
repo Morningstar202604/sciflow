@@ -100,37 +100,9 @@
         ]
       }
     },
-    "/auth/register": {
-      "post": {
-        "operationId": "AuthController_register",
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Auth"
-        ]
-      }
-    },
-    "/auth/login": {
-      "post": {
-        "operationId": "AuthController_login",
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Auth"
-        ]
-      }
-    },
-    "/auth/me": {
+    "/mcp/info": {
       "get": {
-        "operationId": "AuthController_me",
+        "operationId": "McpController_info",
         "parameters": [],
         "responses": {
           "200": {
@@ -138,27 +110,13 @@
           }
         },
         "tags": [
-          "Auth"
+          "Mcp"
         ]
       }
     },
-    "/web/search": {
-      "post": {
-        "operationId": "WebSearchController_search",
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "WebSearch"
-        ]
-      }
-    },
-    "/projects": {
+    "/mcp/tools": {
       "get": {
-        "operationId": "ProjectsController_list",
+        "operationId": "McpController_tools",
         "parameters": [],
         "responses": {
           "200": {
@@ -166,111 +124,139 @@
           }
         },
         "tags": [
-          "Projects"
+          "Mcp"
+        ]
+      }
+    },
+    "/mcp/call": {
+      "post": {
+        "operationId": "McpController_call",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Mcp"
+        ]
+      }
+    },
+    "/mcp/rpc": {
+      "get": {
+        "operationId": "McpController_rpc_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Mcp"
         ]
       },
       "post": {
-        "operationId": "ProjectsController_create",
+        "operationId": "McpController_rpc_post",
         "parameters": [],
         "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Projects"
-        ]
-      }
-    },
-    "/projects/{id}": {
-      "get": {
-        "operationId": "ProjectsController_get",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
           "200": {
             "description": ""
           }
         },
         "tags": [
-          "Projects"
+          "Mcp"
         ]
       },
-      "patch": {
-        "operationId": "ProjectsController_update",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+      "put": {
+        "operationId": "McpController_rpc_put",
+        "parameters": [],
         "responses": {
           "200": {
             "description": ""
           }
         },
         "tags": [
-          "Projects"
+          "Mcp"
         ]
       },
       "delete": {
-        "operationId": "ProjectsController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "operationId": "McpController_rpc_delete",
+        "parameters": [],
         "responses": {
           "200": {
             "description": ""
           }
         },
         "tags": [
-          "Projects"
+          "Mcp"
+        ]
+      },
+      "patch": {
+        "operationId": "McpController_rpc_patch",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Mcp"
+        ]
+      },
+      "options": {
+        "operationId": "McpController_rpc_options",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Mcp"
+        ]
+      },
+      "head": {
+        "operationId": "McpController_rpc_head",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Mcp"
+        ]
+      },
+      "search": {
+        "operationId": "McpController_rpc_search",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Mcp"
         ]
       }
     },
-    "/documents": {
+    "/mcp/external": {
       "get": {
-        "operationId": "DocumentsController_list",
-        "parameters": [
-          {
-            "name": "projectId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "operationId": "McpController_externalServers",
+        "parameters": [],
         "responses": {
           "200": {
             "description": ""
           }
         },
         "tags": [
-          "Documents"
+          "Mcp"
         ]
-      },
+      }
+    },
+    "/mcp/external/discover": {
       "post": {
-        "operationId": "DocumentsController_create",
+        "operationId": "McpController_discover",
         "parameters": [],
         "responses": {
           "201": {
@@ -278,155 +264,13 @@
           }
         },
         "tags": [
-          "Documents"
+          "Mcp"
         ]
       }
     },
-    "/documents/{id}": {
-      "get": {
-        "operationId": "DocumentsController_get",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      },
-      "patch": {
-        "operationId": "DocumentsController_update",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      },
-      "delete": {
-        "operationId": "DocumentsController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/version-name": {
-      "patch": {
-        "operationId": "DocumentsController_setVersionName",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/versions/{version}/commit-message": {
-      "patch": {
-        "operationId": "DocumentsController_setVersionCommitMessage",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "version",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/snapshot": {
+    "/mcp/external/{id}/call": {
       "post": {
-        "operationId": "DocumentsController_createSnapshot",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/outline": {
-      "post": {
-        "operationId": "DocumentsController_generateOutline",
+        "operationId": "McpController_callExternal",
         "parameters": [
           {
             "name": "id",
@@ -443,297 +287,7 @@
           }
         },
         "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/section": {
-      "post": {
-        "operationId": "DocumentsController_draftSection",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/abstract": {
-      "post": {
-        "operationId": "DocumentsController_generateAbstract",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/polish": {
-      "post": {
-        "operationId": "DocumentsController_polish",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/translate": {
-      "post": {
-        "operationId": "DocumentsController_translate",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/polish-records": {
-      "get": {
-        "operationId": "DocumentsController_listPolishRecords",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/citations": {
-      "post": {
-        "operationId": "DocumentsController_addCitation",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      },
-      "get": {
-        "operationId": "DocumentsController_listCitations",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/citations/{citationId}": {
-      "delete": {
-        "operationId": "DocumentsController_removeCitation",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "citationId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/export-citations": {
-      "get": {
-        "operationId": "DocumentsController_exportCitations",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "format",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/render-citations": {
-      "post": {
-        "operationId": "DocumentsController_renderCitations",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/export": {
-      "get": {
-        "operationId": "DocumentsController_exportMarkdown",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
-        ]
-      }
-    },
-    "/documents/{id}/export-docx": {
-      "get": {
-        "operationId": "DocumentsController_exportDocx",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Documents"
+          "Mcp"
         ]
       }
     },
@@ -1175,44 +729,9 @@
         ]
       }
     },
-    "/pipeline": {
+    "/references/{id}/verify-doi": {
       "post": {
-        "operationId": "PipelineController_create",
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Pipeline"
-        ]
-      },
-      "get": {
-        "operationId": "PipelineController_listByProject",
-        "parameters": [
-          {
-            "name": "projectId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Pipeline"
-        ]
-      }
-    },
-    "/pipeline/{id}": {
-      "get": {
-        "operationId": "PipelineController_get",
+        "operationId": "ReferencesController_verifyDoi",
         "parameters": [
           {
             "name": "id",
@@ -1229,51 +748,7 @@
           }
         },
         "tags": [
-          "Pipeline"
-        ]
-      },
-      "delete": {
-        "operationId": "PipelineController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Pipeline"
-        ]
-      }
-    },
-    "/pipeline/{id}/confirm-outline": {
-      "post": {
-        "operationId": "PipelineController_confirmOutline",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Pipeline"
+          "References"
         ]
       }
     },
@@ -1297,6 +772,37 @@
         "parameters": [
           {
             "name": "projectId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Knowledge"
+        ]
+      }
+    },
+    "/knowledge/{id}/map": {
+      "get": {
+        "operationId": "KnowledgeController_map",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
             "required": true,
             "in": "query",
             "schema": {
@@ -1409,10 +915,808 @@
         ]
       }
     },
+    "/auth/register": {
+      "post": {
+        "operationId": "AuthController_register",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "AuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/web/search": {
+      "post": {
+        "operationId": "WebSearchController_search",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "WebSearch"
+        ]
+      }
+    },
+    "/web/config": {
+      "get": {
+        "operationId": "WebSearchController_config",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "WebSearch"
+        ]
+      },
+      "put": {
+        "operationId": "WebSearchController_saveConfig",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "WebSearch"
+        ]
+      }
+    },
+    "/projects": {
+      "get": {
+        "operationId": "ProjectsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectsController_create",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/projects/{id}": {
+      "get": {
+        "operationId": "ProjectsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      },
+      "patch": {
+        "operationId": "ProjectsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/documents": {
+      "get": {
+        "operationId": "DocumentsController_list",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      },
+      "post": {
+        "operationId": "DocumentsController_create",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}": {
+      "get": {
+        "operationId": "DocumentsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      },
+      "patch": {
+        "operationId": "DocumentsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      },
+      "delete": {
+        "operationId": "DocumentsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/citation-audit": {
+      "get": {
+        "operationId": "DocumentsController_citationAudit",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/version-name": {
+      "patch": {
+        "operationId": "DocumentsController_setVersionName",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/versions/{version}/commit-message": {
+      "patch": {
+        "operationId": "DocumentsController_setVersionCommitMessage",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/snapshot": {
+      "post": {
+        "operationId": "DocumentsController_createSnapshot",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/outline": {
+      "post": {
+        "operationId": "DocumentsController_generateOutline",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/section": {
+      "post": {
+        "operationId": "DocumentsController_draftSection",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/abstract": {
+      "post": {
+        "operationId": "DocumentsController_generateAbstract",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/polish": {
+      "post": {
+        "operationId": "DocumentsController_polish",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/translate": {
+      "post": {
+        "operationId": "DocumentsController_translate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/polish-records": {
+      "get": {
+        "operationId": "DocumentsController_listPolishRecords",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/citations": {
+      "post": {
+        "operationId": "DocumentsController_addCitation",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      },
+      "get": {
+        "operationId": "DocumentsController_listCitations",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/citations/{citationId}": {
+      "delete": {
+        "operationId": "DocumentsController_removeCitation",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "citationId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/export-citations": {
+      "get": {
+        "operationId": "DocumentsController_exportCitations",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/render-citations": {
+      "post": {
+        "operationId": "DocumentsController_renderCitations",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/export": {
+      "get": {
+        "operationId": "DocumentsController_exportMarkdown",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/documents/{id}/export-docx": {
+      "get": {
+        "operationId": "DocumentsController_exportDocx",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/pipeline": {
+      "post": {
+        "operationId": "PipelineController_create",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Pipeline"
+        ]
+      },
+      "get": {
+        "operationId": "PipelineController_listByProject",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Pipeline"
+        ]
+      }
+    },
+    "/pipeline/{id}": {
+      "get": {
+        "operationId": "PipelineController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Pipeline"
+        ]
+      },
+      "delete": {
+        "operationId": "PipelineController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Pipeline"
+        ]
+      }
+    },
+    "/pipeline/{id}/confirm-outline": {
+      "post": {
+        "operationId": "PipelineController_confirmOutline",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Pipeline"
+        ]
+      }
+    },
     "/chat": {
       "post": {
         "operationId": "ChatController_answer",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequestBody"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": ""
@@ -1427,6 +1731,16 @@
       "post": {
         "operationId": "ChatController_stream",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequestBody"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": ""
@@ -1708,197 +2022,6 @@
         },
         "tags": [
           "Usage"
-        ]
-      }
-    },
-    "/mcp/info": {
-      "get": {
-        "operationId": "McpController_info",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      }
-    },
-    "/mcp/tools": {
-      "get": {
-        "operationId": "McpController_tools",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      }
-    },
-    "/mcp/call": {
-      "post": {
-        "operationId": "McpController_call",
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      }
-    },
-    "/mcp/rpc": {
-      "get": {
-        "operationId": "McpController_rpc_get",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      },
-      "post": {
-        "operationId": "McpController_rpc_post",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      },
-      "put": {
-        "operationId": "McpController_rpc_put",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      },
-      "delete": {
-        "operationId": "McpController_rpc_delete",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      },
-      "patch": {
-        "operationId": "McpController_rpc_patch",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      },
-      "options": {
-        "operationId": "McpController_rpc_options",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      },
-      "head": {
-        "operationId": "McpController_rpc_head",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      },
-      "search": {
-        "operationId": "McpController_rpc_search",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      }
-    },
-    "/mcp/external": {
-      "get": {
-        "operationId": "McpController_externalServers",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      }
-    },
-    "/mcp/external/discover": {
-      "post": {
-        "operationId": "McpController_discover",
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
-        ]
-      }
-    },
-    "/mcp/external/{id}/call": {
-      "post": {
-        "operationId": "McpController_callExternal",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "tags": [
-          "Mcp"
         ]
       }
     },
@@ -2760,12 +2883,53 @@
   "info": {
     "title": "SciFlow API",
     "description": "本地优先科研工作台（单用户）",
-    "version": "0.4.2",
+    "version": "0.8.1",
     "contact": {}
   },
   "tags": [],
   "servers": [],
   "components": {
-    "schemas": {}
+    "schemas": {
+      "ChatRequestBody": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "本轮用户提问",
+            "example": "图神经网络的消息传递机制是什么？"
+          },
+          "history": {
+            "type": "array",
+            "description": "历史消息（role/content）",
+            "items": {
+              "type": "object"
+            }
+          },
+          "projectId": {
+            "type": "string",
+            "description": "项目 ID：用于知识库 RAG 与项目记忆检索"
+          },
+          "docContext": {
+            "type": "string",
+            "description": "关联文档上下文（标题+大纲+正文片段）"
+          },
+          "model": {
+            "type": "string",
+            "description": "显式指定模型 ID（best-effort 覆盖默认模型）"
+          },
+          "enableThinking": {
+            "type": "boolean",
+            "description": "开启推理过程透传（delta.reasoning_content / delta.thinking）"
+          },
+          "webSearch": {
+            "type": "boolean",
+            "description": "本轮强制联网搜索（输入区「联网」开关，按轮生效）"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    }
   }
 }

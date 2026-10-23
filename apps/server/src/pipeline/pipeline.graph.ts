@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { db, sqlite } from '../db/database';
 import { pipelineTasks, documents, reflexionLogs, memoryLogs, polishRecords, qualityReports } from '../db/schema';
 import type { Outline, PaperHit, QualityReport, ResearchPlan, ResearchTraceEntry, PipelineTaskRow } from './pipeline-state';
+import { splitTailBlock, stripTailBlocks } from './tail-blocks';
 
 /**
  * 主流水线图（LangGraph）：
@@ -81,6 +82,9 @@ export interface PipelineGraphDeps {
 const MAX_RETRY = 2;
 const QUALITY_THRESHOLD = 80;
 
+/** 质量门步骤文案模板（产品唯一来源；测试从这里取，防止格式漂移） */
+export const QUALITY_GATE_LABEL = (score: number | string): string => `总分 ${score}/100`;
+
 export function buildPipelineGraph(deps: PipelineGraphDeps) {
   const graph = new StateGraph(PipelineAnnotation)
     .addNode('topic-verify', async (s: PipelineGraphState) => {
@@ -98,8 +102,16 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
       }
       await deps.notify(s.taskId, 'literature', 'running');
       const enriched = await deps.crossEnrich(s.task.projectId, s.task.topic, s.plan);
+      // ReAct 轨迹（think → act → observe）：由本轮真实跨库命中派生，落 pipeline_task.trace 供前端展示
+      const keywords = (s.plan.searchStrategy?.keywords || [s.task.topic]).filter(Boolean).slice(0, 4);
+      const allHits = [...enriched.libraryHits, ...enriched.knowledgeHits];
+      const researchTrace = keywords.map((q, i) => {
+        const needle = q.toLowerCase();
+        const found = allHits.filter((h) => `${h.title} ${h.abstract || ''}`.toLowerCase().includes(needle)).length;
+        return { round: i + 1, thought: `围绕「${q}」检索本地文献库与知识库`, action: 'search', query: q, found };
+      });
       db.update(pipelineTasks)
-        .set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), updatedAt: Date.now() })
+        .set({ researchNotice: enriched.notice, researchMeta: JSON.stringify(enriched.meta), trace: JSON.stringify(researchTrace), updatedAt: Date.now() })
         .where(eq(pipelineTasks.id, s.taskId))
         .run();
       await deps.notify(s.taskId, 'literature', 'done', enriched.summary.split('\n')[0]);
@@ -107,6 +119,7 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
         enrichedLibHits: enriched.libraryHits,
         enrichedKnHits: enriched.knowledgeHits,
         researchNotice: enriched.notice ?? undefined,
+        researchTrace,
         literatureSummary: enriched.summary,
       };
     })
@@ -171,20 +184,35 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
         const styleHint = procedural ? `\n写作风格参考（来自记忆库）：${procedural}` : '';
         const refsPrompt = deps.buildRefsPrompt(task.projectId);
         if (retry === 0) snapshotBeforeOverwrite(docId, '流水线起草前自动快照');
-        const totalSections = outline.sections?.length || 0;
-        const draftContent = await deps.runDrafting(s.taskId, doc.title || task.topic, outline, refsPrompt, styleHint, reflexion, (done, total) => {
-          void deps.notify(s.taskId, 'quality-gate', 'running', `起草进度 ${done}/${total} 节${retry > 0 ? `（第 ${retry} 次回炉）` : ''}`, retry);
-        });
-        void totalSections;
+        // 「分章起草」开关：关闭时跳过 LLM 起草，直接用现有正文进入评审
+        // （历史 bug：该开关写进 pipeline_config 但 graph 从不读取，UI 显示已关闭却照常起草）
+        const draftingOn = deps.stepEnabled('drafting');
+        let draftContent: string;
+        if (!draftingOn) {
+          await deps.notify(s.taskId, 'quality-gate', 'running', '分章起草已禁用，使用现有正文评审', retry);
+          const current = db.select().from(documents).where(eq(documents.id, docId)).get();
+          // 先剥掉已有尾部块再交给 renderer：否则每轮回炉都会在末尾再追加一份
+          // 「## 研究资料 / ## 图表」，内容越跑越长、版本历史堆满重复快照。
+          const raw = stripTailBlocks(current?.content || '');
+          draftContent = raw || `## ${outline.title || task.topic}\n\n（分章起草已禁用，正文为空）`;
+        } else {
+          draftContent = await deps.runDrafting(s.taskId, doc.title || task.topic, outline, refsPrompt, styleHint, reflexion, (done, total) => {
+            void deps.notify(s.taskId, 'quality-gate', 'running', `起草进度 ${done}/${total} 节${retry > 0 ? `（第 ${retry} 次回炉）` : ''}`, retry);
+          });
+        }
+        // 图表块仅在「重新起草」的回炉轮次里沿用旧图；关闭起草时正文已含图表（stripTailBlocks 已剥掉），
+        // 若再拼一次会出现两份图表块。
         let prevFigures = '';
-        if (retry > 0) {
+        if (retry > 0 && draftingOn) {
           const prev = db.select().from(documents).where(eq(documents.id, docId)).get();
           const m = (prev?.content || '').match(/## 图表[\s\S]*?$/);
           if (m) prevFigures = `\n\n---\n\n${m[0]}`;
         }
         const rendered = deps.renderCitations(task.projectId, docId, draftContent, researchMeta);
         let finalContent = rendered + prevFigures;
-        if (retry === 0 && deps.stepEnabled('figures')) {
+        // 自动配图只在「真的起草出了正文」时才有意义：起草被禁用时正文可能是占位串，
+        // 给它配图会产出「空正文 + 图表」这种无意义产物。
+        if (retry === 0 && draftingOn && deps.stepEnabled('figures')) {
           try {
             const figs = await deps.ai.generateFigures(task.topic, JSON.stringify(outline), rendered);
             if (figs.length > 0) {
@@ -195,7 +223,7 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
             deps.logger.warn(`自动配图失败: ${e.message}`);
           }
         }
-        db.update(documents).set({ content: finalContent, updatedAt: Date.now() }).where(eq(documents.id, docId)).run();
+        writeDocumentContent(docId, finalContent, retry === 0 ? '流水线首轮起草' : `流水线第 ${retry} 轮回炉`);
 
         if (!deps.stepEnabled('quality-gate')) {
           report = { totalScore: 85, feedback: '质量门已禁用，跳过评分' };
@@ -218,7 +246,7 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
         const scored = Number(report.totalScore);
         if (scored > best.score) best = { score: scored, content: latest?.content ?? '', feedback: report.feedback };
         deps.trackBudget(s.taskId); // H2：评审成本打点
-        await deps.notify(s.taskId, 'quality-gate', 'scored', `总分 ${report.totalScore}/100`);
+        await deps.notify(s.taskId, 'quality-gate', 'scored', QUALITY_GATE_LABEL(report.totalScore));
         if (report.totalScore < QUALITY_THRESHOLD && retry < MAX_RETRY) {
           retry += 1;
           const reflex = buildReflexionText(reviewResult.scores, report.feedback);
@@ -231,11 +259,11 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
         break;
       }
       if (best.score >= 0 && best.content && (report?.totalScore ?? 0) < best.score) {
-        db.update(documents).set({ content: best.content, updatedAt: Date.now() }).where(eq(documents.id, docId)).run();
+        writeDocumentContent(docId, best.content, `采用最高分轮次 ${best.score} 分`);
         deps.logger.log(`[质量门] 采用最高分轮次 ${best.score} 分（末轮 ${report?.totalScore ?? '-'} 分）`);
         report = { totalScore: best.score, feedback: best.feedback };
       }
-      await deps.notify(s.taskId, 'quality-gate', 'done', `总分 ${report.totalScore}/100`);
+      await deps.notify(s.taskId, 'quality-gate', 'done', QUALITY_GATE_LABEL(report.totalScore));
       return { report };
     })
     .addNode('polish', async (s: PipelineGraphState) => {
@@ -243,17 +271,9 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
       const docId = s.documentId!;
       const finalDoc = db.select().from(documents).where(eq(documents.id, docId)).get();
       const content = finalDoc?.content ?? '';
-      // H8 修复：尾部块（参考文献/图表）用正则匹配任意标题层级与换行变体，
-      // 不再依赖字面量 '\n\n## 参考文献'（模型输出 '\n## 参考文献' 或 '## 参考文献列表' 时旧逻辑切不到，
-      // 会导致参考文献被当作正文送润色，AI 有机会改写引文内容——学术诚信红线）。
-      const tailRegex = /\n+#{1,3}\s*(参考文献|引用文献|图表|references)(?=[\s（(:：\-—]|$)[^\n]*/gi;
-      let cut = -1;
-      for (const m of content.matchAll(tailRegex)) {
-        const idx = m.index ?? -1;
-        if (idx >= 0 && (cut === -1 || idx < cut)) cut = idx; // 取最早出现的尾部标题
-      }
-      const bodyPart = cut >= 0 ? content.slice(0, cut) : content;
-      const tailPart = cut >= 0 ? content.slice(cut) : '';
+      // 尾部块（参考文献/图表/研究资料）不送润色：AI 有机会改写引文内容——学术诚信红线。
+      // 识别规则收敛到 tail-blocks.ts（此前两处各写一份正则，且都不认识「研究资料」）。
+      const { body: bodyPart, tail: tailPart } = splitTailBlock(content);
       const polished = await deps.ai.polish(bodyPart);
       deps.trackBudget(s.taskId); // H2：润色成本打点
       db.insert(polishRecords)
@@ -265,7 +285,7 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
         polishedText.includes('```json') ||
         (polishedText.trim().startsWith('{') && (polishedText.includes('"reason"') || polishedText.includes('"original"') || polishedText.includes('"polished"') || polishedText.includes('"content"')));
       const fallbackText = (jsonLike ? finalDoc?.content || '' : polishedText) + tailPart;
-      db.update(documents).set({ content: fallbackText, status: 'polished', updatedAt: Date.now() }).where(eq(documents.id, docId)).run();
+      writeDocumentContent(docId, fallbackText, '流水线润色定稿', 'polished');
       await deps.notify(s.taskId, 'polish', 'done');
       return {};
     })
@@ -284,7 +304,7 @@ export function buildPipelineGraph(deps: PipelineGraphDeps) {
         const cur = db.select().from(documents).where(eq(documents.id, docId)).get();
         const body = cur?.content ?? '';
         if (!body.includes('研究阶段未在本地文献库')) {
-          db.update(documents).set({ content: body + `\n\n---\n\n## 研究说明\n\n> ${s.researchNotice}\n`, updatedAt: Date.now() }).where(eq(documents.id, docId)).run();
+          writeDocumentContent(docId, body + `\n\n---\n\n## 研究说明\n\n> ${s.researchNotice}\n`, '追加研究说明');
         }
       }
       try {
@@ -382,6 +402,49 @@ function snapshotBeforeOverwrite(docId: string, reason: string): void {
   if (latest && latest.content === body) return;
   versions.push({ version: doc?.version ?? 1, content: body, updatedAt: Date.now(), commitMessage: `${reason} · ${new Date().toLocaleString('zh-CN')}` });
   db.update(documents).set({ versions: JSON.stringify(versions.slice(-20)), updatedAt: doc?.updatedAt ?? Date.now() }).where(eq(documents.id, docId)).run();
+}
+
+/**
+ * 流水线写正文的唯一入口（与 DocumentsService.update 保持同语义）：
+ *  - 内容真的变化时才推历史版本并 version+1
+ *  - 一并写入 status（润色/定稿阶段需要）
+ *
+ * 历史 bug：graph 里各处直接 `db.update(documents).set({content})`，绕过版本管理，
+ * 导致流水线产物 version 恒为 1、versions 归档永远为空。
+ */
+function writeDocumentContent(docId: string, nextContent: string, reason: string, status?: string): void {
+  const doc = db.select().from(documents).where(eq(documents.id, docId)).get();
+  if (!doc) return;
+  const changed = nextContent !== (doc.content ?? '');
+  if (!changed) {
+    if (status) db.update(documents).set({ status, updatedAt: Date.now() }).where(eq(documents.id, docId)).run();
+    return;
+  }
+  const baseVersion = doc.version ?? 1;
+  const versions = JSON.parse(doc.versions || '[]') as { version: number; content: string; updatedAt: number; commitMessage?: string }[];
+  const prev = doc.content ?? '';
+  // 幂等：最新快照内容与当前正文相同则不再 push。
+  // 否则「起草前 snapshotBeforeOverwrite + 本次 writeDocumentContent」会对同一份旧正文
+  // 各写一条快照（续跑/重跑已有正文的文档时，版本历史里会出现两条内容与版本号都相同的记录）。
+  const latestSnapshot = versions[versions.length - 1];
+  if (prev.trim() && latestSnapshot?.content !== prev) {
+    versions.push({
+      version: baseVersion,
+      content: prev,
+      updatedAt: doc.updatedAt ?? Date.now(),
+      commitMessage: `${reason} · ${new Date().toLocaleString('zh-CN')}`,
+    });
+  }
+  db.update(documents)
+    .set({
+      content: nextContent,
+      version: prev.trim() ? baseVersion + 1 : baseVersion,
+      versions: JSON.stringify(versions.slice(-20)),
+      ...(status ? { status } : {}),
+      updatedAt: Date.now(),
+    })
+    .where(eq(documents.id, docId))
+    .run();
 }
 
 export { interrupt };

@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto';
 import pRetry from 'p-retry';
 import pLimit from 'p-limit';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { generateText, generateObject, streamText, jsonSchema as aiJsonSchema, type ModelMessage, type LanguageModelUsage } from 'ai';
-import type { LanguageModel } from 'ai';
+import { generateText, generateObject, streamText, stepCountIs, jsonSchema as aiJsonSchema, type ModelMessage, type LanguageModelUsage } from 'ai';
+import type { LanguageModel, ToolSet } from 'ai';
 import { decryptSecret } from '../../db/src/secret-crypto';
 import { sqlite } from '../../db/src/database';
 import { db } from '../../db/src/database';
 import { llmCallLogs, customPrompts } from '../../db/src/schema';
 import { eq } from 'drizzle-orm';
+import { envInt } from '../../core/src/env';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -24,6 +25,10 @@ export interface ChatStreamOptions {
   enableThinking?: boolean;
   /** 客户端断连时中止上游生成，避免空跑 token */
   signal?: AbortSignal;
+  /** 工具集（Agent 模式下注入） */
+  tools?: ToolSet;
+  /** 工具调用最大步数 */
+  maxSteps?: number;
 }
 
 export interface CompleteOptions {
@@ -43,6 +48,10 @@ export interface CompleteOptions {
   enableThinking?: boolean;
   /** JSON Schema 结构化输出（经 AI SDK jsonSchema 包装走 response_format） */
   jsonSchema?: { name: string; schema: Record<string, unknown> };
+  /** 工具集（AI SDK tool 定义）。提供时 streamText 会走 tool-calling 循环 */
+  tools?: ToolSet;
+  /** 允许多步工具调用（默认 1，即单轮） */
+  maxSteps?: number;
 }
 
 /**
@@ -67,7 +76,7 @@ export class AiTransportService {
 
   // ---------- 并发限流：p-limit（成熟库替代手写实现） ----------
   // RPM 换算为并发上限：假设单请求 ~10s，RPM 60 → 最多 6 并发；取保守值避免 429
-  protected readonly limit = pLimit(Math.max(1, Math.floor(Number(process.env.AI_RPM_CAP || 60) / 6)));
+  protected readonly limit = pLimit(Math.max(1, Math.floor(envInt('AI_RPM_CAP', 60, { min: 1, max: 100_000 }) / 6)));
 
   constructor() {
     this.applyActiveProvider();
@@ -153,6 +162,7 @@ export class AiTransportService {
         .values({
           id: randomUUID(),
           caller: opts.caller || 'general',
+          kind: 'llm',
           model: opts.model,
           promptTokens: opts.promptTokens,
           completionTokens: opts.completionTokens,
@@ -312,13 +322,132 @@ export class AiTransportService {
     });
   }
 
-  /** 流式补全：返回 OpenAI 兼容 SSE 文本流（经 AI SDK streamText → 转接为上游 ReadableStream 语义，供 sse.helper 转发） */
+  /**
+   * 流式补全：返回 OpenAI 兼容 SSE 文本流（供 sse.helper 转发）。
+   *
+   * 关键行为（2026-10 重写）：
+   *  - 遍历 `fullStream` 而不是 `textStream`：后者只吐正文，会把推理增量与工具调用全部丢弃，
+   *    导致前端「深度思考」开关与折叠面板永远拿不到内容。
+   *  - reasoning 增量编码成 `delta.reasoning_content`（OpenAI 兼容语义），
+   *    由 sse.helper 决定是否透传给客户端（forwardReasoning 开关）。
+   *  - 工具调用以 `delta.tool_calls` 形式下发，供上层 Agent 循环消费。
+   */
   async completeStream(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<ReadableStream<Uint8Array>> {
     this.assertConfigured();
     const t0 = Date.now();
     const model = this.resolveModel(opts);
     const caller = opts.context || 'general';
     const selfLog = this.logLlmCall.bind(this);
+
+    // 兼容性兜底：部分 OpenAI 兼容网关（实测 Qwen3.8-Flash-Next @ hcnsec）
+    // 在 stream=true 时把工具调用写成正文文本（<tool_call><function=...>），只在非流式返回标准 tool_calls。
+    //
+    // 策略：默认仍走流式（保留增量体验）；只有**已知不支持流式工具**的端点才走非流式回退。
+    // 判定依据是 provider 已知问题清单 + 显式环境开关，而不是「只要带 tools 就回退」——
+    // 后者会让所有项目内对话退化成「全文生成完才一次性吐出」，与流式目标冲突。
+    if (opts.tools && this.needsNonStreamTools()) {
+      const viaNonStream = await this.completeWithToolsNonStream(messages, opts, model, caller, t0, selfLog);
+      if (viaNonStream) return viaNonStream;
+    }
+
+    return this.streamPlain(messages, opts, model, caller, t0, selfLog);
+  }
+
+  /**
+   * 该端点是否需要「非流式工具回退」。
+   *  - `AI_TOOLS_NONSTREAM=on`   → 强制所有端点走非流式（保守兜底）
+   *  - `AI_TOOLS_NONSTREAM=off`  → 强制全部走流式（调试用）
+   *  - 未设置 → 命中已知问题主机清单才回退
+   */
+  private needsNonStreamTools(): boolean {
+    const flag = (process.env.AI_TOOLS_NONSTREAM || '').trim().toLowerCase();
+    if (flag === 'off' || flag === '0' || flag === 'false') return false;
+    if (flag === 'on' || flag === '1' || flag === 'true') return true;
+    // 已知把流式 tool_calls 写成正文文本的端点（实测）
+    const known = (process.env.AI_TOOLS_NONSTREAM_HOSTS || 'hcnsec.cn')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    const host = (() => {
+      try {
+        return new URL(this.baseUrl).hostname.toLowerCase();
+      } catch {
+        return '';
+      }
+    })();
+    return known.some((k) => host.includes(k));
+  }
+
+  /**
+   * 工具模式的非流式回退：用 generateText + stopWhen 跑完整工具循环，
+   * 把「推理 / 工具调用 / 最终文本」按 SSE 契约回放。
+   * 仅在检测到上游流式不支持标准 tool_calls 时使用（一次性），避免所有请求都退化成非流式。
+   */
+  private async completeWithToolsNonStream(
+    messages: ChatMessage[],
+    opts: CompleteOptions,
+    model: string,
+    caller: string,
+    t0: number,
+    selfLog: AiTransportService['logLlmCall'],
+  ): Promise<ReadableStream<Uint8Array> | null> {
+    const { instructions, rest } = this.splitSystemMessages(messages);
+    const encoder = new TextEncoder();
+    const useFallback = process.env.AI_TOOLS_NONSTREAM !== 'off';
+    if (!useFallback) return null;
+    // 先取出模型实例（buildModel 依赖 this，必须在构造 ReadableStream 之前调用一次）
+    const streamModel = this.buildModel(model, opts.signal);
+    const sse = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const enqueue = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        try {
+          const r = await generateText({
+            model: streamModel,
+            temperature: opts.temperature ?? 0.7,
+            maxOutputTokens: opts.maxTokens ?? 4096,
+            abortSignal: opts.signal,
+            instructions,
+            messages: rest,
+            tools: opts.tools,
+            stopWhen: stepCountIs(opts.maxSteps && opts.maxSteps > 1 ? opts.maxSteps : 1),
+          });
+          // 推理内容：AI SDK v7 的 r.reasoning 是数组（ReasoningPart[]），
+          // 字符串在 r.reasoningText（r.reasoning 直接当字符串会得到 "[object Object]"）
+          const reasoningText = r.reasoningText ?? '';
+          if (reasoningText) enqueue({ choices: [{ delta: { reasoning_content: reasoningText }, index: 0 }] });
+          // 工具调用回放（供前端/轨迹消费）
+          for (const tc of r.toolCalls ?? []) {
+            enqueue({ choices: [{ delta: { tool_calls: [{ id: tc.toolCallId, function: { name: tc.toolName, arguments: JSON.stringify(tc.input ?? {}) } }] }, index: 0 }] });
+          }
+          // 最终文本
+          const text = r.text ?? '';
+          if (text) enqueue({ choices: [{ delta: { content: text }, index: 0 }] });
+          const usage = r.usage;
+          const pt = usage?.inputTokens ?? 0;
+          const ct = usage?.outputTokens ?? 0;
+          enqueue({ choices: [{ delta: {}, index: 0, finish_reason: 'stop' }], usage: { prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct } });
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          selfLog({ caller, model, promptTokens: pt, completionTokens: ct, latencyMs: Date.now() - t0, success: true });
+        } catch (err: any) {
+          selfLog({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: err?.message });
+          if (!opts.signal?.aborted) enqueue({ error: String(err?.message || err) });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return sse;
+  }
+
+  /** 纯流式路径（无工具，或上游支持标准 tool_calls 时） */
+  private async streamPlain(
+    messages: ChatMessage[],
+    opts: CompleteOptions,
+    model: string,
+    caller: string,
+    t0: number,
+    selfLog: AiTransportService['logLlmCall'],
+  ): Promise<ReadableStream<Uint8Array>> {
     return this.limit(async () => {
       const { instructions, rest } = this.splitSystemMessages(messages);
       const result = streamText({
@@ -328,22 +457,61 @@ export class AiTransportService {
         abortSignal: opts.signal,
         instructions,
         messages: rest,
+        // AI SDK v7 用 stopWhen: stepCountIs(n) 控制多步工具循环（v6 的 maxSteps 已移除且会被静默忽略）
+        ...(opts.tools ? { tools: opts.tools, stopWhen: stepCountIs(opts.maxSteps && opts.maxSteps > 1 ? opts.maxSteps : 1) } : {}),
       });
-      // streamText.textStream → 重新编码为 SSE data: 行流，保持 sse.helper 的转发契约
       const encoder = new TextEncoder();
       const sse = new ReadableStream<Uint8Array>({
         async start(controller) {
+          const enqueue = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
           try {
-            for await (const delta of result.textStream) {
-              if (delta) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: delta }, index: 0 }] })}\n\n`));
+            for await (const part of result.stream) {
+              switch (part.type) {
+                case 'text-delta': {
+                  const text = part.text ?? '';
+                  if (text) enqueue({ choices: [{ delta: { content: text }, index: 0 }] });
+                  break;
+                }
+                case 'reasoning-delta': {
+                  const text = part.text ?? '';
+                  if (text) enqueue({ choices: [{ delta: { reasoning_content: text }, index: 0 }] });
+                  break;
+                }
+                case 'tool-call': {
+                  enqueue({
+                    choices: [
+                      {
+                        delta: {
+                          tool_calls: [{ id: part.toolCallId, function: { name: part.toolName, arguments: JSON.stringify(part.input ?? {}) } }],
+                        },
+                        index: 0,
+                      },
+                    ],
+                  });
+                  break;
+                }
+                case 'error': {
+                  enqueue({ error: String((part as { error?: unknown }).error ?? '模型流式输出异常') });
+                  break;
+                }
+                default:
+                  break;
+              }
             }
             const usage = await result.usage;
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, index: 0, finish_reason: 'stop' }], usage: { prompt_tokens: usage?.inputTokens ?? 0, completion_tokens: usage?.outputTokens ?? 0, total_tokens: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0) } })}\n\n`));
+            enqueue({
+              choices: [{ delta: {}, index: 0, finish_reason: 'stop' }],
+              usage: {
+                prompt_tokens: usage?.inputTokens ?? 0,
+                completion_tokens: usage?.outputTokens ?? 0,
+                total_tokens: (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0),
+              },
+            });
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
             selfLog({ caller, model, promptTokens: usage?.inputTokens ?? 0, completionTokens: usage?.outputTokens ?? 0, latencyMs: Date.now() - t0, success: true });
           } catch (err: any) {
             selfLog({ caller, model, promptTokens: 0, completionTokens: 0, latencyMs: Date.now() - t0, success: false, error: err?.message });
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: String(err?.message || err) })}\n\n`));
+            if (!opts.signal?.aborted) enqueue({ error: String(err?.message || err) });
           } finally {
             controller.close();
           }

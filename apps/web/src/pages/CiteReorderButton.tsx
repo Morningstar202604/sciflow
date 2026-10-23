@@ -6,7 +6,7 @@ import { Button, Modal, errMsg } from '../components/ui';
 import type { CiteStyle, RenderCitationsResult } from '../types';
 
 /** 序号样式集合（[n] 插入序，无需正文重排） */
-const NUMBERED_STYLES: CiteStyle[] = ['ieee', 'vancouver', 'gbt', 'nature', 'springer', 'acs'];
+const NUMBERED_STYLES: CiteStyle[] = ['ieee', 'vancouver', 'gbt', 'nature', 'acs'];
 
 /**
  * 著者-年重排入口（缺口#4 前端半）——独立 lazy chunk：按钮 + 预览 Modal + 调用全在此。

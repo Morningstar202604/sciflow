@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '11.7.0'
+
+jobs:
+  types-unit-build:
+    name: Types / Unit / Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck (server)
+        run: pnpm --filter @sciflow/server typecheck
+      - name: Typecheck (web)
+        run: pnpm --filter @sciflow/web typecheck
+      - name: Unit tests (server)
+        run: pnpm --filter @sciflow/server test
+      - name: Unit tests (web)
+        run: pnpm --filter @sciflow/web test
+      - name: Build (server)
+        run: pnpm --filter @sciflow/server build
+      - name: Build (web)
+        run: pnpm --filter @sciflow/web build
+
+  regression:
+    name: Full mock regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: types-unit-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build server
+        run: pnpm --filter @sciflow/server build
+      - name: Start backend (mock AI, fresh database)
+        run: |
+          rm -f /tmp/sciflow_ci.db*
+          AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_ci.db PORT=3000 \
+            node apps/server/dist/apps/server/src/main.js > /tmp/server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3000/api/health > /dev/null; then echo "backend up"; exit 0; fi
+            sleep 1
+          done
+          echo "backend failed to start"; tail -50 /tmp/server.log; exit 1
+      - name: Run regression
+        env:
+          SCIFLOW_BASE: http://127.0.0.1:3000
+          AI_MOCK: '1'
+          # 必须与启动实例的 DATABASE_PATH 一致：否则脚本内 2 个依赖真实库的 check 会降级为 info
+          SCIFLOW_DB_PATH: /tmp/sciflow_ci.db
+        run: python3 scripts/full_regression.py
+      - name: Dump server log on failure
+        if: failure()
+        run: tail -100 /tmp/server.log
+
+  e2e-evals:
+    name: E2E + prompt evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: types-unit-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build server
+        run: pnpm --filter @sciflow/server build
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Start backend (mock AI)
+        run: |
+          rm -f /tmp/sciflow_e2e.db*
+          AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_e2e.db PORT=3000 \
+            node apps/server/dist/apps/server/src/main.js > /tmp/server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3000/api/health > /dev/null; then echo "backend up"; exit 0; fi
+            sleep 1
+          done
+          tail -50 /tmp/server.log; exit 1
+      - name: Start web dev server
+        run: |
+          pnpm --filter @sciflow/web dev -- --host 127.0.0.1 --port 5173 > /tmp/web.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:5173 > /dev/null; then echo "web up"; exit 0; fi
+            sleep 1
+          done
+          tail -50 /tmp/web.log; exit 1
+      - name: Playwright smoke
+        env:
+          E2E_BASE: http://127.0.0.1:5173
+        run: pnpm exec playwright test e2e/workspace-smoke.spec.ts
+      - name: Start mock HTTP gateway
+        run: |
+          node apps/server/scripts/mock-openai-http.mjs > /tmp/gateway.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:5099/v1/models > /dev/null; then echo "gateway up"; exit 0; fi
+            sleep 1
+          done
+          tail -50 /tmp/gateway.log; exit 1
+      - name: Prompt contract evals
+        run: pnpm exec promptfoo eval -c evals/promptfooconfig.yaml --no-progress-bar
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo '--- server ---'; tail -80 /tmp/server.log || true
+          echo '--- web ---'; tail -40 /tmp/web.log || true

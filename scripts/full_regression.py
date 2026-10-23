@@ -147,14 +147,20 @@ if docid:
     st, d2 = req("PATCH", f"/api/documents/{docid}", {"title": "回归测试论文-v2"})
     check("文档更新 PATCH :id", st == 200 and d2.get("title") == "回归测试论文-v2", f"{st} {d2}")
     st, d2 = req("GET", f"/api/documents/{docid}/export")
-    check("文档导出 export", st == 200, f"{st}")
+    export_text = d2 if isinstance(d2, str) else json.dumps(d2 or "", ensure_ascii=False)
+    check(
+        "文档导出 export（内容非空且含标题/正文）",
+        st == 200 and len(export_text) > 50 and "回归测试论文" in export_text,
+        f"st={st} len={len(export_text)} head={export_text[:80]!r}",
+    )
     st, d2 = req("POST", f"/api/documents/{docid}/citations", {"text": "Graph neural networks have shown great success in node classification tasks."})
     if st in (200, 201):
         info("引文抽取 POST citations", "成功")
         st, d3 = req("GET", f"/api/documents/{docid}/citations")
-        check("引文列表 GET citations", st == 200, f"{st}")
+        check("引文列表 GET citations", st == 200 and isinstance(d3, list), f"{st} {str(d3)[:80]}")
         st, d3 = req("GET", f"/api/documents/{docid}/export-citations")
-        check("引文导出 export-citations", st == 200, f"{st}")
+        cite_text = d3 if isinstance(d3, str) else json.dumps(d3 or "", ensure_ascii=False)
+        check("引文导出 export-citations（非空）", st == 200 and len(cite_text.strip()) > 5, f"st={st} len={len(cite_text)}")
     else:
         info("引文抽取 POST citations", f"业务校验拒绝 st={st}（内容过短属正常拦截）")
     # AI 接口
@@ -199,10 +205,8 @@ if tools:
     # 构造一个必填参数缺失的调用 → guardrail 应拒绝（参数校验）
     bad_args = {"__missing__": True} if "query" in json.dumps(tools[0].get("inputSchema", {})) else {"query": ""}
     st, d2 = req("POST", "/api/mcp/call", {"name": name, "arguments": bad_args})
-    if st in (400, 422):
-        check("Guardrail 参数校验拒绝（缺参）", True, f"{st} {str(d2)[:100]}")
-    else:
-        check("Guardrail 参数校验拒绝（缺参）", st in (400, 422) or "拒绝" in str(d2), f"未拒绝 st={st} {str(d2)[:100]}")
+    # 恒真断言已删除：两个分支此前都会通过，该 check 毫无判别力
+    check("Guardrail 参数校验拒绝（缺参）", st in (400, 422) or "拒绝" in str(d2), f"未拒绝 st={st} {str(d2)[:100]}")
     # 正常调用
     st, d2 = req("POST", "/api/mcp/call", {"name": name, "arguments": {"query": "图神经网络"}})
     check(f"MCP 工具调用 {name}", st in (200, 201), f"st={st} {str(d2)[:90]}")
@@ -258,8 +262,13 @@ if runid:
             n_pipe = sum(1 for c in cd if c.get("format") == "pipeline") if isinstance(cd, list) else 0
             check("流水线 e2e·citations 回填 format=pipeline", sc == 200 and n_pipe >= 1, f"st={sc} n={n_pipe}")
             sdoc, dd = req("GET", f"/api/documents/{doc_id}")
-            check("流水线 e2e·文档正文含参考文献列表（renderCitations）",
-                  sdoc == 200 and "## 参考文献" in (dd.get("content") or ""), f"st={sdoc} len={len(dd.get('content',''))}")
+            # 契约变更（v0.6）：正文只保留 [n] 锚点，参考文献列表由前端按用户选中的 CSL 样式渲染，
+            # 流水线不再把一份硬编码 GB/T 形态的列表写进正文（否则打开写作页会出现两个参考文献区）。
+            # 断言改为：正文含数字锚点 + citations 已落库 —— 这两者才是"引用闭环"的真实契约。
+            _body = (dd.get("content") or "") if sdoc == 200 else ""
+            _anchors = sum(1 for _ in __import__("re").finditer(r"\[\d+\]", _body))
+            check("流水线 e2e·正文含数字锚点（引用闭环）",
+                  sdoc == 200 and _anchors >= 1, f"st={sdoc} anchors={_anchors} len={len(_body)}")
     # 不删，留给断点续跑验证
 
 # ---------- 6. 记忆中心 ----------
@@ -940,9 +949,16 @@ if MOCK:
                       f"notice={fin2.get('researchNotice')!r}")
                 sd, dd = req("GET", f"/api/documents/{fin2.get('documentId')}")
                 c2 = dd.get("content", "") if sd == 200 else ""
-                check("25.1 产物参考文献块含「（文献库 · 匹配」来源/匹配度标记",
-                      "（文献库 · 匹配" in c2, f"len={len(c2)}")
-                check("25.1 产物仍含「## 参考文献」块（既有契约不破）", "## 参考文献" in c2, "")
+                # v0.6 契约：正文不再内嵌参考文献列表；来源/匹配度改由 citations 元数据承载
+                _sc25, _cit25 = req("GET", f"/api/documents/{fin2.get('documentId')}/citations")
+                check("25.1 引用已落库（来源可追溯）",
+                      _sc25 == 200 and isinstance(_cit25, list) and len(_cit25) >= 1,
+                      f"st={_sc25} n={len(_cit25) if isinstance(_cit25, list) else '?'}")
+                # v0.6 契约：正文只保留 [n] 锚点，参考文献列表由前端按样式渲染。
+                # 这里只断言「锚点存在且 citations 已落库」——不再断言正文没有「## 参考文献」标题：
+                # 模型完全可能在正文里自己写这个标题（真实模型下会误报），那不是契约的一部分。
+                check("25.1 正文含数字锚点（引用闭环）",
+                      bool(__import__("re").search(r"\[\d+\]", c2)), f"len={len(c2)}")
 
     # 25.2 命中0：干净空项目（无文献/无知识库）跑流水线 → researchNotice 非空 + 产物含引导段
     st, pj0 = req("POST", "/api/projects", {"name": "跨库零命中项目", "description": "cross-search zero-hit path"})
@@ -1026,6 +1042,23 @@ if p26id:
           f"body={str(daudit)[:200]}")
     st, _na = req("GET", "/api/documents/non-exist-id-xyz/citation-audit")
     check("27.3 不存在文档 citation-audit 返回 404", st == 404, f"st={st}")
+
+    # 27.4 兼容 [Ref:n] 锚点（历史缺陷：只认 [n]，正文用 [Ref:1] 时 anchorTotal=0 → 假满分）
+    st4, d4 = req("POST", "/api/documents", {"projectId": p26id, "title": "Ref锚点文档"})
+    d4id = d4.get("id") if st4 == 201 else None
+    if d4id:
+        req("PATCH", f"/api/documents/{d4id}", {"content": "## 引言\n依据[Ref:1]与[Ref:2]。"})
+        st5, da = req("GET", f"/api/documents/{d4id}/citation-audit")
+        check("27.4 [Ref:n] 锚点可识别且幽灵引用受罚",
+              st5 == 200 and da.get("anchorTotal") == 2 and da.get("ghost") == 2 and da.get("score", 100) < 60,
+              f"body={str(da)[:160]}")
+        # 27.5 无锚点不再是「满分假绿」
+        req("PATCH", f"/api/documents/{d4id}", {"content": "## 引言\n本文没有任何引用标注。"})
+        st6, db_ = req("GET", f"/api/documents/{d4id}/citation-audit")
+        check("27.5 无锚点时 score 封顶 60 且给出提示",
+              st6 == 200 and db_.get("anchorTotal") == 0 and db_.get("score", 100) <= 60
+              and any("未检测到引用" in str(i) for i in (db_.get("issues") or [])),
+              f"body={str(db_)[:160]}")
 
 print("=" * 60)
 print(f"结果: PASS {PASS} / FAIL {FAIL} / KNOWN(存量缺口) {KNOWN}")

@@ -40,7 +40,11 @@ fs.mkdirSync(backupDir, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const target = path.join(backupDir, `sciflow-${stamp}.db`);
 
-const { default: Database } = require('better-sqlite3');
+// better-sqlite3 是 CJS，require 直接返回构造函数（没有 .default）；
+// 原来写 `const { default: Database }` 会得到 undefined → `Database is not a constructor`。
+// 两种导出形态都兼容，避免未来包结构变化再次失效。
+const sqliteMod = require('better-sqlite3');
+const Database = sqliteMod?.default ?? sqliteMod;
 const src = new Database(dbPath, { readonly: true });
 try {
   await src.backup(target);

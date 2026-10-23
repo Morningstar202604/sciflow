@@ -32,6 +32,7 @@ secrets/
 
 # test coverage
 coverage/
+dist-desktop/
 
 # database (local dev)
 *.db
@@ -64,3 +65,8 @@ npm-shrinkwrap.json
 
 # OpenAPI 生成中间库
 openapi.tmp.db*
+dist-release
+
+# 审计临时截图/产物
+tmp-shots/
+tmp-ux2/

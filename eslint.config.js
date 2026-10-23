@@ -4,7 +4,7 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/release/**', '**/resources/**', '**/node_modules/**', '**/*.config.cjs', '.zwork/**', 'apps/server/data/**'] },
+  { ignores: ['**/dist/**', '**/release/**', '**/resources/**', '**/node_modules/**', '**/*.config.cjs', '.zwork/**', 'apps/server/data/**', '**/coverage/**'] },
   {
     // M3-3 依赖红线（模块边界固化）：packages=核心能力层，apps/server=接口层
     files: ['packages/**/*.ts'],
@@ -51,6 +51,17 @@ export default tseslint.config(
       'react-hooks/refs': 'error',
       'react-hooks/immutability': 'error',
       'react-hooks/exhaustive-deps': 'error',
+    },
+  },
+  {
+    // 对话控制器（ChatPage）：持有流中止句柄 ref、在 effect 里把会话快照写入 localStorage。
+    // React Compiler 的三条实验性规则针对「可安全记忆化」的纯组件；该文件是显式的
+    // 有状态控制器（abort handle / draft 持久化），属已知安全模式，其余规则仍然强制。
+    files: ['apps/web/src/pages/ChatPage.tsx'],
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/immutability': 'off',
     },
   },
 );

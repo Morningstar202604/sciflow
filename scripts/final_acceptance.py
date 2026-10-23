@@ -82,7 +82,7 @@ code, out = run("pnpm --filter @sciflow/web build"); record("A7 web build", code
 print("\n[B] 服务启动 / 安全头 / 结构化日志")
 logf = open(os.path.join(tempfile.gettempdir(), "sciflow-acc.log"), "w", encoding="utf-8")
 srv = subprocess.Popen(
-    ["node", "apps/server/dist/main.js"], cwd=str(ROOT),
+    ["node", "apps/server/dist/apps/server/src/main.js"], cwd=str(ROOT),
     env={**os.environ, "AI_MOCK": "1", "AI_RPM_CAP": "120", "DATABASE_PATH": DB, "PORT": str(PORT)},
     stdout=logf, stderr=subprocess.STDOUT,
 )
@@ -170,11 +170,11 @@ record("E1 MCP 握手+调用(HTTP)", code == 0 and "OK 11 true" in out, last)
 
 # ---------- F. CLI ----------
 print("\n[F] CLI（commander）")
-code, out = run("node apps/server/dist/cli.js --help", env={"DATABASE_PATH": DB})
+code, out = run("node apps/server/dist/apps/server/src/cli.js --help", env={"DATABASE_PATH": DB})
 record("F1 CLI --help", code == 0 and "Usage:" in out)
-code, out = run("node apps/server/dist/cli.js project list", env={"DATABASE_PATH": DB})
+code, out = run("node apps/server/dist/apps/server/src/cli.js project list", env={"DATABASE_PATH": DB})
 record("F2 project list", code == 0)
-code, out = run("node apps/server/dist/cli.js pipeline status", env={"DATABASE_PATH": DB})
+code, out = run("node apps/server/dist/apps/server/src/cli.js pipeline status", env={"DATABASE_PATH": DB})
 record("F3 缺参报错", code != 0 and "required option" in out)
 
 # ---------- cleanup ----------

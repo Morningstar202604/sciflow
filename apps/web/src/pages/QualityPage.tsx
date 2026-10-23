@@ -8,7 +8,7 @@ import { HBar, LineChart, ProgressRing } from '../components/charts';
 import { QUALITY_DIMS } from './qualityDims';
 
 /** 自绘 SVG 雷达图（替代 ECharts，去掉 ~200KB 打包体积） */
-function Radar({ scores }: { scores: Record<string, number> }) {
+function Radar({ scores, compare }: { scores: Record<string, number>; compare?: Record<string, number> | null }) {
   const W = 300, H = 250, CX = W / 2, CY = 112, R = 82;
   const n = QUALITY_DIMS.length;
   const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
@@ -18,29 +18,45 @@ function Radar({ scores }: { scores: Record<string, number> }) {
   };
   const poly = (v: number) => Array.from({ length: n }, (_, i) => pt(i, v).join(',')).join(' ');
   const value = (i: number) => Math.round(scores[QUALITY_DIMS[i].key] ?? 0);
+  /** 数据多边形：按各维真实分数取点（历史 bug：写死 poly(100)，任何稿子都画成满分形状） */
+  const dataPoly = Array.from({ length: n }, (_, i) => pt(i, value(i)).join(',')).join(' ');
+  const total = Math.round(QUALITY_DIMS.reduce((s, _, i) => s + value(i), 0) / n);
+  /** 对比层（F-2.5）：上一版评分的多边形，与当前版同图叠加 */
+  const compareValue = (i: number) => Math.round(compare?.[QUALITY_DIMS[i].key] ?? 0);
+  const comparePoly = compare
+    ? Array.from({ length: n }, (_, i) => pt(i, compareValue(i)).join(',')).join(' ')
+    : '';
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="7 维质量评分雷达图">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label={`7 维质量评分雷达图，平均 ${total} 分`}>
+      <desc>
+        {QUALITY_DIMS.map((d, i) => `${d.label} ${value(i)} 分`).join('；')}
+        {compare ? `。对比版本：${QUALITY_DIMS.map((d, i) => `${d.label} ${compareValue(i)} 分`).join('；')}` : ''}
+      </desc>
       {/* 网格：4 级同心多边形 */}
       {[25, 50, 75, 100].map((lv) => (
-        <polygon key={lv} points={poly(lv)} fill="none" stroke="#e2e8f0" strokeWidth="1" className="dark:stroke-slate-700" />
+        <polygon key={lv} points={poly(lv)} fill="none" stroke="currentColor" strokeOpacity={0.14} strokeWidth="1" />
       ))}
       {/* 轴线 */}
       {QUALITY_DIMS.map((_, i) => (
-        <line key={i} x1={CX} y1={CY} x2={pt(i, 100)[0]} y2={pt(i, 100)[1]} stroke="#e2e8f0" strokeWidth="1" className="dark:stroke-slate-700" />
+        <line key={i} x1={CX} y1={CY} x2={pt(i, 100)[0]} y2={pt(i, 100)[1]} stroke="currentColor" strokeOpacity={0.14} strokeWidth="1" />
       ))}
-      {/* 数据多边形 */}
-      <polygon points={poly(100)} fill="rgba(13,148,136,0.22)" stroke="var(--brand-500)" strokeWidth="2" />
+      {/* 对比层：上一版评分（虚线灰色，不抢主线视觉） */}
+      {compare && (
+        <polygon points={comparePoly} fill="none" stroke="var(--muted-foreground)" strokeWidth={1.4} strokeDasharray="4 3" strokeOpacity={0.8} />
+      )}
+      {/* 数据多边形（真实分数） */}
+      <polygon points={dataPoly} fill="var(--brand-500)" fillOpacity={0.22} stroke="var(--brand-500)" strokeWidth="2" strokeLinejoin="round" />
       {/* 顶点 + 数值标签 */}
       {QUALITY_DIMS.map((d, i) => {
         const [x, y] = pt(i, value(i));
         const [lx, ly] = pt(i, 118);
         return (
           <g key={d.key}>
-            <circle cx={x} cy={y} r="3.5" fill="var(--brand-400)" stroke="#fff" strokeWidth="1.5">
+            <circle cx={x} cy={y} r="3.5" fill="var(--brand-400)" stroke="var(--background)" strokeWidth="1.5">
               <title>{`${d.label}：${value(i)}/100`}</title>
             </circle>
-            <text x={lx} y={ly} textAnchor="middle" fontSize="10" fill="#475569" className="dark:fill-slate-300" fontWeight={600}>
+            <text x={lx} y={ly} textAnchor="middle" fontSize="10" fill="currentColor" fillOpacity={0.62} fontWeight={600}>
               {d.label}
             </text>
             <text x={lx} y={ly + 11} textAnchor="middle" fontSize="10" fill="var(--brand-500)" fontWeight={700}>
@@ -133,14 +149,28 @@ export function QualityPage({ project }: { project: Project }) {
   };
 
   const current = selectedHist || report;
+  /**
+   * 对比基准（F-2.5）：
+   *  - 未选历史版本时，显示「当前最新」与「上一版」的叠加（若存在两次以上评分）
+   *  - 选中历史版本时，改为「所选版本」与「最新版本」对比
+   */
+  const compareReport = (() => {
+    if (!current) return null;
+    // history 按 createdAt 倒序：h[0] 是最新。若当前展示的就是最新一条，
+    // 对比基准取第二条；否则（用户在查看历史版本）对比基准取最新一条。
+    const latest = history[0];
+    if (!latest) return null;
+    if (current.id === latest.id) return history[1] ?? null;
+    return latest;
+  })();
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={error} />
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <Gauge size={16} className="brand-gradient-text" />
+          <Gauge size={16} className="text-teal-600 dark:text-teal-300" />
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 mr-2">选择文档进行 7 维质量评分</span>
           <Select
             className="w-full sm:w-64"
@@ -193,15 +223,30 @@ export function QualityPage({ project }: { project: Project }) {
                 </Badge>
               </div>
             </div>
-            <Radar scores={current.scoresObj} />
+            <Radar
+              scores={current.scoresObj}
+              compare={compareReport ? jsonText<Record<string, number>>(compareReport.scores, {}) : null}
+            />
+            {compareReport && (
+              <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-0.5 w-3" style={{ background: 'var(--brand-500)' }} /> 当前 {current.totalScore}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-0.5 w-3 border-t border-dashed" style={{ borderColor: 'var(--muted-foreground)' }} />
+                  对比 {compareReport.totalScore}（{new Date(compareReport.createdAt).toLocaleDateString()}）
+                </span>
+              </div>
+            )}
             <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
               <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">最需改进的维度</div>
               <HBar
+                max={100}
                 items={[...QUALITY_DIMS]
                   .map((d) => ({ label: d.label, value: Math.round(current.scoresObj[d.key] ?? 0) }))
                   .sort((a, b) => a.value - b.value)
                   .slice(0, 3)
-                  .map((it) => ({ ...it, color: it.value < 60 ? '#f87171' : it.value < 75 ? '#f59e0b' : undefined }))}
+                  .map((it) => ({ ...it, color: it.value < 60 ? 'var(--rose-500)' : it.value < 75 ? 'var(--amber-500)' : 'var(--brand-500)' }))}
               />
             </div>
           </Card>
@@ -253,7 +298,7 @@ export function QualityPage({ project }: { project: Project }) {
           </Card>
         </div>
       ) : (
-          <Empty text="选择文档并点击「开始评分」后，雷达图、总分与改进建议将在这里展示" />
+          <Empty illustration="documents" text="选择一篇文档并开始评分" hint="评分后这里会显示 7 维雷达图、总分趋势与可执行的改进建议" />
       )}
     </div>
   );

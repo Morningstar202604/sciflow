@@ -1,6 +1,6 @@
 /**
  * 一键再生成 OpenAPI 产物：
- *   openapi.json（NestJS Swagger 导出，dist/tools/openapi-dump.js）
+ *   openapi.json（NestJS Swagger 导出，dist/apps/server/src/tools/openapi-dump.js）
  *   → apps/web/src/api/openapi.d.ts（openapi-typescript 生成，前端类型化契约）
  *
  * 用法：pnpm openapi:gen（内部先构建 server）
@@ -42,9 +42,9 @@ function runPnpm(args, opts = {}) {
   }
 }
 
-const dumpScript = join(root, 'apps/server/dist/tools/openapi-dump.js');
+const dumpScript = join(root, 'apps/server/dist/apps/server/src/tools/openapi-dump.js');
 if (!existsSync(dumpScript)) {
-  console.error('[openapi-gen] 未找到 apps/server/dist/tools/openapi-dump.js，请先构建 server');
+  console.error('[openapi-gen] 未找到 apps/server/dist/apps/server/src/tools/openapi-dump.js，请先构建 server');
   process.exit(1);
 }
 

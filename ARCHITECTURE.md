@@ -1,11 +1,48 @@
-# SciFlow 架构文档（v0.4 重构目标态）
+# SciFlow 架构文档（v0.9 现状）
 
 > 本文档是唯一真理源。任何影响架构、接口、数据模型、依赖的代码变更，必须同步回写本文档。
-> 状态基线：commit 3c601d1（v0.3.0）。重构决策依据见 §6 ADR 索引。
+> 状态基线：v0.9.0（2026-10-23）。重构决策依据见 §6 ADR 索引；本版审查结论文档 `docs/AUDIT-2026-10-23.md`。
 >
 > **本 §7「禁止重复造轮子守则」对所有后续开发会话生效**：动手前先查 §2.6 地图——能用成熟件的必须用，不允许在任务中途自造已有成熟替代的基建。
 
 ---
+
+## §2.10 v0.6 新增契约（2026-10-20）
+
+实测 + 独立审计驱动的一轮修复，确立了 8 条后续必须遵守的契约（同时写入 `AGENTS.md`）：
+
+| # | 契约 | 原因（历史事故） |
+|---|---|---|
+| 1 | 布局只在 `AppShell` 定义，页面不得自管分栏/断点/溢出 | 写作页五栏挤一行，1024px 下编辑器被压到 2px |
+| 2 | `HBar` 高度内部自适应，调用方禁止传 `height`/`barHeight`；颜色用 `--viz-series-*` | 该参数造成过两次事故（压成 5px / 丢标签） |
+| 3 | `request()` 抛 `ApiError`，页面只 catch 不拼文案 | 字符类正则误判，74/87 条中文错误被覆盖成"无法连接服务器" |
+| 4 | 流式回调参数是**累积值**，必须用 `applyStreamDelta` 覆盖 | 工作台误按增量追加，输出平方膨胀 |
+| 5 | 步骤清单唯一来源 `packages/core/src/pipeline-steps.ts` | 曾有四份不一致的清单，开关写了但 graph 不读 |
+| 6 | 流水线写正文必须走 `writeDocumentContent`（保版本） | graph 直接写库导致产物无版本历史 |
+| 7 | 正文只放 `[n]` 锚点，参考文献列表由前端按 CSL 渲染 | 服务端与前端各渲染一份，出现两个参考文献区 |
+| 8 | 工具调用与模型调用分表统计（`llm_call_log.kind`） | 无 token 的工具调用污染成本看板 |
+
+**Agent 工具链**（新增能力，见 `apps/server/src/agent/agent-tool-bridge.ts`）：
+- 工具来源：复用 `McpService.tools`（REST / MCP 协议 / Agent 三条入口同一份实现）
+- 作用域：`buildToolSet(projectId)` 强制覆盖模型入参中的 projectId，防跨项目检索
+- 限额：单轮最多 8 次调用、单项 20s 超时、计数在闭包内（并发对话互不影响）
+- 轨迹：`llm_call_log(kind='tool', caller='tool:<name>')`
+- 网关兼容：部分 OpenAI 兼容端点流式不返回标准 `tool_calls`（实测 hcnsec/Qwen3.8），
+  命中 `AI_TOOLS_NONSTREAM_HOSTS`（默认 `hcnsec.cn`）时改走非流式工具循环再按 SSE 回放
+
+---
+
+## §2.11 v0.6.0 全模块复审契约（2026-10-20 第二轮）
+
+| 契约 | 落点 | 护栏 |
+|---|---|---|
+| `@Public()` 只允许 auth / health | `apps/server/src/auth/public.decorator.ts` | `auth-surface.spec.ts` 静态扫描全部 controller |
+| 数值环境变量统一 `envInt`/`envFloat`（非法回落 + 区间夹取） | `packages/core/src/env.ts` | `env.spec.ts` 9 条 |
+| 项目删除必须覆盖全部 project 维度表（无外键） | `projects.service.ts` | `projects-cascade.spec.ts` 真实库断言 8 表归零 |
+| 步骤明细不得直出 JSON | `PipelineDag.summarizeStepOutput` | `PipelineDag.test.ts` 6 条 |
+| 环形图零值分段不占配色槽位 | `charts.tsx:normalizeDonutData` | `charts.test.tsx` 2 条 |
+| 图表配色 token 必须有定义 | `index.css` `--rose/amber/emerald/sky-500` | 脚本校验 var() 引用全集 |
+| CI 三 job 与 README 承诺一致 | `.github/workflows/ci.yml` | 命令与本机实测逐条对齐 |
 
 ## §2.9 模块化布局（M3，2026-10-18）
 
@@ -108,7 +145,7 @@ packages/retrieval/  检索层（knowledge.service · embedding.service）——
 | `msw` | 3.0.3 | web 单测 API mock |
 | `@playwright/test` | 1.64.0 | E2E 冒烟（Electron/本地双模式各一条主路径） |
 | `promptfoo` | 0.124.1 | prompt 回归评估（仅 dev，禁入运行时） |
-| `@nestjs/swagger` + `openapi-typescript` | 12.0.2 / 7.13.0 | 契约先行：装饰器 → `openapi.json`（111 paths）→ `apps/web/src/api/openapi.d.ts`（`pnpm openapi:gen` 重建）；openapi-fetch 未采用（取类型即可，client.ts 对外行为不变） |
+| `@nestjs/swagger` + `openapi-typescript` | 12.0.2 / 7.13.0 | 契约先行：装饰器 → `openapi.json`（114 paths，v0.6.0）→ `apps/web/src/api/openapi.d.ts`（`pnpm openapi:gen` 重建）；openapi-fetch 未采用（取类型即可，client.ts 对外行为不变） |
 
 CI 同步：`ci.yml` 增加 lint 步骤、web 测试步骤、`full_regression.py` 接入、promptfoo 评估可选 job。
 
@@ -279,14 +316,14 @@ apps/server/src/
 
 体验打磨（真实跑中发现）：评审 prompt 加**评分锚点 + 维度独立**（原 citation 存疑会把 novelty/figures 连坐压到 0）+「疑似不实引用逐条标注，不臆断学术不端」；起草**逐节进度通知**（quality-gate 步骤实时显示"起草进度 n/N 节"，含回炉轮次）；workspace run card **已用时计时**；大纲 prompt **类型感知**（综述/比较研究不得套「实验与结果」章节，评审实测会据此判逻辑断裂）。
 
-真实验收结果：连通自检 ✓ | 非流式问答 7.3s ✓ | **SSE 流式首包 0.91s / 85 字秒 / usage 收尾 ✓** | **完整流水线 509s→completed（6 节 12.5k 字，引用/质量报告/trace 全落库）** ✓ | 逐节进度 6/6 实时可见 ✓ | 桌面打包版（Electron 38）真实模型 health+chat ✓ | CLI（health/project/status）✓ | Web Playwright 真实对话 ✓（`e2e/real-chat.spec.ts`，`E2E_REAL=1` 启用，默认 CI 跳过）。token 总账：首跑 46 calls / 90.5k tokens（含 3 轮回炉）——三轮回炉因"评审严格 + 首轮大纲含实验章节"所致，已用类型感知+维度独立收敛。
+真实验收结果：连通自检 ✓ | 非流式问答 7.3s ✓ | **SSE 流式首包 0.91s / 85 字秒 / usage 收尾 ✓** | **完整流水线 509s→completed（6 节 12.5k 字，引用/质量报告/trace 全落库）** ✓ | 逐节进度 6/6 实时可见 ✓ | 桌面打包版（Electron 41）真实模型 health+chat ✓ | CLI（health/project/status）✓ | Web Playwright 真实对话 ✓（`e2e/real-chat.spec.ts`，`E2E_REAL=1` 启用，默认 CI 跳过）。token 总账：首跑 46 calls / 90.5k tokens（含 3 轮回炉）——三轮回炉因"评审严格 + 首轮大纲含实验章节"所致，已用类型感知+维度独立收敛。
 
 ### 计划内任务全部核销（2026-10-14 终局）
 
 **技术债清零（第五轮）**：eslint 39→0（豁免块删除、六规则 error 强制）。**收尾轮（第六轮）全部完成**：
 - ✅ msw 测试接入（web 测试 15/15，含 3 条网络层拦截：成功解析/中文业务错误透传/msw×fetch 协同）
 - ✅ autoevals 接入（server 测试 16/16；NumericDiff 守护质量门文案、Levenshtein 守护 mock 契约；LLM-judge 归 promptfoo）
-- ✅ swagger→openapi-typescript（openapi.json 111 paths；`pnpm openapi:gen`；apps/web/src/api/openapi-typescript 入口）
+- ✅ swagger→openapi-typescript（openapi.json 114 paths；`pnpm openapi:gen`；apps/web/src/api/openapi-typescript 入口）
 - ✅ mock-gateway MSW 化（a20d12e MSW 版回归：**AI_MOCK 不再占用 5099 端口**；回归 161/0/0）
 - ✅ Workspace 二期（线程 localStorage 持久化；chat_session 历史侧栏注入背景；独立问答页并入——导航移除，深链保留）
 - ✅ TanStack Table v8（**钉 ^8.21.3**：v9 为新 major API 未稳）重写抽取矩阵（动态列=文献+字段、表头点击排序）

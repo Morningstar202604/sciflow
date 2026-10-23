@@ -302,6 +302,8 @@ export interface PipelineStepConfig {
   key: string;
   label: string;
   core: boolean;
+  /** 是否允许在设置页启停（骨架步骤为 false） */
+  configurable: boolean;
   enabled: number;
   customized: boolean;
 }
@@ -374,6 +376,8 @@ export interface AppSettings {
 export interface SelfCheck {
   database: { ok: boolean; path: string };
   ai: { configured: boolean; ok: boolean; model: string; latencyMs: number; detail: string };
+  /** 检索栈能力（向量 / 嵌入模型 / 全文索引）与降级原因 */
+  retrieval?: { vector: boolean; embeddingModel: boolean; fullText: boolean; ok: boolean; notes: string[] };
   timestamp: number;
 }
 

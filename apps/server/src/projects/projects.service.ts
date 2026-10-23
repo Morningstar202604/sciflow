@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db } from '../db/database';
-import { projects, documents, references, pipelineTasks, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments, experiments, submissions, submissionStatusEvents, citations, qualityReports, polishRecords, knowledgeDocs, knowledgeChunks, memoryLogs } from '../db/schema';
+import { projects, documents, references, pipelineTasks, reflexionLogs, screeningQueue, extractionFields, extractionValues, reviewComments, experiments, submissions, submissionStatusEvents, citations, qualityReports, polishRecords, knowledgeDocs, knowledgeChunks, memoryLogs, agentExecutions, agentSteps, chatSessions } from '../db/schema';
 import { parseJson } from '../common/json-guard';
 
 /** Zod schemas for projects input validation */
@@ -24,8 +24,12 @@ const updateProjectSchema = z.object({
 
 @Injectable()
 export class ProjectsService {
-  list() {
-    return db.select().from(projects).orderBy(projects.updatedAt).all();
+  list(ownerId = '') {
+    // ownerId 为空 = 本地/桌面模式：返回全部（历史行为）
+    // 非空 = 企业模式：只返回归属该用户的（含历史 owner_id 为空的公共项目？不给：
+    // 企业模式下未归属的项目一律不可见，避免跨用户数据泄露）
+    if (!ownerId) return db.select().from(projects).orderBy(projects.updatedAt).all();
+    return db.select().from(projects).where(eq(projects.ownerId, ownerId)).orderBy(projects.updatedAt).all();
   }
 
   get(id: string) {
@@ -34,7 +38,7 @@ export class ProjectsService {
     return row;
   }
 
-  create(input: { name: string; description?: string }) {
+  create(input: { name: string; description?: string }, ownerId = '') {
     const validated = createProjectSchema.parse(input);
     const now = Date.now();
     const row = {
@@ -44,6 +48,8 @@ export class ProjectsService {
       status: 'active',
       createdAt: now,
       updatedAt: now,
+      // 企业模式：记录归属；本地模式为空串（公共项目）
+      ownerId,
     };
     db.insert(projects).values(row).run();
     return row;
@@ -103,6 +109,14 @@ export class ProjectsService {
       db.delete(submissionStatusEvents).where(eq(submissionStatusEvents.submissionId, sid)).run();
     }
     db.delete(submissions).where(eq(submissions.projectId, id)).run();
+    // Agent 轨迹级联：步骤先于执行记录（step 只带 run_id，必须先收集 run id）
+    const runIds = db.select().from(agentExecutions).where(eq(agentExecutions.projectId, id)).all().map((r) => r.id);
+    for (const runId of runIds) {
+      db.delete(agentSteps).where(eq(agentSteps.runId, runId)).run();
+    }
+    db.delete(agentExecutions).where(eq(agentExecutions.projectId, id)).run();
+    // 对话会话摘要级联（chat_session 按 project_id 关联；消息体在摘要字段内，无独立表）
+    db.delete(chatSessions).where(eq(chatSessions.projectId, id)).run();
     db.delete(documents).where(eq(documents.projectId, id)).run();
     db.delete(references).where(eq(references.projectId, id)).run();
     db.delete(pipelineTasks).where(eq(pipelineTasks.projectId, id)).run();

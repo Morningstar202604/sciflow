@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Brain, Check, CircleDashed, Eye, Loader2, Plus, RotateCcw, Trash2, Workflow, Zap } from 'lucide-react';
+import { Brain, Eye, Loader2, Plus, Trash2, Workflow, Zap } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
@@ -8,17 +8,16 @@ import type { Outline, PipelineStep, PipelineTask, Project, ReactTraceStep } fro
 import { Badge, Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, Spinner, jsonText, errMsg } from '../components/ui';
 import { PipelineDag } from '../components/PipelineDag';
 import { ProgressRing, Sparkline } from '../components/charts';
+import { PIPELINE_STEPS, PIPELINE_UI_STEPS } from '@sciflow/core/pipeline-steps';
 
-const STEP_LABELS: Record<string, string> = {
-  'topic-verify': '① 主题验证',
-  literature: '② 文献调研',
-  outline: '③ 大纲生成',
-  drafting: '④ 分章起草',
-  'quality-gate': '⑤ 质量门评分',
-  polish: '⑥ 润色定稿',
-  'citation-format': '⑦ 引用格式化',
-  complete: '⑧ 完成',
-};
+/** 步骤标签单一来源：与后端 graph / customization 共用同一份定义 */
+const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩';
+const STEP_LABELS: Record<string, string> = Object.fromEntries(
+  PIPELINE_UI_STEPS.map((s, i) => [s.key, `${CIRCLED[i] ?? i + 1} ${s.label}`]),
+);
+const ALL_STEP_LABELS: Record<string, string> = Object.fromEntries(PIPELINE_STEPS.map((s) => [s.key, s.label]));
+/** 任意步骤 key → 展示标签（含非 UI 步骤 drafting / figures） */
+const stepLabel = (key: string) => STEP_LABELS[key] || ALL_STEP_LABELS[key] || key;
 
 /** 多 Agent 协作映射：每个流水线步骤由哪个 Agent 角色负责（对标 Deep Research / Agent Laboratory 分工） */
 const AGENT_MAP: Record<string, { role: string; tone: 'blue' | 'green' | 'teal' | 'amber' | 'slate' }> = {
@@ -388,15 +387,6 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
     }
   };
 
-  const stepTone = (s: PipelineStep) => {
-    if (s.status === 'done') return { bg: 'brand-logo text-white', icon: <Check size={14} /> };
-    if (s.status === 'running') return { bg: 'brand-logo text-white brand-breathe', icon: <Loader2 size={14} className="animate-spin" /> };
-    if (s.status === 'awaiting_confirmation') return { bg: 'bg-amber-400 text-white', icon: <CircleDashed size={14} /> };
-    if (s.status === 'retry') return { bg: 'bg-rose-100 text-rose-600', icon: <RotateCcw size={14} /> };
-    if (s.status === 'failed') return { bg: 'bg-rose-500 text-white', icon: <CircleDashed size={14} /> };
-    return { bg: 'bg-slate-200 text-slate-500 dark:text-slate-400', icon: <CircleDashed size={14} /> };
-  };
-
   const statusText: Record<string, { text: string; tone: 'blue' | 'amber' | 'green' | 'red' }> = {
     running: { text: '执行中', tone: 'blue' },
     awaiting_confirmation: { text: '等待大纲确认', tone: 'amber' },
@@ -407,12 +397,12 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={error} />
 
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 mb-3 text-slate-700 dark:text-slate-200 font-semibold">
-          <Workflow size={16} className="brand-gradient-text" /> 一键全自动流水线
+          <Workflow size={16} className="text-teal-600 dark:text-teal-300" /> 一键全自动流水线
         </div>
         <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
           输入研究主题 → 多智能体自动完成 文献调研 → 大纲确认 → 分章起草 → 7 维质量门（&lt;80 自动回炉打磨）→ 润色定稿 → 引用格式化
@@ -443,7 +433,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                 }`}
               >
                 {tpl.label}
-                {!tpl.builtin && <span className="ml-1 text-[9px] opacity-60">自</span>}
+                {!tpl.builtin && <span className="ml-1 text-[11px] opacity-60">自</span>}
               </button>
             ))}
           </div>
@@ -489,7 +479,7 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
           hint="在上方输入研究主题启动自动流水线；或先选中大纲模板，点「一键套用为草稿」直接进入写作页。"
         />
       ) : (
-        <div className="grid lg:grid-cols-3 gap-4">
+        <div className="grid lg:grid-cols-3 gap-4 [&>*]:min-w-0">
           {/* 任务列表 */}
           <Card className="p-3 lg:col-span-1">
             <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">任务记录</div>
@@ -543,19 +533,20 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                   </div>
                 </div>
 
-                {/* 进度环：8 步中已完成占比，label=当前步骤 */}
+                {/* 进度环：只用数字，步骤名放在右侧（长中文塞进 56px 圆环会溢出） */}
                 {(() => {
                   const doneCount = active.steps.filter((s) => s.status === 'done').length;
-                  const totalSteps = active.steps.length || 8;
+                  const totalSteps = active.steps.length || 1;
+                  const pct = Math.round((doneCount / totalSteps) * 100);
                   return (
                     <div className="flex items-center gap-3 mb-3 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 px-3 py-2">
-                      <ProgressRing
-                        value={(doneCount / totalSteps) * 100}
-                        size={56}
-                        thickness={6}
-                        label={STEP_LABELS[active.currentStep] || active.currentStep}
-                        sub={`${doneCount}/${totalSteps} 步已完成`}
-                      />
+                      <ProgressRing value={pct} size={56} thickness={6} label={`${pct}%`} />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{stepLabel(active.currentStep)}</div>
+                        <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                          {doneCount}/{totalSteps} 步已完成{active.retryCount > 0 ? ` · 回炉 ${active.retryCount} 次` : ''}
+                        </div>
+                      </div>
                     </div>
                   );
                 })()}
@@ -637,14 +628,14 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                           return foundSeries.length > 1 ? (
                             <div className="flex items-center gap-2 mb-2 rounded bg-white/60 dark:bg-slate-900/40 px-2 py-1.5">
                               <span className="text-[11px] text-blue-600 dark:text-blue-400 shrink-0">检索命中收敛</span>
-                              <Sparkline data={foundSeries} width={110} height={26} stroke="#3b82f6" />
+                              <Sparkline data={foundSeries} width={110} height={26} stroke="var(--blue)" />
                               <span className="text-[11px] text-slate-400 dark:text-slate-500 ml-auto shrink-0">{foundSeries.join(' → ')}</span>
                             </div>
                           ) : null;
                         })()}
                         {activeTrace.map((t, i) => (
                           <div key={i} className="flex items-start gap-2 text-xs">
-                            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 text-[10px]">
+                            <span className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0 text-[11px]">
                               {t.round}
                             </span>
                             <div className="flex-1 min-w-0">
@@ -665,35 +656,28 @@ export function PipelinePage({ project, onOpenDoc }: { project: Project; onOpenD
                 )}
 
 
-                {/* 步骤时间线（品牌渐变徽章 + 纵向连接线，链条式阅读） */}
-                <div className="space-y-0 mb-4">
-                  {active.steps.map((s, i) => {
-                    const tone = stepTone(s);
-                    const isLast = i === active.steps.length - 1;
-                    return (
-                      <div key={s.key} className="flex items-start gap-2.5 relative">
-                        {!isLast && <span className="absolute left-[11px] top-7 bottom-0 w-px bg-gradient-to-b from-teal-300/70 to-slate-200 dark:from-teal-700/60 dark:to-slate-700" />}
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10 ${tone.bg}`}>{tone.icon}</div>
-                        <div className="flex-1 min-w-0 pt-0.5 pb-4">
-                          <div className="flex items-center gap-2">
-                            <span className={`text-sm ${s.status === 'pending' ? 'text-slate-400 dark:text-slate-500' : 'text-slate-700 dark:text-slate-200'}`}>{STEP_LABELS[s.key] || s.label}</span>
-                            {AGENT_MAP[s.key] && <Badge tone={AGENT_MAP[s.key].tone}>{AGENT_MAP[s.key].role}</Badge>}
-                            {s.retryCount > 0 && <Badge tone="red">回炉 {s.retryCount} 次</Badge>}
-                          </div>
-                          {s.output && (
-                            <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-2 break-all">{s.output}</div>
-                          )}
-                        </div>
+                {/* 步骤详情：DAG 已在上方给出全局状态，这里只展开「当前/失败」步骤的细节，
+                    避免同一份 steps 被完整渲染两遍（历史问题：页面高度凭空翻倍） */}
+                {(() => {
+                  const focus = active.steps.find((s) => s.status === 'running' || s.status === 'failed' || s.status === 'awaiting_confirmation' || s.status === 'retry');
+                  if (!focus || !focus.output) return null;
+                  return (
+                    <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 px-3 py-2 mb-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{stepLabel(focus.key)}</span>
+                        {AGENT_MAP[focus.key] && <Badge tone={AGENT_MAP[focus.key].tone}>{AGENT_MAP[focus.key].role}</Badge>}
+                        {focus.retryCount > 0 && <Badge tone="red">回炉 {focus.retryCount} 次</Badge>}
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 break-all whitespace-pre-wrap max-h-40 overflow-y-auto">{focus.output}</div>
+                    </div>
+                  );
+                })()}
 
                 {/* 大纲确认区 */}
                 {active.status === 'awaiting_confirmation' && (
                   <Card className="p-3 bg-amber-50 border-amber-200">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-amber-800">大纲已生成，请确认后继续起草（Human-in-the-loop）</span>
+                      <span className="text-sm font-medium text-amber-800">大纲已生成，请确认后继续起草（人工确认）</span>
                       <Button variant="success" className="text-xs" onClick={openConfirm}>
                         查看 / 编辑大纲
                       </Button>

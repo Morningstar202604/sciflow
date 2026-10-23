@@ -45,7 +45,7 @@ pnpm --filter @sciflow/server build
 pnpm --filter @sciflow/web build
 
 # 4. 全量回归（mock 网关，FAIL 必须为 0）
-AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_pr.db PORT=3000 node apps/server/dist/main.js &
+AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_pr.db PORT=3000 node apps/server/dist/apps/server/src/main.js &
 SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 python3 scripts/full_regression.py
 ```
 

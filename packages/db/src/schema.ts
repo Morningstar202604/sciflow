@@ -12,6 +12,8 @@ export const projects = sqliteTable('project', {
   preface: text('preface').default(''),
   /** 差距#1：自定义大纲模板（JSON 字符串：[{name,description,sections:[{title,points}]}]） */
   templates: text('templates').default('[]'),
+  /** 归属用户（AUTH_MODE=jwt 企业模式使用；空串=本地单用户模式的公共项目） */
+  ownerId: text('owner_id').default(''),
 });
 
 /** 文档（论文草稿，多版本历史以 JSON 保存在 versions） */
@@ -219,6 +221,8 @@ export const customPrompts = sqliteTable('custom_prompt', {
 export const llmCallLogs = sqliteTable('llm_call_log', {
   id: text('id').primaryKey(),
   caller: text('caller').default('general'), // 调用方标识（pipeline/chat/orchestrator 等）
+  /** 记录类型：llm=模型调用（计入 token 成本）；tool=工具调用（只计次数/耗时，无 token） */
+  kind: text('kind').default('llm'),
   model: text('model').default(''),
   promptTokens: integer('prompt_tokens').default(0),
   completionTokens: integer('completion_tokens').default(0),

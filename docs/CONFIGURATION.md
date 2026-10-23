@@ -133,7 +133,7 @@ docker compose up -d          # dev 配置
 docker compose -f docker-compose.prod.yml up -d   # 生产配置
 ```
 
-镜像构建走 `Dockerfile`（glibc 基础镜像——别手贱换 alpine/musl，better-sqlite3 的原生模块会教做人，v0.4.2 修过三处相关真因）。健康检查打 `/api/health`，111 条路由全注册即构建正确。
+镜像构建走 `Dockerfile`（glibc 基础镜像——别手贱换 alpine/musl，better-sqlite3 的原生模块会教做人，v0.4.2 修过三处相关真因）。健康检查打 `/api/health`，114 条路由全注册即构建正确。
 
 ---
 

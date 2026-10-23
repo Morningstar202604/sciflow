@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { db } from '../db/database';
@@ -26,15 +26,26 @@ const LOW_SCORE_THRESHOLD = 60;
  */
 @Injectable()
 export class DashboardService {
+  private readonly logger = new Logger(DashboardService.name);
+
   overview() {
+    // 分块降级：单个聚合失败只影响它自己，并把错误写进日志（此前整体 catch 把 SQL 错误吞成「全 0」）
+    const safe = <T,>(label: string, fn: () => T, fallback: T): T => {
+      try {
+        return fn();
+      } catch (e) {
+        this.logger.error(`dashboard.${label} 失败：${e instanceof Error ? e.message : String(e)}`);
+        return fallback;
+      }
+    };
     try {
-      const pendingOutline = this.pendingOutlineCount();
-      const openReviewComments = this.openReviewCommentCount();
-      const experimentCount = this.countRows(experiments);
-      const docCount = this.countRows(documents);
-      const refCount = this.countRows(references);
-      const overdueSubmissions = this.overdueSubmissions();
-      const lowQualityDocs = this.lowQualityDocs();
+      const pendingOutline = safe('pendingOutline', () => this.pendingOutlineCount(), 0);
+      const openReviewComments = safe('openReviewComments', () => this.openReviewCommentCount(), 0);
+      const experimentCount = safe('experiments', () => this.countRows(experiments), 0);
+      const docCount = safe('documents', () => this.countRows(documents), 0);
+      const refCount = safe('references', () => this.countRows(references), 0);
+      const overdueSubmissions = safe('overdueSubmissions', () => this.overdueSubmissions(), []);
+      const lowQualityDocs = safe('lowQualityDocs', () => this.lowQualityDocs(), []);
       return {
         pendingOutline,
         overdueSubmissions,
@@ -68,7 +79,9 @@ export class DashboardService {
   }
 
   private countRows(table: SQLiteTable): number {
-    return db.select().from(table).all().length;
+    // COUNT(*) 而非 select().all().length：后者把整表拉进内存（文档/文献多时纯浪费）
+    const row = db.select({ n: sql<number>`COUNT(*)` }).from(table).get();
+    return Number(row?.n ?? 0);
   }
 
   /**
@@ -118,7 +131,9 @@ export class DashboardService {
       })
       .from(documents)
       .innerJoin(qualityReports, eq(qualityReports.documentId, documents.id))
-      .where(sql`quality_report.created_at = (SELECT MAX(qr.created_at) FROM quality_report qr WHERE qr.document_id = documents.id)`)
+      // 注意：物理表名是 document（单数），别名必须写 document.id；写成 documents.id 会抛
+      // "no such column" 并被上层 catch 吞成「全 0」，导致总览恒为 0（历史缺陷）。
+      .where(sql`quality_report.created_at = (SELECT MAX(qr.created_at) FROM quality_report qr WHERE qr.document_id = document.id)`)
       .all();
     return rows.filter((r) => (r.score ?? 100) < LOW_SCORE_THRESHOLD).slice(0, 10);
   }

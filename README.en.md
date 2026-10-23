@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A520%20(CI%2022)-339933.svg)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-11.7.0-f69220.svg)](package.json)
-[![version](https://img.shields.io/badge/version-0.4.2-black.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.9.0-black.svg)](CHANGELOG.md)
 
 > **🌐 Language / 语言：[English](README.en.md) · [中文](README.md)**
 
 > **Repository mirrors (synced across 5 platforms)**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (161 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree.
+> The three GitHub mirrors run the same CI: lint · typecheck ×2 · vitest ×2 · build ×2 · full mock regression (167 checks) · promptfoo prompt-contract evals · Playwright smoke; GitCode and Gitee mirror the same release tree.
 
 SciFlow is a **local-first, single-machine** AI research assistant: give it a research topic and it runs the whole academic lifecycle — **literature survey → research planning → outline generation (human confirmation) → section-wise drafting (Agentic RAG, search-while-writing) → 7-dimension quality gate (auto Reflexion rewrite below threshold) → polishing → citation formatting → submission assistance** — while accumulating process assets in a NotebookLM-style RAG knowledge base and a visual workbench.
 
@@ -21,19 +21,46 @@ SciFlow is a **local-first, single-machine** AI research assistant: give it a re
 
 ## 📸 Screenshots
 
-| Chat Workspace · default view | Pipeline · Agent Orchestration |
-| --- | --- |
-| ![Chat workspace](docs/screenshots/workspace.png) | ![Pipeline](docs/screenshots/pipeline.png) |
+> All screenshots are taken from the real running app (1600×1000, local mock gateway, demo data seeded by `scripts/seed-demo.mjs`) — no collage or retouching.
 
-| Writing · Outline + AI assistant + math | Quality · 7-Dimension Radar + Feedback |
-| --- | --- |
-| ![Writing](docs/screenshots/writing.png) | ![Quality](docs/screenshots/quality.png) |
+![Chat Workspace](docs/screenshots/workspace.png)
 
-| Literature Library · screening & coding matrix | Knowledge Base RAG · grounded Q&A |
+| Pipeline · multi-agent orchestration | Quality · 7-dimension radar |
 | --- | --- |
-| ![Literature](docs/screenshots/literature.png) | ![Knowledge](docs/screenshots/knowledge.png) |
+| ![Pipeline](docs/screenshots/pipeline.png) | ![Quality](docs/screenshots/quality.png) |
 
-> Screenshots come from the real running UI (local deployment, verified against the built-in AI gateway).
+| Writing · outline + split preview | Literature · screening & reading state |
+| --- | --- |
+| ![Writing](docs/screenshots/writing.png) | ![Literature](docs/screenshots/literature.png) |
+
+| Knowledge base · grounded Q&A | Dashboard · end-to-end todos |
+| --- | --- |
+| ![Knowledge](docs/screenshots/knowledge.png) | ![Dashboard](docs/screenshots/dash.png) |
+
+| Research chat · sessions & sources | Settings · usage & cost |
+| --- | --- |
+| ![Chat](docs/screenshots/chat.png) | ![Settings](docs/screenshots/settings.png) |
+
+| Experiments · local Python sandbox | Submission · journals / cover letter / tracking |
+| --- | --- |
+| ![Experiments](docs/screenshots/experiments.png) | ![Submission](docs/screenshots/submission.png) |
+
+| Memory center · episodic / procedural | Dark theme · follow system |
+| --- | --- |
+| ![Memory](docs/screenshots/memory.png) | ![Dark theme](docs/screenshots/settings-dark.png) |
+
+**24-second product tour**: [`docs/media/demo.mp4`](docs/media/demo.mp4) (recorded with Playwright against the real UI).
+
+### Design language
+
+| Dimension | Spec |
+| --- | --- |
+| Brand | One-stroke flowing "S" + research-fluid gradient (teal → cyan → sky), see [`docs/BRAND.md`](docs/BRAND.md) |
+| Color | All three gradient stops ≥ 4.5:1 with white text; `--on-brand` switches to deep ink in dark mode (≥ 6.8:1) |
+| Layout | One `--page-max: 1152px` container for all content pages |
+| Type | Body 14px / secondary 12px / minimum 11px; 1.6–1.75 line height for mixed CJK/Latin |
+| Theme | Light / Dark / Follow system (inline boot script, no white flash) |
+| A11y | Site-wide h1, focus rings, modal focus trap, Esc, touch-visible actions, confirm dialogs for destructive ops |
 
 ## ✨ Features
 
@@ -82,8 +109,8 @@ SciFlow is a **local-first, single-machine** AI research assistant: give it a re
 | --- | --- |
 | Backend `apps/server` | NestJS 11 · TypeScript (strict) · Drizzle ORM · better-sqlite3 (WAL) · Vercel AI SDK (OpenAI-compatible) · LangGraph (orchestration / checkpoint resume / interrupts) · official MCP SDK · zod · helmet + pino · in-process MSW mock gateway |
 | Frontend `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · TanStack Query / Table · Recharts · sigma.js + graphology · streamdown (streaming Markdown) · CodeMirror 6 · react-markdown + KaTeX |
-| Desktop `apps/desktop` | Electron 38 (embedded Node 22, native `require(ESM)`) · embedded backend (`ELECTRON_RUN_AS_NODE`) · local SQLite (userData-isolated, native modules auto-rebuilt for the Electron ABI when packaging) · electron-builder · electron-updater (opt-in) |
-| Engineering | pnpm workspace · vitest (server 16 / web 15) · Playwright smoke · promptfoo prompt-contract evals · GitHub Actions with 3 jobs (types/unit/build · full regression · E2E+evals) · Python 3 regression script (161 checks) |
+| Desktop `apps/desktop` | Electron 41 (embedded Node 24, native `require(ESM)`) · embedded backend (`ELECTRON_RUN_AS_NODE`) · local SQLite (userData-isolated, native modules auto-rebuilt for the Electron ABI when packaging) · electron-builder · electron-updater (opt-in) |
+| Engineering | pnpm workspace · vitest (server 99 / web 62) · Playwright smoke · promptfoo prompt-contract evals · GitHub Actions with 3 jobs (types/unit/build · full regression · E2E+evals) · Python 3 regression script (167 checks) |
 
 **Architecture overview**
 
@@ -125,7 +152,7 @@ pnpm --filter @sciflow/server build
 
 # 4. Run (two terminals)
 #    backend :3000
-node apps/server/dist/main.js
+node apps/server/dist/apps/server/src/main.js
 #    frontend :5173
 pnpm --filter @sciflow/web dev
 
@@ -173,7 +200,7 @@ Compatible endpoints (any of these, always `base_url` + model name): DeepSeek `h
 pnpm --filter @sciflow/server typecheck
 pnpm --filter @sciflow/web typecheck
 
-# Unit tests (vitest: server 16 + web 15)
+# Unit tests (vitest: server 99 + web 62)
 pnpm --filter @sciflow/server test
 pnpm --filter @sciflow/web test
 
@@ -181,7 +208,8 @@ pnpm --filter @sciflow/web test
 pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
 
 # E2E smoke (Playwright; prerequisites: mock backend :3000 + web dev :5173 running)
-pnpm exec playwright test
+pnpm exec playwright test e2e/workspace-smoke.spec.ts
+# Real-model E2E (skipped by default; needs a real endpoint): E2E_REAL=1 pnpm exec playwright test e2e/real-chat.spec.ts
 
 # Prompt-contract evals (promptfoo, offline; prerequisites: server build + mock HTTP gateway below)
 pnpm exec promptfoo eval -c evals/promptfooconfig.yaml
@@ -194,7 +222,7 @@ With `AI_MOCK=1`, **MSW intercepts all AI calls in-process** (no port, no networ
 ```bash
 # backend (mock mode, relaxed rate limit)
 AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_regression.db PORT=3000 \
-  node apps/server/dist/main.js
+  node apps/server/dist/apps/server/src/main.js
 
 # other terminal: full regression (all routes + one end-to-end pipeline with artifact assertions)
 SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
@@ -203,7 +231,7 @@ SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
 
 > When an external tool (e.g. promptfoo) needs a real HTTP endpoint: `node apps/server/scripts/mock-openai-http.mjs` — it reuses the same route table and listens on `127.0.0.1:5099`.
 
-Regression baseline (fresh database + mock gateway, see `scripts/full_regression.py`): **PASS 161 / FAIL 0 / KNOWN 0** (the KNOWN mechanism remains, currently empty — all 11 legacy gaps fixed). The mock gateway is for testing/demos only and does not represent real model capability.
+Regression baseline (fresh database + mock gateway, see `scripts/full_regression.py`): **PASS 167 / FAIL 0 / KNOWN 0** (the KNOWN mechanism remains, currently empty — all 11 legacy gaps fixed). The mock gateway is for testing/demos only and does not represent real model capability.
 
 ## 📚 Documentation Index
 

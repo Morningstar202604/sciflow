@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A520%20(CI%2022)-339933.svg)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-11.7.0-f69220.svg)](package.json)
-[![version](https://img.shields.io/badge/version-0.4.2-black.svg)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.9.0-black.svg)](CHANGELOG.md)
 
 > **🌐 语言 / Language：[中文](README.md) · [English](README.en.md)**
 
 > **仓库镜像（五平台同步）**
 > [GitCode](https://gitcode.com/badhope/sciflow) · [Gitee](https://gitee.com/badhope/sciflow) · [GitHub · badhope](https://github.com/badhope/sciflow) · [GitHub · X33834](https://github.com/X33834/sciflow) · [GitHub · Morningstar202604](https://github.com/Morningstar202604/sciflow)
-> GitHub 三仓运行同一套 CI：lint · typecheck ×2 · vitest ×2 · build ×2 · mock 全量回归（161 项）· promptfoo 契约评估 · Playwright 冒烟；GitCode 与 Gitee 同步同一发布树。
+> GitHub 三仓运行同一套 CI：lint · typecheck ×2 · vitest ×2 · build ×2 · mock 全量回归（167 项）· promptfoo 契约评估 · Playwright 冒烟；GitCode 与 Gitee 同步同一发布树。
 
 SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一个研究主题，自动完成 **文献调研 → 研究规划 → 大纲（人工确认）→ 分章起草（边写边查的 Agentic RAG）→ 质量门评分（不达标自动 Reflexion 回炉）→ 润色 → 引用格式化 → 投稿辅助** 的科研全生命周期，并以 NotebookLM 式 RAG 知识库 + 可视化工作台沉淀过程资产。
 
@@ -21,19 +21,46 @@ SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一�
 
 ## 📸 界面预览
 
-| 对话工作台 · 首屏默认视图 | 全自动流水线 · 多智能体编排 |
-| --- | --- |
-| ![对话工作台](docs/screenshots/workspace.png) | ![流水线](docs/screenshots/pipeline.png) |
+> 全部截图来自真实运行实例（1600×1000，本机 mock 网关，演示数据由 `scripts/seed-demo.mjs` 生成），未做任何拼贴或美化。
 
-| 论文写作 · 大纲 + AI 助手 + 公式渲染 | 质量评分 · 7 维雷达 + 改进建议 |
-| --- | --- |
-| ![论文写作](docs/screenshots/writing.png) | ![质量评分](docs/screenshots/quality.png) |
+![对话工作台](docs/screenshots/workspace.png)
 
-| 文献库 · 筛选与编码矩阵 | 知识库 RAG · 引用问答 |
+| 全自动流水线 · 多智能体编排 | 质量评分 · 7 维雷达 |
 | --- | --- |
-| ![文献库](docs/screenshots/literature.png) | ![知识库](docs/screenshots/knowledge.png) |
+| ![流水线](docs/screenshots/pipeline.png) | ![质量评分](docs/screenshots/quality.png) |
 
-> 截图来自真实运行界面（本地部署 · 内置 AI 网关实测）。
+| 论文写作 · 大纲 + 分栏预览 | 文献调研 · 筛选与阅读状态 |
+| --- | --- |
+| ![论文写作](docs/screenshots/writing.png) | ![文献调研](docs/screenshots/literature.png) |
+
+| 知识库 RAG · 资料问答 | 项目总览 · 全链路待办 |
+| --- | --- |
+| ![知识库](docs/screenshots/knowledge.png) | ![项目总览](docs/screenshots/dash.png) |
+
+| 科研问答 · 会话与来源卡 | 设置 · 用量与成本 |
+| --- | --- |
+| ![科研问答](docs/screenshots/chat.png) | ![设置](docs/screenshots/settings.png) |
+
+| 实验记录 · 本地 Python 沙箱 | 投稿辅助 · 期刊匹配/投稿信/跟踪 |
+| --- | --- |
+| ![实验记录](docs/screenshots/experiments.png) | ![投稿辅助](docs/screenshots/submission.png) |
+
+| 记忆中心 · 情景/程序记忆 | 深色主题 · 跟随系统 |
+| --- | --- |
+| ![记忆中心](docs/screenshots/memory.png) | ![深色主题](docs/screenshots/settings-dark.png) |
+
+**24 秒功能导览视频**：[`docs/media/demo.mp4`](docs/media/demo.mp4)（Playwright 真实操作录制：工作台 → 流水线 → 质量评分 → 写作 → 文献 → 知识库 → 总览 → 深色模式）
+
+### 设计语言
+
+| 维度 | 规范 |
+| --- | --- |
+| 品牌 | 一笔流线 S + 科研流体渐变（teal → cyan → sky），见 [`docs/BRAND.md`](docs/BRAND.md) |
+| 色彩 | 品牌渐变三档均 ≥ 4.5:1（白字），`--on-brand` 在深色模式自动切深墨字（≥ 6.8:1） |
+| 布局 | 内容页统一 `--page-max: 1152px`；导航/工具栏/内容三区固定，页面只负责内容 |
+| 排版 | 正文 14px / 辅助 12px / 下限 11px；中英文混排统一行高 1.6–1.75 |
+| 主题 | 浅色 / 深色 / 跟随系统（`index.html` 预置脚本，刷新无闪白） |
+| 无障碍 | 全站 h1、焦点环、Modal 焦点陷阱、Esc、触屏操作常显、危险操作二次确认 |
 
 ## ✨ 特性
 
@@ -42,7 +69,7 @@ SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一�
 - **分章起草 + Agentic RAG**：每章边写边查本地知识库，文内 `[n]` 锚点与文末列表一一对应。
 - **学术润色**：三段式润色（原文 + 润色文 + 理由）、中英互译、降重改写；自动保护图表与「参考文献」尾部不被洗掉。
 - **多版本历史 + 版本 diff**：每次定稿留存快照，逐版本 LCS 文本比对（`VersionDiffModal`）。
-- **一键导出**：Markdown / HTML / LaTeX(.tex) / Word(.docx)，投稿交稿即用。
+- **一键导出**：Markdown / Word(.docx)，投稿交稿即用（LaTeX/HTML 导出逻辑已实现，界面入口待接）。
 
 ### 引用与文献
 - **8 种引用样式**：APA / IEEE / Vancouver / **GB/T 7714** / Nature / Chicago / Springer / ACS。
@@ -82,8 +109,8 @@ SciFlow 是一个**本地优先、单机部署**的科研 AI 助手：输入一�
 | --- | --- |
 | 后端 `apps/server` | NestJS 11 · TypeScript（strict）· Drizzle ORM · better-sqlite3（WAL）· Vercel AI SDK（OpenAI 兼容）· LangGraph（编排 / 断点续跑 / 人工确认）· MCP 官方 SDK · zod · helmet + pino · MSW 进程内 mock 网关 |
 | 前端 `apps/web` | React 19 · Vite 6 · TypeScript · Tailwind CSS v4 · TanStack Query / Table · Recharts · sigma.js + graphology · streamdown（流式 Markdown）· CodeMirror 6 · react-markdown + KaTeX |
-| 桌面端 `apps/desktop` | Electron 38（内嵌 Node 22，原生支持 require(ESM)）· 内嵌后端（`ELECTRON_RUN_AS_NODE`）· 本地 SQLite（userData 隔离，打包时自动按 Electron ABI 重编原生模块）· electron-builder 三平台打包 · electron-updater 自动更新（opt-in） |
-| 工程 | pnpm workspace · vitest（server 16 / web 15）· Playwright 冒烟 · promptfoo 契约评估 · GitHub Actions 三 job（类型/单测/构建 · 全量回归 · E2E+评测）· Python 3 回归脚本（161 项） |
+| 桌面端 `apps/desktop` | Electron 41（内嵌 Node 24，原生支持 require(ESM)）· 内嵌后端（`ELECTRON_RUN_AS_NODE`）· 本地 SQLite（userData 隔离，打包时自动按 Electron ABI 重编原生模块）· electron-builder 三平台打包 · electron-updater 自动更新（opt-in） |
+| 工程 | pnpm workspace · vitest（server 99 / web 62）· Playwright 冒烟 · promptfoo 契约评估 · GitHub Actions 三 job（类型/单测/构建 · 全量回归 · E2E+评测）· Python 3 回归脚本（167 项） |
 
 **架构概览**
 
@@ -117,20 +144,23 @@ Chat(科研问答) · Submission(投稿辅助) · Settings(设置)
 git clone <你的仓库镜像地址> sciflow && cd sciflow
 pnpm install
 
-# 2. 配置 AI（复制模板并填写你自己的 Key；模板已含全部变量说明）
+# 2. 先跑环境自检（Node/依赖/目录/端口/AI/向量/Python 一次看全）
+pnpm doctor        # 有问题会给出具体修复动作；可加 --fix 自动修复安全项
+
+# 3. 配置 AI（复制模板并填写你自己的 Key；模板已含全部变量说明）
 cp apps/server/.env.example apps/server/.env
 #    编辑 apps/server/.env：至少填 AI_BASE_URL / AI_API_KEY / AI_MODEL
 
-# 3. 编译后端
+# 4. 编译后端
 pnpm --filter @sciflow/server build
 
-# 4. 启动（两个终端）
+# 5. 启动（两个终端）
 #    后端 :3000
-node apps/server/dist/main.js
+node apps/server/dist/apps/server/src/main.js
 #    前端 :5173
 pnpm --filter @sciflow/web dev
 
-# 5. 浏览器打开
+# 6. 浏览器打开
 #    http://localhost:5173
 ```
 
@@ -174,7 +204,7 @@ SciFlow 支持**任意 OpenAI 兼容端点**，只需要填 `base_url` + `model`
 pnpm --filter @sciflow/server typecheck
 pnpm --filter @sciflow/web typecheck
 
-# 单元测试（vitest：server 16 条 + web 15 条）
+# 单元测试（vitest：server 99 条 + web 62 条）
 pnpm --filter @sciflow/server test
 pnpm --filter @sciflow/web test
 
@@ -182,7 +212,8 @@ pnpm --filter @sciflow/web test
 pnpm --filter @sciflow/server build && pnpm --filter @sciflow/web build
 
 # E2E 冒烟（Playwright；前置：mock 后端 :3000 + web dev :5173 均已启动）
-pnpm exec playwright test
+pnpm exec playwright test e2e/workspace-smoke.spec.ts
+# 真实模型端到端（默认跳过，需真实端点）：E2E_REAL=1 pnpm exec playwright test e2e/real-chat.spec.ts
 
 # prompt 契约评估（promptfoo，离线；前置：server build + 下方 mock HTTP 网关）
 pnpm exec promptfoo eval -c evals/promptfooconfig.yaml
@@ -195,16 +226,17 @@ pnpm exec promptfoo eval -c evals/promptfooconfig.yaml
 ```bash
 # 起后端（mock 模式，放宽限流）
 AI_MOCK=1 AI_RPM_CAP=120 DATABASE_PATH=/tmp/sciflow_regression.db PORT=3000 \
-  node apps/server/dist/main.js
+  node apps/server/dist/apps/server/src/main.js
 
 # 另一终端：全量回归（覆盖全部路由 + 一条流水线端到端产物断言）
+# ⚠️ 必须使用全新数据库：脏库会让指纹去重/字段唯一性等用例误报失败
 SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
   python3 scripts/full_regression.py
 ```
 
 > 外部工具（如 promptfoo）需要真实 HTTP 端点时：`node apps/server/scripts/mock-openai-http.mjs`——复用同一路由表，监听 `127.0.0.1:5099`。
 
-回归基线（全新库 + mock 网关实测，见 `scripts/full_regression.py`）：**PASS 161 / FAIL 0 / KNOWN 0**（KNOWN 机制保留但当前为空集：历史 11 项存量缺口已全部修复）。mock 网关仅用于测试/演示，不代表真实模型能力。
+回归基线（全新库 + mock 网关实测，见 `scripts/full_regression.py`）：**PASS 167 / FAIL 0 / KNOWN 0**（KNOWN 机制保留但当前为空集：历史 11 项存量缺口已全部修复）。mock 网关仅用于测试/演示，不代表真实模型能力。
 
 ## 📚 文档索引
 
@@ -217,12 +249,22 @@ SCIFLOW_BASE=http://localhost:3000 AI_MOCK=1 \
 | [`docs/screenshots/`](docs/screenshots/) | 对话工作台 / 流水线 / 写作 / 质量 / 文献库 / 知识库 实机截图 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境、提交规范、PR 流程 |
 | [`SECURITY.md`](SECURITY.md) | 安全设计要点与漏洞披露方式 |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | 安全审计实测结论：4 个高/严重问题的 PoC、修复与复测 |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | 运维手册：SLI/SLO、健康检查、备份恢复实测、故障处置 |
+| [`docs/QUALITY-BASELINE.md`](docs/QUALITY-BASELINE.md) | 质量基线看板：覆盖率/复杂度/变异分数实测值与红线判定 |
+| [`docs/AUDIT-2026-10-23.md`](docs/AUDIT-2026-10-23.md) | 全维度审查与对标报告（35 条发现、竞品矩阵、路线图，含未修复项） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变更记录 |
 
-## 🌱 演示数据说明
+## 🌱 演示数据
 
-- 首次启动在演示项目中预置 **1 篇示例文献 + 1 份知识库资料**，便于立刻体验文献绑定、RAG 检索与流水线；
-- 全流程产物（文档/版本/引用/记忆）均存于本地 SQLite，删除 `DATABASE_PATH` 指向的 db 文件即可回到干净状态。
+```bash
+# 全新库 + mock 网关（无需任何 Key）
+AI_MOCK=1 DATABASE_PATH=/tmp/sciflow_demo.db PORT=3000 node apps/server/dist/apps/server/src/main.js
+node scripts/seed-demo.mjs          # 1 项目 / 1 文档 / 4 文献 / 质量报告 / 投稿 / 2 份知识库资料 / 1 实验
+RUN_PIPELINE=1 node scripts/seed-demo.mjs   # 额外跑通全自动流水线（约 30s）
+```
+
+`scripts/seed-demo.mjs` 只调用公开 REST API，可重复执行；库里已有项目时自动跳过，不会污染现有数据。全流程产物（文档/版本/引用/记忆）均存于本地 SQLite，删除 `DATABASE_PATH` 指向的 db 文件即可回到干净状态。
 
 ## 🐳 Docker 部署
 

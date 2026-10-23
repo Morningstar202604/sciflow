@@ -170,7 +170,7 @@ export function ExperimentsPage({ project }: { project: Project }) {
   };
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={error} />
       <div className="grid lg:grid-cols-5 gap-4">
         {/* 左：新建实验表单 */}
@@ -213,11 +213,11 @@ export function ExperimentsPage({ project }: { project: Project }) {
           <Card className="p-4 sm:p-5">
             <SectionTitle extra={<span className="text-xs text-slate-400">{exps.length} 条记录</span>}>
               <span className="flex items-center gap-2">
-                <Beaker size={16} className="brand-gradient-text" /> 实验记录
+                <Beaker size={16} className="text-teal-600 dark:text-teal-300" /> 实验记录
               </span>
             </SectionTitle>
             {exps.length === 0 ? (
-              <Empty text="暂无实验记录" hint="在左侧写一段 Python 并运行，结果会保存在这里" />
+              <Empty illustration="pipeline" text="还没有实验记录" hint="在左侧写一段 Python 并运行，结果与图表会保存在这里" />
             ) : (
               <div className="space-y-2">
                 {exps.map((exp) => (

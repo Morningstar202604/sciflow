@@ -1,8 +1,9 @@
-import { useCallback, useContext, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { flexRender, getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table';
+import { ExtractionHeatmap } from './ExtractionHeatmap';
 import { BookOpenCheck, FileDown, FlaskConical, Loader2, ShieldCheck, StickyNote, Trash2, Upload } from 'lucide-react';
 import type { EvidenceResult, PaperComparisonResult, Project, Reference, ReferenceGraph, DeepDiveResult, GapResult, ExtractedPaper, ExtractionField, ExtractionTableResult, ScreeningItem } from '../../types';
-import { Badge, Button, Card, CollapsibleCard, Empty, ErrorBox, Input, Spinner, Textarea, jsonText, errMsg } from '../../components/ui';
+import { Badge, Button, Card, CollapsibleCard, ConfirmDialog, Empty, ErrorBox, Input, Spinner, Textarea, jsonText, errMsg } from '../../components/ui';
 import { ChartEmpty, Donut, HBar } from '../../components/charts';
 import { ToastContext } from '../../App';
 import { api } from '../../api/client';
@@ -225,9 +226,18 @@ export function LiteratureTable(props: LiteratureTableProps) {
     }
   };
 
-  const removeRef = async (id: string) => {
-    await api.references.remove(id);
-    setRefs((s: Reference[]) => s.filter((r) => r.id !== id));
+  const [deletingRef, setDeletingRef] = useState<{ id: string; title: string } | null>(null);
+  const confirmRemoveRef = async () => {
+    if (!deletingRef) return;
+    try {
+      await api.references.remove(deletingRef.id);
+      setRefs((s: Reference[]) => s.filter((r) => r.id !== deletingRef.id));
+      toast('info', `已移除文献「${deletingRef.title}」`);
+    } catch (e: unknown) {
+      setError(errMsg(e));
+    } finally {
+      setDeletingRef(null);
+    }
   };
 
   // BibTeX/RIS export
@@ -397,10 +407,11 @@ export function LiteratureTable(props: LiteratureTableProps) {
       const y = r.year ? String(r.year) : '未知';
       m.set(y, (m.get(y) || 0) + 1);
     });
+    // 按年份升序展示（趋势可读）；「未知」固定排最后，避免占据首位误导
     return [...m.entries()]
       .map(([label, value]) => ({ name: label, value, hint: `${label} 年：${value} 篇` }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
+      .sort((a, b) => (a.name === '未知' ? 1 : b.name === '未知' ? -1 : Number(a.name) - Number(b.name)))
+      .slice(0, 12);
   }, [refs]);
 
   const topCited = useMemo(() => {
@@ -430,6 +441,12 @@ export function LiteratureTable(props: LiteratureTableProps) {
   }, [refs]);
 
   // 系统综述：筛选队列
+  // 大列表分批渲染：文献上千条时一次性挂载全部卡片会明显卡顿（每张卡含 4 个按钮 + 2 个输入）。
+  // 分批追加而不是虚拟滚动——卡片高度随「筛选理由/阅读状态」动态变化，固定行高会裁内容。
+  const PAGE_SIZE = 60;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // 切换项目或文献集合变化时回到第一批（否则新项目会沿用上个项目的展开量）
+  useEffect(() => setVisibleCount(PAGE_SIZE), [project.id, refs.length]);
   const [showScreen, setShowScreen] = useState(false);
   const [screenFilter, setScreenFilter] = useState<'all' | ScreenStatus>('all');
   const [screenSelected, setScreenSelected] = useState<Set<string>>(new Set());
@@ -589,7 +606,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
       {/* 检索区 */}
       <Card className="p-4 mb-4">
         <div className="flex items-center gap-1.5 mb-2.5 text-slate-700 dark:text-slate-200 font-semibold">
-          <FlaskConical size={15} className="brand-gradient-text" /> 文献调研
+          <FlaskConical size={15} className="text-teal-600 dark:text-teal-300" /> 文献调研
         </div>
         <div className="flex gap-2 flex-wrap">
           <Input
@@ -718,8 +735,8 @@ export function LiteratureTable(props: LiteratureTableProps) {
             <div className="mb-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800">
               <div className="grid md:grid-cols-2 gap-3">
                 <div>
-                  <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">年份分布 Top 10</div>
-                  <HBar data={yearDist} height={100} />
+                  <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">年份分布</div>
+                  <HBar data={yearDist} />
                 </div>
                 <div>
                   <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">来源 / venue 分布</div>
@@ -729,13 +746,13 @@ export function LiteratureTable(props: LiteratureTableProps) {
               {topCited.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-slate-200/70 dark:border-slate-800">
                   <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">高被引 Top {topCited.length}</div>
-                  <HBar data={topCited} height={100} />
+                  <HBar data={topCited} />
                 </div>
               )}
             </div>
 
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
-              {refs.map((r) => {
+              {refs.slice(0, visibleCount).map((r) => {
                 const sc = screenMap.get(r.id);
                 const scStatus: ScreenStatus = sc?.status ?? 'pending';
                 return (
@@ -794,7 +811,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
                       )}
                       {/* 阅读状态机（差距#1）：未读/在读/已读/已引 */}
                       <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                        <span className="text-[10px] text-slate-400 mr-0.5">阅读</span>
+                        <span className="text-[11px] text-slate-400 mr-0.5">阅读</span>
                         {READING_ORDER.map((st) => {
                           const active = (r.readingStatus || 'unread') === st;
                           return (
@@ -803,7 +820,7 @@ export function LiteratureTable(props: LiteratureTableProps) {
                               onClick={() => setReadingStatus(r, st)}
                               className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
                                 active
-                                  ? 'bg-teal-600 text-white border-teal-600'
+                                  ? 'bubble-user border-transparent'
                                   : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:border-teal-300 hover:text-teal-600'
                               }`}
                               title={`标记为${READING_LABEL[st]}`}
@@ -851,12 +868,21 @@ export function LiteratureTable(props: LiteratureTableProps) {
                     >
                       <BookOpenCheck size={14} />
                     </button>
-                    <button className="text-slate-300 hover:text-rose-500" onClick={() => removeRef(r.id)}>
+                    <button className="p-1 text-slate-400 hover:text-rose-500" aria-label={`删除文献 ${r.title}`} onClick={() => setDeletingRef({ id: r.id, title: r.title })}>
                       <Trash2 size={14} />
                     </button>
                   </div>
                 );
               })}
+              {/* 分批加载：还有未渲染条目时给出明确入口（不做无限自动追加，避免长列表持续重排） */}
+              {refs.length > visibleCount && (
+                <button
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 py-2 text-xs text-slate-500 dark:text-slate-400 hover:border-teal-300 hover:text-teal-600 transition-colors"
+                  onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                >
+                  还有 {refs.length - visibleCount} 条，加载更多
+                </button>
+              )}
             </div>
           </>
         )}
@@ -999,6 +1025,15 @@ export function LiteratureTable(props: LiteratureTableProps) {
           </Button>
         </div>
 
+        {extFields.length > 0 && extTable && extTable.rows.length > 0 && (
+          <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 mb-3">
+            <ExtractionHeatmap
+              fields={extFields.map((f) => ({ id: f.id, label: f.label }))}
+              rows={extTable.rows}
+            />
+          </div>
+        )}
+
         <div className="rounded-lg border border-slate-100 dark:border-slate-800 p-3 mb-3">
           <div className="text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">抽取字段管理</div>
           <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1077,6 +1112,15 @@ export function LiteratureTable(props: LiteratureTableProps) {
           </div>
         )}
       </CollapsibleCard>
+      <ConfirmDialog
+        open={!!deletingRef}
+        title="移除文献"
+        description={`确定从文献库移除「${deletingRef?.title ?? ''}」？该文献的引用与编码数据会一并删除，无法恢复。`}
+        confirmText="移除"
+        danger
+        onConfirm={confirmRemoveRef}
+        onClose={() => setDeletingRef(null)}
+      />
     </>
   );
 }

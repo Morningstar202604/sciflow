@@ -25,7 +25,7 @@
 
 ```
 ┌─ apps/desktop (Electron) ── contextIsolation 隔离壳，内嵌 server，回环监听
-├─ apps/server  (NestJS 11) ── 20 controller / 24 表 / 111 路由
+├─ apps/server  (NestJS 11) ── 20 controller / 24 表 / 114 路由（v0.6.0）
 │   ├─ ai/          AiTransport(AI SDK 多厂商热切换/限流/重试/成本落库) + AiService(24 个业务 prompt 方法) + mock 网关(CI 离线回归)
 │   ├─ pipeline/    LangGraph 真编排：interrupt 人工确认 + SqliteSaver checkpoint + best-of-N 质量门
 │   ├─ knowledge/   三级降级检索：sqlite-vec ANN → FTS5 trigram BM25 → LIKE

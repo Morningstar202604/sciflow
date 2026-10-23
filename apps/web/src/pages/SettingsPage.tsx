@@ -189,21 +189,21 @@ function PipelineEditor() {
       <div className="mt-4">
         <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
           全自动流水线的 {state.pipelineSteps.length} 个阶段可自定义启停：关闭的步骤直接跳过（步骤显示「已禁用」）。
-          「主题验证 / 分章起草 / 完成」为骨架步骤不可关闭。改动对之后新建的流水线生效。
+          「主题验证 / 完成」为骨架步骤不可关闭，其余均可自由启停。改动对之后新建的流水线生效。
         </div>
         <div className="grid sm:grid-cols-2 gap-1.5">
           {state.pipelineSteps.map((st) => (
             <div key={st.key} className="flex items-center gap-2 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
               <button
-                className={`relative w-7 h-4 rounded-full transition-colors ${st.enabled ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-700'} ${st.core ? 'opacity-50 cursor-not-allowed' : ''}`}
-                onClick={() => { if (!st.core) togglePipelineStep(st.key, st.enabled ? 0 : 1); }}
+                className={`relative w-7 h-4 rounded-full transition-colors ${st.enabled ? 'bg-teal-500' : 'bg-slate-300 dark:bg-slate-700'} ${!st.configurable ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={() => { if (st.configurable) togglePipelineStep(st.key, st.enabled ? 0 : 1); }}
               >
                 <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${st.enabled ? 'left-3.5' : 'left-0.5'}`} />
               </button>
               <span className="text-xs text-slate-700 dark:text-slate-200">{st.label}</span>
               <span className="text-[11px] text-slate-400 flex-1">{st.key}</span>
-              {st.core ? (
-                <span className="text-[10px] text-slate-400">骨架</span>
+              {!st.configurable ? (
+                <span className="text-[11px] text-slate-400">骨架</span>
               ) : st.enabled ? (
                 <Badge tone="teal">启用</Badge>
               ) : (
@@ -311,7 +311,7 @@ function SettingsLayout() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={state.error} />
 
       {/* AI 配置总览 */}
@@ -337,7 +337,7 @@ function SettingsLayout() {
               <div className="text-xs text-slate-400 dark:text-slate-500 mb-1">API Key 状态</div>
               <div className="text-sm flex items-center gap-1.5">
                 <ModelIcon ok={state.settings.ai.configured} />
-                {state.settings.ai.configured ? '已配置（apps/server/.env）' : '未配置 → 编辑 apps/server/.env'}
+                {state.settings.ai.configured ? '已配置' : '未配置（请在服务端环境变量中填写）'}
               </div>
             </div>
             <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-4">
@@ -386,6 +386,24 @@ function SettingsLayout() {
                 {state.check.ai.ok ? `${state.check.ai.latencyMs}ms · ${state.check.ai.detail}` : state.check.ai.detail}
               </span>
             </div>
+            {state.check.retrieval && (
+              <div className="rounded-lg bg-slate-50 dark:bg-slate-900/50 p-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <ModelIcon ok={state.check.retrieval.ok} />
+                  <span className="text-slate-600 dark:text-slate-300">检索栈</span>
+                  <span className="flex flex-wrap gap-1.5 text-xs">
+                    <Badge tone={state.check.retrieval.vector ? 'green' : 'amber'}>向量 {state.check.retrieval.vector ? '可用' : '降级'}</Badge>
+                    <Badge tone={state.check.retrieval.embeddingModel ? 'green' : 'amber'}>嵌入模型 {state.check.retrieval.embeddingModel ? '已配置' : '未配置'}</Badge>
+                    <Badge tone={state.check.retrieval.fullText ? 'green' : 'red'}>全文索引 {state.check.retrieval.fullText ? '可用' : '不可用'}</Badge>
+                  </span>
+                </div>
+                {state.check.retrieval.notes.length > 0 && (
+                  <ul className="mt-1.5 ml-6 list-disc text-[11px] text-amber-600 dark:text-amber-400 space-y-0.5">
+                    {state.check.retrieval.notes.map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Card>

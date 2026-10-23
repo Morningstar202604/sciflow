@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, setToken, getToken } from '../api/client';
 import { Button, Input, errMsg } from './ui';
+import { BrandMark } from './BrandMark';
 
 /**
  * 全局登录门（企业模式专属）
@@ -82,19 +83,14 @@ export function AuthGate() {
       <div className="modal-in w-[380px] max-w-[92vw] rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-7">
         {/* 品牌头 */}
         <div className="flex items-center gap-2.5 mb-5">
-          <div className="w-9 h-9 rounded-xl brand-logo text-white flex items-center justify-center">
-            <svg viewBox="0 0 64 64" className="w-6 h-6" aria-hidden="true">
-              <path
-                d="M 45 13 C 34 8, 20 14, 21 24 C 22 34, 43 30, 44 41 C 45 51, 29 57, 18 51"
-                fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round"
-              />
-            </svg>
+          <div className="w-9 h-9 rounded-xl brand-logo flex items-center justify-center">
+            <BrandMark className="w-6 h-6" />
           </div>
           <div>
             <div className="text-[16px] font-semibold text-slate-900 dark:text-slate-100 tracking-tight">
               Sci<span className="brand-gradient-text">Flow</span>
             </div>
-            <div className="text-[10px] text-slate-400">让科研从想法到成文</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">让科研从想法到成文</div>
           </div>
         </div>
 

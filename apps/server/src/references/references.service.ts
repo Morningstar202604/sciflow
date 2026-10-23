@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { sql, eq, and } from 'drizzle-orm';
+import { sql, eq, and, desc } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { Cite } from '@citation-js/core';
 import '@citation-js/plugin-bibtex';
@@ -163,7 +163,9 @@ export class ReferencesService {
     // 空元数据守卫：无作者且无年份的条目（如 Agentic RAG 补检的纯标题）不进文献库，
     // 避免污染引用池导致 [Unknown n.d.] / 佚名
     const authorsOk = authorsNorm.length > 0;
-    if (!authorsOk && !hit.year) return null;
+    if (!authorsOk && !hit.year) {
+      throw new BadRequestException('文献元数据不足：作者与年份至少填写一项（避免收录无法引用的空条目）');
+    }
     // 标题归一化指纹去重：命中同项目已存在文献时，新条目标记为其重复（保留两条记录供筛选流程核对）
     const fp = fingerprint(hit.title);
     const dupOf = fp
@@ -202,7 +204,13 @@ export class ReferencesService {
 
   remove(id: string) {
     this.get(id);
-    db.delete(references).where(eq(references.id, id)).run();
+    // 无外键库必须显式清理：citation 孤儿会让 citation-audit 假绿，筛选队列/编码值也会残留
+    db.transaction((tx) => {
+      tx.delete(references).where(eq(references.id, id)).run();
+      tx.delete(citations).where(eq(citations.referenceId, id)).run();
+      tx.delete(screeningQueue).where(eq(screeningQueue.referenceId, id)).run();
+      tx.delete(extractionValues).where(eq(extractionValues.referenceId, id)).run();
+    });
     return { ok: true };
   }
 
@@ -307,6 +315,15 @@ export class ReferencesService {
       .where(and(eq(citations.documentId, body.documentId), eq(citations.referenceId, body.referenceId)))
       .get();
     if (existing) return existing;
+    // createdAt 必须严格大于该文档已有引用：同毫秒插入会让 ORDER BY 不稳定，
+    // 导致正文 [n] 与列表第 n 条错位（列表顺序 = 插入顺序 = 正文首次出现顺序）。
+    const maxRow = db
+      .select({ createdAt: citations.createdAt })
+      .from(citations)
+      .where(eq(citations.documentId, body.documentId))
+      .orderBy(desc(citations.createdAt))
+      .get();
+    const createdAt = Math.max(Date.now(), (maxRow?.createdAt ?? 0) + 1);
     const row = {
       id: randomUUID(),
       documentId: body.documentId,
@@ -315,7 +332,7 @@ export class ReferencesService {
       context: body.context || '',
       format: body.format || 'apa',
       verified: ref.doi ? 1 : 0,
-      createdAt: Date.now(),
+      createdAt,
     };
     db.insert(citations).values(row).run();
     return row;

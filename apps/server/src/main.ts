@@ -1,15 +1,40 @@
 import 'dotenv/config';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { config as loadEnv } from 'dotenv';
-// 显式加载 apps/server/.env：dotenv/config 只读 cwd/.env，从仓库根目录启动（node apps/server/dist/main.js）会漏读，
-// 导致 AI_BASE_URL/AI_MODEL/AI_API_KEY 等配置丢失（settings/check 503、流水线创建 400 的根因）。
-loadEnv({ path: join(__dirname, '..', '.env') });
+
+/**
+ * 显式加载 apps/server/.env。
+ *
+ * 编译后 __dirname 是 `dist/apps/server/src`（rootDir 固化为仓库根），
+ * 因此既不能写死 `join(__dirname,'..')`，也不能只依赖 cwd。
+ * 这里按「__dirname 向上逐级探测 apps/server/.env」+「cwd 兜底」两条路径找，
+ * 保证从仓库根、从 apps/server、从 dist 目录启动都能读到同一份配置。
+ */
+(function loadServerEnv() {
+  const candidates = [
+    // 1) 相对 cwd 的常见位置
+    resolve(process.cwd(), 'apps', 'server', '.env'),
+    resolve(process.cwd(), '.env'),
+    // 2) 相对自身位置向上探测（dist/apps/server/src → … → 仓库根）
+    ...Array.from({ length: 6 }, (_, i) => resolve(__dirname, ...Array(i > 0 ? i : 0).fill('..'), 'apps', 'server', '.env')),
+    ...Array.from({ length: 6 }, (_, i) => resolve(__dirname, ...Array(i > 0 ? i : 0).fill('..'), '.env')),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      loadEnv({ path: p });
+      return;
+    }
+  }
+})();
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { InputValidationPipe } from './common/input-validation.pipe';
+import { envInt } from '../../../packages/core/src/env';
 
 async function bootstrap() {
   // ---------- 启动期安全闸：非回环绑定必须启用鉴权，否则拒绝启动 ----------
@@ -47,9 +72,14 @@ async function bootstrap() {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   appRef = app;
   app.useLogger(app.get(Logger));
+  // 请求体上限：知识库上传 PDF 走 base64 JSON，Express 默认 100kb 会在 ~75KB 的 PDF 上就 500。
+  // 与 nginx.conf 的 client_max_body_size 64m 对齐；超限抛 413（HttpExceptionFilter 已映射为可读中文）。
+  const bodyLimit = process.env.BODY_LIMIT || '64mb';
+  app.useBodyParser('json', { limit: bodyLimit });
+  app.useBodyParser('urlencoded', { limit: bodyLimit, extended: true });
   // HTTP 安全头（helmet 默认集：CSP 关闭以兼容本地静态资源；其余 X-Content-Type-Options/HSTS/Referrer-Policy 等生效）
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   // CORS：默认仅放行本地开发来源，可通过 CORS_ORIGIN 配置（如逗号分隔多个域名；* 表示全放行）
@@ -65,12 +95,12 @@ async function bootstrap() {
   // OpenAPI 契约：本地文档端点（/api/docs）+ 供 openapi-typescript 生成前端类型（pnpm openapi:gen）
   const openapiDoc = SwaggerModule.createDocument(
     app,
-    new DocumentBuilder().setTitle('SciFlow API').setDescription('本地优先科研工作台（单用户）').setVersion('0.4.2').build(),
+    new DocumentBuilder().setTitle('SciFlow API').setDescription('本地优先科研工作台（单用户）').setVersion('0.8.1').build(),
   );
   SwaggerModule.setup('api/docs', app, openapiDoc);
   // 全局输入校验（轻量兜底，零新增依赖）：仅约束 @Body() 为 JSON 对象，不剥字段、不误伤现有端点
   app.useGlobalPipes(new InputValidationPipe());
-  const port = Number(process.env.PORT || 3000);
+  const port = envInt('PORT', 3000, { min: 1, max: 65535 });
   // 安全基线：单用户本地定位服务，只回环监听 127.0.0.1，不再对局域网暴露零鉴权 API。
   // 确需对外暴露时显式设置 HOST=0.0.0.0（默认安全，opt-in 暴露）。
   const host = process.env.HOST || '127.0.0.1';

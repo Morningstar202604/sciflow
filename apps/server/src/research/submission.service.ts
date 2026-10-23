@@ -1,9 +1,9 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db } from '../db/database';
-import { journals, submissions, submissionStatusEvents, SUBMISSION_STATUSES } from '../db/schema';
+import { journals, submissions, submissionStatusEvents, SUBMISSION_STATUSES, projects } from '../db/schema';
 import { AiService } from '../ai/ai.service';
 
 /** 状态码校验：不在 13 个枚举内一律拒绝（zod refine） */
@@ -205,6 +205,8 @@ export class SubmissionService {
   createTrack(body: { projectId: string; journalId?: string; journalName: string; documentId?: string; submittedAt?: number; currentStatus?: string; note?: string; previousSubmissionId?: string; revisionDeadline?: number | null }) {
     if (!body.projectId?.trim()) throw new BadRequestException('projectId 必填');
     if (!body.journalName?.trim()) throw new BadRequestException('期刊名必填');
+    const project = db.select({ id: projects.id }).from(projects).where(eq(projects.id, body.projectId.trim())).get();
+    if (!project) throw new BadRequestException('项目不存在');
     const status = body.currentStatus || 'submitted';
     if (!statusEnum.safeParse(status).success) throw new BadRequestException('未知投稿状态');
     if (body.revisionDeadline !== undefined && body.revisionDeadline !== null && typeof body.revisionDeadline !== 'number') {
@@ -252,8 +254,27 @@ export class SubmissionService {
   listTracks(projectId: string) {
     if (!projectId?.trim()) throw new BadRequestException('projectId 必填');
     const rows = db.select().from(submissions).where(eq(submissions.projectId, projectId)).all();
+    if (!rows.length) return [];
+    // 批量取期刊与事件，消除 2N 次逐行查询（N+1）
+    const journalIds = [...new Set(rows.map((r) => r.journalId).filter(Boolean))] as string[];
+    const journalRows = journalIds.length
+      ? db.select().from(journals).where(inArray(journals.id, journalIds)).all()
+      : [];
+    const journalMap = new Map(journalRows.map((j) => [j.id, j]));
+    const idList = rows.map((r) => r.id);
+    const eventRows = db.select().from(submissionStatusEvents).where(inArray(submissionStatusEvents.submissionId, idList)).all();
+    const eventsBySubmission = new Map<string, typeof eventRows>();
+    for (const e of eventRows) {
+      const list = eventsBySubmission.get(e.submissionId) || [];
+      list.push(e);
+      eventsBySubmission.set(e.submissionId, list);
+    }
     return rows
-      .map((r) => this.decorate(r))
+      .map((r) => {
+        const journal = r.journalId ? journalMap.get(r.journalId) : undefined;
+        const events = (eventsBySubmission.get(r.id) || []).sort((a, b) => a.eventAt - b.eventAt);
+        return { ...r, journalName: r.journalName, events, ...this.infer(r, journal?.firstDecisionWeeks ?? null) };
+      })
       .sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0));
   }
 

@@ -38,10 +38,31 @@ describe('api client × msw（网络层拦截）', () => {
   });
 
   it('英文错误 + 500：转译为友好中文提示', async () => {
+    // 走真实的 request() 出口，而不是裸 fetch——否则测不到错误翻译层。
+    // /api/boom 返回 message="kaboom"（非中文）且状态 500，应被翻译成状态码对应的中文。
+    const { request } = await import('./core');
+    await expect(request('/api/boom')).rejects.toThrow(/服务内部错误|请求失败/);
+    // 且错误必须携带状态码，便于上层区分「服务端故障」与「网络不通」
+    await expect(request('/api/boom')).rejects.toMatchObject({ status: 500 });
+  });
+
+  /**
+   * 回归护栏（2026-10）：此前 catch 用字符类 /^[请求服务网络未授权没有操作]/ 判首字，
+   * 导致 74/87 条后端中文错误被覆盖成"无法连接服务器"。这里专门挑首字不在该集合里的文案。
+   */
+  it('首字不在旧白名单里的中文业务错误，也要原样透传', async () => {
+    server.use(
+      http.post('http://msw.test/api/quality', () =>
+        HttpResponse.json({ message: '文档内容过短，暂无法评分（至少 50 字）', error: 'Bad Request', statusCode: 400 }, { status: 400 }),
+      ),
+    );
     const { api } = await import('./client');
-    // 走内部 request 的公开入口（health 之外任取 500 路径）；用 documents.get 打 /api/boom 不可达，改为直接 fetch 断言
-    const res = await fetch('http://msw.test/api/boom');
-    expect(res.status).toBe(500);
-    void api; // client 已加载即可；该断言验证 msw 与 fetch 拦截协同
+    await expect(api.quality.review('d1', 't', 'x')).rejects.toThrow(/文档内容过短，暂无法评分/);
+  });
+
+  it('网络失败：给出可识别的连接提示（而不是吞成通用错误）', async () => {
+    server.use(http.get('http://msw.test/api/offline', () => HttpResponse.error()));
+    const { request } = await import('./core');
+    await expect(request('/api/offline')).rejects.toThrow(/无法连接服务器/);
   });
 });

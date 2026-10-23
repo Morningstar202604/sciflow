@@ -1,12 +1,13 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookMarked, Brain, Check, ChevronDown, ChevronUp, FileText, Link2, Loader2, MessageSquare, Quote, Trash2, Unlink, Upload } from 'lucide-react';
+import { BookMarked, Brain, Check, ChevronDown, ChevronUp, FileText, Link2, Loader2, MessageSquare, Quote, ScatterChart, Trash2, Unlink, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import { useContext } from 'react';
 import { ToastContext } from '../App';
 import type { Doc, KnowledgeDoc, KnowledgeDocDetail, KnowledgeQueryResult, KnowledgeSource, Project, Reference } from '../types';
 import { Button, Card, ConfirmDialog, Empty, ErrorBox, Input, Modal, SectionTitle, Badge, Spinner, errMsg } from '../components/ui';
 import { Donut, HBar } from '../components/charts';
+import { SemanticMap } from './knowledge/SemanticMap';
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -22,7 +23,7 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 /* =====================================================================
- * 差距#24：NotebookLM 式学习/复盘（轻量版，纯前端规则生成，零依赖）
+ * 差距#24：资料内问答学习/复盘（轻量版，纯前端规则生成，零依赖）
  * ---------------------------------------------------------------------
  * 后端未暴露「按文档取 chunk 正文 / outline」的读接口（knowledge 仅
  * upload/list/query/bind/remove，且 query 无 AI key 时 503）。故本卡片：
@@ -80,18 +81,18 @@ function MindMap({ root, leaves }: { root: string; leaves: string[] }) {
               key={`e-${i}`}
               d={`M ${rootX + 110} ${rootY} C ${rootX + 220} ${rootY}, ${leafX - 60} ${ly}, ${leafX} ${ly}`}
               fill="none"
-              stroke="#94a3b8"
+              stroke="var(--viz-series-6)"
               strokeWidth={1.4}
             />
           );
         })}
       {/* 根节点（点击折叠/展开子树） */}
       <g onClick={() => setCollapsed((v) => !v)} className="cursor-pointer">
-        <rect x={rootX} y={rootY - 22} width={220} height={44} rx={10} fill="#14b8a6" />
+        <rect x={rootX} y={rootY - 22} width={220} height={44} rx={10} fill="var(--brand-400)" />
         <text x={rootX + 110} y={rootY + 4} textAnchor="middle" fontSize={12} fill="#ffffff" fontWeight={600}>
           {root.length > 16 ? root.slice(0, 16) + '…' : root}
         </text>
-        <text x={rootX + 110} y={rootY + 36} textAnchor="middle" fontSize={9} fill="#0f766e">
+        <text x={rootX + 110} y={rootY + 36} textAnchor="middle" fontSize={9} fill="var(--brand-600)">
           {collapsed ? '▸ 点击展开子树' : '▾ 点击折叠'}
         </text>
       </g>
@@ -99,7 +100,7 @@ function MindMap({ root, leaves }: { root: string; leaves: string[] }) {
       {!collapsed &&
         leaves.map((t, i) => {
           const ly = 36 + i * 38;
-          const fill = i % 2 === 0 ? '#06b6d4' : '#0ea5e9';
+          const fill = i % 2 === 0 ? 'var(--viz-series-2)' : 'var(--sky-500)';
           return (
             <g key={`n-${i}`}>
               <rect x={leafX} y={ly} width={200} height={leafH} rx={8} fill={fill} />
@@ -195,7 +196,7 @@ function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
         </span>
       </SectionTitle>
       <div className="text-xs text-slate-400 dark:text-slate-500 mb-3">
-        选一份资料，前端规则生成复习卡 + 思维导图（NotebookLM 式）。已接入分块取数：挖空来自原文句子，思维导图优先用真实章节标题；无 AI key 也可用。
+        选一份资料，前端规则生成复习卡 + 思维导图（资料内问答）。已接入分块取数：挖空来自原文句子，思维导图优先用真实章节标题；无 AI key 也可用。
       </div>
       <div className="max-w-md">
         <select
@@ -226,7 +227,7 @@ function StudyReviewCard({ docs }: { docs: KnowledgeDoc[] }) {
                 onClick={() => setRevealed((m) => ({ ...m, [i]: !m[i] }))}
                 className="cursor-pointer rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-900/50 hover:border-teal-300 transition-colors"
               >
-                <div className="text-[10px] text-teal-600 dark:text-teal-400 mb-1">{revealed[i] ? '答案' : '问题/填空'}</div>
+                <div className="text-[11px] text-teal-600 dark:text-teal-400 mb-1">{revealed[i] ? '答案' : '问题/填空'}</div>
                 <div className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
                   {revealed[i] ? c.a : c.q}
                 </div>
@@ -254,6 +255,8 @@ export function KnowledgePage({ project }: { project: Project }) {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<KnowledgeQueryResult | null>(null);
   const [busy, setBusy] = useState('');
+  /* 语义地图：展开时才拉数据（避免首屏多一次 embedding 全表扫描） */
+  const [mapOpen, setMapOpen] = useState(false);
   const [error, setError] = useState('');
   const toast = useContext(ToastContext);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -275,6 +278,13 @@ export function KnowledgePage({ project }: { project: Project }) {
   const qc = useQueryClient();
   const kbDocsQuery = useQuery({ queryKey: ['kb-docs', project.id], queryFn: () => api.knowledge.list(project.id) });
   const kbRefsQuery = useQuery({ queryKey: ['kb-refs', project.id], queryFn: () => api.references.list(project.id), retry: 0 });
+  const mapQuery = useQuery({
+    queryKey: ['kb-map', project.id],
+    queryFn: () => api.knowledge.semanticMap(project.id),
+    enabled: mapOpen,
+    staleTime: 5 * 60_000,
+    retry: 0,
+  });
   const docs: KnowledgeDoc[] = useMemo(() => kbDocsQuery.data ?? [], [kbDocsQuery.data]);
   const refs: Reference[] = useMemo(() => kbRefsQuery.data ?? [], [kbRefsQuery.data]);
   const load = async () => {
@@ -346,9 +356,9 @@ export function KnowledgePage({ project }: { project: Project }) {
   // 文档类型分布 Donut（pdf/markdown/text）
   const typeDist = useMemo(() => {
     const order: { key: string; label: string; color: string }[] = [
-      { key: 'pdf', label: 'PDF', color: '#f87171' },
-      { key: 'markdown', label: 'Markdown', color: '#0ea5e9' },
-      { key: 'text', label: '纯文本', color: '#94a3b8' },
+      { key: 'pdf', label: 'PDF', color: 'var(--rose-500)' },
+      { key: 'markdown', label: 'Markdown', color: 'var(--sky-500)' },
+      { key: 'text', label: '纯文本', color: 'var(--viz-series-6)' },
     ];
     const counts: Record<string, number> = { pdf: 0, markdown: 0, text: 0 };
     docs.forEach((d) => {
@@ -365,7 +375,8 @@ export function KnowledgePage({ project }: { project: Project }) {
         .sort((a, b) => b.chunkCount - a.chunkCount)
         .slice(0, 8)
         .map((d) => ({
-          label: d.name.length > 22 ? d.name.slice(0, 22) + '…' : d.name,
+          // 窄屏标签更短，避免左侧标签吃掉绘图区（390 实测长文件名会把柱子挤到只剩一小段）
+          label: d.name.length > 16 ? d.name.slice(0, 16) + '…' : d.name,
           value: d.chunkCount,
           hint: d.name,
         })),
@@ -422,7 +433,7 @@ export function KnowledgePage({ project }: { project: Project }) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="page-container">
       <ErrorBox message={error} />
 
       {/* 上传区 */}
@@ -462,13 +473,45 @@ export function KnowledgePage({ project }: { project: Project }) {
           />
           <FileText size={28} className="mx-auto text-slate-400 dark:text-slate-500 mb-2" />
           <div className="text-sm text-slate-600 dark:text-slate-300">点击选择或拖拽 PDF / TXT / Markdown 到此处</div>
-          <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">支持 PDF 解析与自动分块（NotebookLM 式 RAG）</div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">支持 PDF 解析与自动分块（基于资料的可溯源问答）</div>
           {busy.startsWith('upload:') && (
             <div className="mt-2">
               <Spinner label={`解析 ${busy.slice(7)}…`} />
             </div>
           )}
         </div>
+
+        {/* 语义地图（F-2.2）：默认折叠，展开时才拉数据（只读已有向量，不触发嵌入模型） */}
+        {docs.length > 0 && (
+          <div className="mt-4">
+            <button
+              className="w-full flex items-center justify-between rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:border-teal-300 transition-colors"
+              onClick={() => setMapOpen((v) => !v)}
+              aria-expanded={mapOpen}
+              aria-controls="semantic-map-panel"
+            >
+              <span className="flex items-center gap-1.5">
+                <ScatterChart size={13} className="text-teal-600" aria-hidden="true" /> 语义地图（分块向量分布）
+              </span>
+              <span className="text-[11px] text-slate-400">{mapOpen ? '收起 ▾' : '展开 ▸'}</span>
+            </button>
+            {mapOpen && (
+              <div id="semantic-map-panel" className="mt-2 rounded-lg border border-slate-100 dark:border-slate-800 p-3">
+                {mapQuery.isLoading ? (
+                  <div className="text-xs text-slate-400 py-6 text-center">正在计算投影…</div>
+                ) : mapQuery.isError ? (
+                  <div className="text-xs text-rose-500 py-4">{errMsg(mapQuery.error)}</div>
+                ) : (
+                  <SemanticMap
+                    points={mapQuery.data?.points ?? []}
+                    total={mapQuery.data?.total ?? 0}
+                    sampled={mapQuery.data?.sampled ?? false}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 资料概览可视化 */}
         {docs.length > 0 && (
@@ -480,7 +523,7 @@ export function KnowledgePage({ project }: { project: Project }) {
               </div>
               <div>
                 <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">分块量 Top {chunkDist.length}</div>
-                <HBar items={chunkDist} barHeight={6} />
+                <HBar items={chunkDist} />
               </div>
             </div>
           </div>
@@ -490,7 +533,7 @@ export function KnowledgePage({ project }: { project: Project }) {
         <div className="mt-4">
           <div className="text-xs text-slate-400 dark:text-slate-500 mb-2">知识库（{docs.length} 份资料）</div>
           {docs.length === 0 ? (
-            <Empty text="暂无资料，上传后即可基于资料问答" />
+            <Empty illustration="knowledge" text="知识库还没有资料" hint="上传 PDF / Markdown / 文本后即可基于资料提问" />
           ) : (
             <div className="space-y-2">
               {docs.map((d) => (
@@ -534,7 +577,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                                 >
                                   <div className="text-[12px] text-slate-700 dark:text-slate-200 truncate">{r.title}</div>
                                   {(r.year || r.venue) && (
-                                    <div className="text-[10px] text-slate-400 truncate">
+                                    <div className="text-[11px] text-slate-400 truncate">
                                       {[r.venue, r.year].filter(Boolean).join(' · ')}
                                     </div>
                                   )}
@@ -580,7 +623,7 @@ export function KnowledgePage({ project }: { project: Project }) {
       <Card className="p-4 sm:p-5">
         <SectionTitle>
           <span className="flex items-center gap-2">
-            <MessageSquare size={16} className="brand-gradient-text" /> 基于资料问答
+            <MessageSquare size={16} className="text-teal-600 dark:text-teal-300" /> 基于资料问答
           </span>
         </SectionTitle>
         <div className="flex flex-col sm:flex-row gap-2">
@@ -589,7 +632,7 @@ export function KnowledgePage({ project }: { project: Project }) {
             {busy === 'query' ? <Loader2 size={15} className="animate-spin" /> : <MessageSquare size={15} />} 提问
           </Button>
         </div>
-        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">答案严格来自你的资料（NotebookLM 式），不依赖外部知识</div>
+        <div className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">答案严格来自你的资料（资料内问答），不依赖外部知识</div>
 
         {busy === 'query' && (
           <div className="mt-4">
@@ -608,7 +651,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                     value: s.score,
                     sub: `匹配 ${s.score}%`,
                     hint: s.snippet,
-                    color: s.score >= 70 ? undefined : s.score >= 40 ? '#f59e0b' : '#f87171',
+                    color: s.score >= 70 ? undefined : s.score >= 40 ? 'var(--amber-500)' : 'var(--rose-500)',
                   }))}
                 />
                 <div className="mt-2 space-y-2 border-t border-slate-100 dark:border-slate-800 pt-2">
@@ -623,7 +666,7 @@ export function KnowledgePage({ project }: { project: Project }) {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-slate-600 dark:text-slate-300 font-medium">「{s.docName}」</span>
                           {chunkNo !== null && (
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500">
                               分块 {chunkNo}{totalChunks ? `/${totalChunks}` : ''}
                             </span>
                           )}

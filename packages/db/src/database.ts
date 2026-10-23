@@ -25,6 +25,8 @@ sqlite.pragma('foreign_keys = ON');
 sqlite.pragma('busy_timeout = 5000');
 
 // ---------- sqlite-vec 扩展加载（向量 ANN 检索） ----------
+/** 运行期能力探测：扩展是否真的加载成功（供 /api/health 与设置页自检展示） */
+export let vecLoaded = false;
 try {
   // sqlite-vec 官方入口：getLoadablePath() 按平台解析预编译扩展（win32→vec0.dll；mac→dylib；linux→so）
   // 注意：不能 require.resolve('sqlite-vec/better-sqlite3')——该包的 exports 只允许 '.' 子路径，
@@ -33,6 +35,7 @@ try {
   if (process.env.SCIFLOW_NO_VEC !== '1') {
     const sqliteVec = sqliteVecMod;
     sqlite.loadExtension(sqliteVec.getLoadablePath());
+    vecLoaded = true;
     console.log('[DB] sqlite-vec 扩展已加载（向量 ANN 检索可用）');
   } else {
     console.warn('[DB] SCIFLOW_NO_VEC=1，跳过 sqlite-vec 扩展加载（排障模式）');
@@ -51,7 +54,8 @@ CREATE TABLE IF NOT EXISTS project (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   preface TEXT DEFAULT '',
-  templates TEXT DEFAULT '[]'
+  templates TEXT DEFAULT '[]',
+  owner_id TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS document (
@@ -228,6 +232,7 @@ CREATE TABLE IF NOT EXISTS custom_prompt (
 CREATE TABLE IF NOT EXISTS llm_call_log (
   id TEXT PRIMARY KEY,
   caller TEXT DEFAULT 'general',
+  kind TEXT DEFAULT 'llm',
   model TEXT DEFAULT '',
   prompt_tokens INTEGER DEFAULT 0,
   completion_tokens INTEGER DEFAULT 0,
@@ -491,6 +496,11 @@ ensureColumn('reference', 'notes', "TEXT DEFAULT ''");
 ensureColumn('project', 'preface', "TEXT DEFAULT ''");
 // 差距 #1：自定义大纲模板（JSON 字符串数组）；旧库补齐默认 '[]'
 ensureColumn('project', 'templates', "TEXT DEFAULT '[]'");
+// 调用类型：llm=模型调用，tool=工具调用（分开统计，避免工具污染 token 成本看板）
+ensureColumn('llm_call_log', 'kind', "TEXT DEFAULT 'llm'");
+// 企业模式（AUTH_MODE=jwt）：项目归属，用于按用户隔离数据（防 IDOR）
+ensureColumn('project', 'owner_id', "TEXT DEFAULT ''");
+sqlite.exec('CREATE INDEX IF NOT EXISTS idx_project_owner ON project(owner_id)');
 
 // ---------- 迁移：knowledge_chunk_fts 从 unicode61 升级到 trigram ----------
 // 原因：unicode61 不切分 CJK（整段中文是一个 token），中文短语检索永远命中不到；

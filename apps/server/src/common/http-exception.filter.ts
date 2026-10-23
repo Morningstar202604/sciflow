@@ -67,6 +67,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
       });
       return;
     }
+    // 例外 2：body-parser 的超限错误（type=entity.too.large）是客户端错误 → 413 可读中文，不是 500
+    const tooLarge = asBodyParserError(exception);
+    if (tooLarge) {
+      this.logger.warn(`[Body] 请求体过大（上限 ${tooLarge.limit ?? '未知'}）`);
+      response.status(HttpStatus.PAYLOAD_TOO_LARGE).json({
+        statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+        message: `上传内容过大（上限 ${tooLarge.limit ?? '64mb'}），请压缩后重试`,
+        error: 'Payload Too Large',
+      });
+      return;
+    }
     this.logServerSide(exception);
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -86,6 +97,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
 function truncate(s: string): string {
   return s.length > MAX_MESSAGE_LEN ? s.slice(0, MAX_MESSAGE_LEN) : s;
+}
+
+/** 结构化识别 body-parser 的超限错误（只认最小形状，不引 body-parser 类型） */
+function asBodyParserError(e: unknown): { limit?: string } | null {
+  if (typeof e !== 'object' || e === null) return null;
+  const o = e as { type?: unknown; status?: unknown; statusCode?: unknown; limit?: unknown };
+  const isTooLarge = o.type === 'entity.too.large' || o.status === 413 || o.statusCode === 413;
+  if (!isTooLarge) return null;
+  // body-parser 的 limit 是字节数（number），不是字符串；统一格式化成 MB 展示
+  let limit: string | undefined;
+  if (typeof o.limit === 'number' && Number.isFinite(o.limit)) {
+    limit = `${Math.round((o.limit / (1024 * 1024)) * 10) / 10}mb`;
+  } else if (typeof o.limit === 'string') {
+    limit = o.limit;
+  } else if (process.env.BODY_LIMIT) {
+    limit = process.env.BODY_LIMIT;
+  }
+  return { limit };
 }
 
 /** 结构化识别 ZodError（避免直接 import zod 造成循环依赖：只认最小形状） */

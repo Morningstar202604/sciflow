@@ -81,21 +81,21 @@ export function WebSearchSettings() {
           <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Tavily Key {cfg.tavilyKey && <span className="text-slate-400">（当前 {cfg.tavilyKey}）</span>}</div>
           <div className="flex gap-1.5">
             <Input value={tavilyNew} onChange={(e) => setTavilyNew(e.target.value)} type="password" placeholder="留空不修改" />
-            <Button variant="outline" disabled={busy || !tavilyNew} onClick={() => save({ tavilyKey: tavilyNew })}>存</Button>
+            <Button variant="outline" disabled={busy || !tavilyNew} onClick={() => save({ tavilyKey: tavilyNew })}>保存</Button>
           </div>
         </div>
         <div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Serper Key {cfg.serperKey && <span className="text-slate-400">（当前 {cfg.serperKey}）</span>}</div>
           <div className="flex gap-1.5">
             <Input value={serperNew} onChange={(e) => setSerperNew(e.target.value)} type="password" placeholder="留空不修改" />
-            <Button variant="outline" disabled={busy || !serperNew} onClick={() => save({ serperKey: serperNew })}>存</Button>
+            <Button variant="outline" disabled={busy || !serperNew} onClick={() => save({ serperKey: serperNew })}>保存</Button>
           </div>
         </div>
         <div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Brave Key {cfg.braveKey && <span className="text-slate-400">（当前 {cfg.braveKey}）</span>}</div>
           <div className="flex gap-1.5">
             <Input value={braveNew} onChange={(e) => setBraveNew(e.target.value)} type="password" placeholder="留空不修改" />
-            <Button variant="outline" disabled={busy || !braveNew} onClick={() => save({ braveKey: braveNew })}>存</Button>
+            <Button variant="outline" disabled={busy || !braveNew} onClick={() => save({ braveKey: braveNew })}>保存</Button>
           </div>
         </div>
       </div>

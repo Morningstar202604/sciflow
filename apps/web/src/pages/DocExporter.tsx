@@ -382,14 +382,54 @@ export interface DocExporterProps {
   onExportWord: () => void;
   aiBusy: boolean;
 }
-export function DocExporter({ onExportFull, onExportWord, aiBusy }: DocExporterProps) {
+
+/** 安全文件名（各平台禁止字符统一替换） */
+function safeName(title: string, ext: string): string {
+  return `${(title || '论文').replace(/[\\/:*?"<>|]/g, '_')}.${ext}`;
+}
+
+/**
+ * 导出面板：Markdown / Word 走后端接口（含大纲、引用等完整结构）；
+ * LaTeX / HTML 在前端本地转换（mdToLatex / mdToHtmlSync 是纯函数，无需网络）。
+ */
+export function DocExporter({ doc, content, onExportFull, onExportWord, aiBusy }: DocExporterProps) {
+  const title = doc?.title || '论文';
+  const hasContent = Boolean(content?.trim());
+
+  const download = (text: string, ext: string, mime: string) => {
+    const url = URL.createObjectURL(new Blob([text], { type: mime }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safeName(title, ext);
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportLatex = () => {
+    if (!hasContent) return;
+    download(latexDoc(title, mdToLatex(content)), 'tex', 'application/x-tex;charset=utf-8');
+  };
+
+  const exportHtml = () => {
+    if (!hasContent) return;
+    download(htmlDoc(title, mdToHtmlSync(content)), 'html', 'text/html;charset=utf-8');
+  };
+
+  const btn = 'text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50';
+
   return (
-    <div className="flex items-center gap-2">
-      <button className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50" onClick={onExportFull} disabled={aiBusy}>
+    <div className="flex flex-wrap items-center gap-2">
+      <button className={btn} onClick={onExportFull} disabled={aiBusy}>
         导出 Markdown
       </button>
-      <button className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50" onClick={onExportWord} disabled={aiBusy}>
+      <button className={btn} onClick={onExportWord} disabled={aiBusy}>
         导出 Word
+      </button>
+      <button className={btn} onClick={exportLatex} disabled={aiBusy || !hasContent} title="Markdown → LaTeX(.tex)，本地转换，适合期刊投稿">
+        导出 LaTeX
+      </button>
+      <button className={btn} onClick={exportHtml} disabled={aiBusy || !hasContent} title="Markdown → 独立 HTML（含公式/表格样式），可直接浏览器打开">
+        导出 HTML
       </button>
     </div>
   );

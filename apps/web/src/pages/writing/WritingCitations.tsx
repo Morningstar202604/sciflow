@@ -55,6 +55,16 @@ export function WritingCitations({
 }) {
   return (
     <>
+      {/*
+        导出区放在面板最前：底部 Tab 面板高度约 40vh，若把导出放到引用列表之后，
+        按钮会落在可视区之外（实测 1440×950 下按钮 top=959，用户必须滚动才能看到）。
+        导出是高频操作，优先露出。
+      */}
+      <div className="mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+        <div className={SEC}>导出全文</div>
+        {renderDocExporter}
+      </div>
+
       {/* 引用管理 */}
       <div className="mb-4">
         <div className={`${SEC} flex items-center gap-1`}>
@@ -72,8 +82,8 @@ export function WritingCitations({
                 centerValue={`${pct}%`}
                 centerLabel="核验率"
                 segments={[
-                  { label: `已核验 ${verified}`, value: verified, color: '#10b981' },
-                  { label: `未核验 ${citations.length - verified}`, value: citations.length - verified, color: '#cbd5e1' },
+                  { label: `已核验 ${verified}`, value: verified, color: 'var(--emerald-500)' },
+                  { label: `未核验 ${citations.length - verified}`, value: citations.length - verified, color: 'var(--viz-series-6)' },
                 ]}
               />
             </div>
@@ -144,7 +154,7 @@ export function WritingCitations({
           const meta = CITE_STYLES.find((s) => s.value === exportFormat);
           if (!meta) return null;
           return (
-            <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+            <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
               文中引用：<span className="font-mono text-slate-500 dark:text-slate-400">{meta.inText}</span>
               {!meta.numbered && '（锚点仍为 [n]，列表按引用序渲染）'}
             </div>
@@ -159,9 +169,6 @@ export function WritingCitations({
             ))}
           </div>
         )}
-        <div className="mt-2 border-t border-slate-100 dark:border-slate-800 pt-2">
-          {renderDocExporter}
-        </div>
       </div>
 
       {/* 历史记录 */}
@@ -226,7 +233,7 @@ function CitationPickerModal({
                     {cited && <span className="font-mono text-teal-600 dark:text-teal-400 mr-1">[{citedIdx + 1}]</span>}
                     {r.title}
                   </div>
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500">{[r.year, r.venue].filter(Boolean).join(' · ')}</div>
+                  <div className="text-[11px] text-slate-400 dark:text-slate-500">{[r.year, r.venue].filter(Boolean).join(' · ')}</div>
                 </div>
                 <Button
                   variant="outline"

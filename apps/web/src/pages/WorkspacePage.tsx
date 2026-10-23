@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Brain, Check, ExternalLink, FilePlus2, Loader2, PlayCircle, Send, Square, Workflow } from 'lucide-react';
+import { Brain, Check, Copy, ExternalLink, FilePlus2, Globe, Loader2, PlayCircle, RotateCcw, Send, Sparkles, Square, Trash2, Workflow } from 'lucide-react';
 import { Streamdown } from 'streamdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { api, streamChat } from '../api/client';
+import { applyStreamDelta } from '../api/stream-accumulator';
 import type { ChatSource, Doc, PipelineTask, Project } from '../types';
-import { Badge, Button, Empty, Input } from '../components/ui';
+import { Badge, Button, ConfirmDialog, Empty, Input } from '../components/ui';
 import { WritingPreview } from './writing/WritingPreview';
 
 /**
@@ -72,6 +76,10 @@ export function WorkspacePage({
   const [topic, setTopic] = useState('');
   const [showRun, setShowRun] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [webSearch, setWebSearch] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const abortRef = useRef<(() => void) | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
 
@@ -120,6 +128,49 @@ export function WorkspacePage({
     requestAnimationFrame(() => threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }));
   }, []);
 
+  /** 复制单条消息（带 1.5s 勾选反馈） */
+  const copyMsg = useCallback(async (i: number) => {
+    try {
+      await navigator.clipboard.writeText(messages[i].content);
+      setCopiedIdx(i);
+      window.setTimeout(() => setCopiedIdx((c) => (c === i ? null : c)), 1500);
+    } catch {
+      /* 剪贴板不可用（http 非安全上下文等）：静默失败不打断对话 */
+    }
+  }, [messages]);
+
+  /** 删除单条消息 */
+  const deleteMsg = useCallback((i: number) => {
+    setMessages((ms) => ms.filter((_, k) => k !== i));
+  }, []);
+
+  /** 重新生成第 i 条 assistant 消息：回到其前置历史重发 */
+  const regenerate = useCallback((i: number) => {
+    const j = i - 1;
+    if (j < 0 || streaming) return;
+    const text = messages[j]?.content || '';
+    if (!text) return;
+    setMessages((ms) => ms.slice(0, j));
+    setStreaming(true);
+    setMessages((ms) => [...ms, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true }]);
+    const history = messages.slice(0, j).filter((x) => !x.streaming).map((x) => ({ role: x.role, content: x.content }));
+    const updateLast = (patch: Partial<ThreadMessage>) =>
+      setMessages((ms) => ms.map((x, k) => (k === ms.length - 1 ? { ...x, ...patch } : x)));
+    abortRef.current = streamChat({
+      message: text,
+      history,
+      projectId: project.id,
+      docContext: activeDoc && effectiveDocId ? `当前文档《${activeDoc.title}》正文（片段）：
+${(activeDoc.content || '').slice(0, 1500)}` : undefined,
+      onDelta: (fullText) => updateLast({ content: fullText }),
+      onReasoning: (full) => updateLast({ reasoning: full }),
+      onSources: (src) => updateLast({ sources: src }),
+      onUsage: (u) => updateLast({ usage: u }),
+      onDone: () => { setStreaming(false); updateLast({ streaming: false }); abortRef.current = null; },
+      onError: (msg) => { setStreaming(false); updateLast({ streaming: false, content: messages[j + 1]?.content || `（出错了：${msg}）`, stopped: true }); abortRef.current = null; },
+    });
+  }, [messages, streaming, project.id, activeDoc, effectiveDocId]);
+
   const send = useCallback(() => {
     const text = input.trim();
     if (!text || streaming) return;
@@ -134,6 +185,7 @@ export function WorkspacePage({
       message: text,
       history,
       projectId: project.id,
+      webSearch: webSearch || undefined,
       docContext:
         [
           activeDoc && effectiveDocId ? `当前文档《${activeDoc.title}》正文（片段）：\n${(activeDoc.content || '').slice(0, 1500)}` : '',
@@ -141,14 +193,36 @@ export function WorkspacePage({
         ]
           .filter(Boolean)
           .join('\n\n') || undefined,
-      onDelta: (d) => { updateLast((x) => ({ content: (x.content || '') + d })); scrollToBottom(); },
-      onReasoning: (r) => { updateLast((x) => ({ reasoning: (x.reasoning || '') + r })); scrollToBottom(); },
+      // onDelta/onReasoning 回调参数是「累积全文」——用统一的 applyStreamDelta 覆盖，禁止追加拼接
+      onDelta: (fullText) => {
+        updateLast((x) => applyStreamDelta({ content: x.content, reasoning: x.reasoning ?? '' }, { content: fullText }));
+        scrollToBottom();
+      },
+      onReasoning: (full) => {
+        updateLast((x) => ({ reasoning: applyStreamDelta({ content: x.content, reasoning: x.reasoning ?? '' }, { reasoning: full }).reasoning }));
+        scrollToBottom();
+      },
       onSources: (s) => updateLast({ sources: s }),
       onUsage: (u) => updateLast({ usage: u }),
       onDone: () => { setStreaming(false); updateLast({ streaming: false }); abortRef.current = null; },
       onError: (msg) => { setStreaming(false); updateLast((x) => ({ streaming: false, content: x.content || `（出错了：${msg}）`, stopped: true })); abortRef.current = null; },
     });
-  }, [input, streaming, messages, project.id, activeDoc, effectiveDocId, sessionContext, scrollToBottom]);
+  }, [input, streaming, messages, project.id, activeDoc, effectiveDocId, sessionContext, scrollToBottom, webSearch]);
+
+  // Esc 全局停止（生成中）：挂在 window 上，不依赖输入框焦点
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && abortRef.current) {
+        e.preventDefault();
+        abortRef.current();
+        abortRef.current = null;
+        setStreaming(false);
+        setMessages((ms) => ms.map((x, i) => (i === ms.length - 1 ? { ...x, streaming: false, stopped: true } : x)));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const stop = useCallback(() => {
     abortRef.current?.();
@@ -205,9 +279,9 @@ export function WorkspacePage({
   return (
     <div className="h-full flex flex-col gap-3">
       {/* 顶栏：文档流 & 流水线入口 */}
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
         <select
-          className="rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 text-sm bg-white dark:bg-slate-900 outline-none max-w-[280px]"
+          className="rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 text-sm bg-white dark:bg-slate-900 outline-none max-w-[min(60vw,220px)] sm:max-w-[280px] min-w-0"
           value={effectiveDocId ?? ''}
           onChange={(e) => setDocId(e.target.value || null)}
         >
@@ -228,8 +302,13 @@ export function WorkspacePage({
           <Brain size={14} /> 历史会话
         </Button>
         {messages.length > 0 && (
-          <Button variant="ghost" onClick={() => { setMessages([]); setSessionContext(null); }} title="清空当前对话">
+          <Button variant="ghost" onClick={() => setConfirmClear(true)} title="清空当前对话">
             清空对话
+          </Button>
+        )}
+        {effectiveDocId && (
+          <Button variant="outline" className="lg:hidden" onClick={() => setShowPreview(true)} title="查看文档预览">
+            <ExternalLink size={14} /> 预览
           </Button>
         )}
         {effectiveDocId && (
@@ -262,7 +341,7 @@ export function WorkspacePage({
                 onClick={() => setSessionContext(sessionContext === sess.summary ? null : sess.summary)}
               >
                 <div className="text-slate-700 dark:text-slate-200 line-clamp-2">{sess.summary || '（无摘要）'}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">
+                <div className="text-[11px] text-slate-400 mt-0.5">
                   {new Date(sess.createdAt).toLocaleString()} · {sess.messageCount} 条消息 · {sess.totalTokens} tokens
                 </div>
               </button>
@@ -293,36 +372,89 @@ export function WorkspacePage({
         <div className="flex-1 min-w-0 flex flex-col rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
           <div ref={threadRef} data-testid="chat-thread" className="flex-1 overflow-y-auto p-3.5 space-y-3">
             {messages.length === 0 && (
-              <Empty text="开始与 SciFlow 对话" hint="让 AI 起草章节、润色、答疑；或点上方「运行流水线」一键成稿——产物会出现在右侧预览" />
+              <div className="pt-4">
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <div className="w-11 h-11 rounded-xl brand-logo flex items-center justify-center">
+                    <Sparkles size={19} className="text-white" aria-hidden="true" />
+                  </div>
+                  <div className="text-sm font-medium text-slate-600 dark:text-slate-300">开始与 SciFlow 对话</div>
+                  <div className="text-xs text-slate-400 dark:text-slate-500 max-w-md">
+                    让 AI 起草章节、润色、答疑；或点上方「运行流水线」一键成稿——产物可在预览中查看
+                  </div>
+                </div>
+                <div className="mt-5 grid sm:grid-cols-2 gap-2 max-w-2xl mx-auto">
+                  {[
+                    { t: '起草一段引言', d: '基于当前文档与知识库', q: '请基于当前文档和知识库资料，起草「引言」一节（600 字左右，学术风格，引用使用 [n] 锚点）。' },
+                    { t: '润色这段正文', d: '提升表达与逻辑', q: '请润色当前文档正文，提升学术表达与逻辑连贯性，并说明主要修改点。' },
+                    { t: '找研究空白', d: '从文献库归纳', q: '请基于我的文献库，找出该方向尚未被充分研究的问题，并给出 3 个可执行的选题。' },
+                    { t: '解释一个概念', d: '由浅入深 + 例子', q: '请由浅入深解释图神经网络的消息传递机制，并给一个直观例子。' },
+                  ].map((c) => (
+                    <button
+                      key={c.t}
+                      onClick={() => setInput(c.q)}
+                      className="text-left rounded-xl border border-slate-200 dark:border-slate-700 bg-[var(--card)] p-3 hover:border-teal-400 hover:bg-teal-50/40 dark:hover:bg-teal-900/10 transition-colors"
+                    >
+                      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                        <Sparkles size={12} className="text-teal-600" aria-hidden="true" /> {c.t}
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">{c.d}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             {messages.map((m, i) => (
               <div key={i}>
                 {m.role === 'user' ? (
-                  <div className="ml-auto max-w-[85%] w-fit rounded-2xl bg-teal-600/10 dark:bg-teal-400/10 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap">
-                    {m.content}
+                  <div className="group ml-auto max-w-[85%] w-fit flex flex-col items-end">
+                    <div className="rounded-2xl bg-teal-600/10 dark:bg-teal-400/10 px-3 py-2 text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words" data-testid="user-message">
+                      {m.content}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <button onClick={() => copyMsg(i)} className="p-1 rounded text-slate-400 hover:text-teal-600" title="复制" aria-label="复制提问">
+                        {copiedIdx === i ? <Check size={11} /> : <Copy size={11} />}
+                      </button>
+                      <button onClick={() => deleteMsg(i)} className="p-1 rounded text-slate-400 hover:text-rose-500" title="删除这条消息" aria-label="删除提问">
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="max-w-full text-sm leading-relaxed text-slate-700 dark:text-slate-200">
+                  <div className="group max-w-full min-w-0 text-sm leading-relaxed text-slate-700 dark:text-slate-200" data-testid="assistant-message">
                     {m.reasoning ? (
                       <details className="mb-1.5">
                         <summary className="cursor-pointer select-none text-[11px] font-medium text-teal-700 dark:text-teal-300 flex items-center gap-1">
                           <Brain size={11} /> 思考过程
                         </summary>
-                        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 border-l-2 border-teal-300 dark:border-teal-700 pl-2 max-h-32 overflow-y-auto">{m.reasoning}</div>
+                        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 border-l-2 border-teal-300 dark:border-teal-700 pl-2 max-h-32 overflow-y-auto" data-testid="assistant-reasoning">{m.reasoning}</div>
                       </details>
                     ) : null}
-                    {m.content ? <Streamdown mode={m.streaming ? 'streaming' : 'static'}>{m.content}</Streamdown> : m.streaming ? <Loader2 size={13} className="animate-spin text-teal-500" /> : null}
+                    {m.content ? <Streamdown mode={m.streaming ? 'streaming' : 'static'} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{m.content}</Streamdown> : m.streaming ? <Loader2 size={13} className="animate-spin text-teal-500" /> : null}
                     {m.sources && m.sources.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {m.sources.slice(0, 4).map((s, k) => (
-                          <span key={k} className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-slate-400" title={s.chunkText?.slice(0, 200)}>
+                          <span key={k} className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-500 dark:text-slate-400" title={s.chunkText?.slice(0, 200)}>
                             📄 {s.docName} · {(s.score ?? 0).toFixed?.(0) ?? s.score}
                           </span>
                         ))}
                       </div>
                     )}
                     {m.usage && !m.streaming && (
-                      <div className="mt-1 text-[10px] text-slate-400">↑{m.usage.prompt_tokens} ↓{m.usage.completion_tokens}</div>
+                      <div className="mt-1 text-[11px] text-slate-400">↑{m.usage.prompt_tokens} ↓{m.usage.completion_tokens}</div>
+                    )}
+                    {!m.streaming && (
+                      <div className="mt-1 flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <button onClick={() => copyMsg(i)} className="p-1 rounded text-slate-400 hover:text-teal-600" title="复制回答" aria-label="复制回答">
+                          {copiedIdx === i ? <Check size={12} className="text-teal-600" /> : <Copy size={12} />}
+                        </button>
+                        <button onClick={() => regenerate(i)} className="p-1 rounded text-slate-400 hover:text-teal-600" title="重新生成" aria-label="重新生成">
+                          <RotateCcw size={12} />
+                        </button>
+                        <button onClick={() => deleteMsg(i)} className="p-1 rounded text-slate-400 hover:text-rose-500" title="删除这条回答" aria-label="删除回答">
+                          <Trash2 size={12} />
+                        </button>
+                        {m.stopped && <span className="text-[11px] text-amber-600 dark:text-amber-400 ml-1">已停止</span>}
+                      </div>
                     )}
                   </div>
                 )}
@@ -343,7 +475,7 @@ export function WorkspacePage({
                   {task.steps.map((s) => (
                     <span
                       key={s.key}
-                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] ${
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] ${
                         s.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
                         : s.status === 'failed' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
                         : s.status === 'running' || s.status === 'scored' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300'
@@ -397,6 +529,17 @@ export function WorkspacePage({
 
           {/* 输入区 */}
           <div className="border-t border-slate-100 dark:border-slate-800 p-2.5 shrink-0">
+            <div className="flex items-center gap-2 mb-1.5">
+              <button
+                onClick={() => setWebSearch((v) => !v)}
+                aria-pressed={webSearch}
+                className={`flex items-center gap-1 text-[11px] rounded-md px-1.5 py-1 border transition-colors ${webSearch ? 'bg-teal-50 dark:bg-teal-500/10 border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300' : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}
+                title="联网搜索：本轮回答会检索公开网页"
+              >
+                <Globe size={12} /> 联网{webSearch ? '已开' : ''}
+              </button>
+              <span className="text-[11px] text-slate-400">⌘/Ctrl+Enter 发送 · Esc 停止</span>
+            </div>
             <div className="flex items-end gap-2">
               <textarea
                 rows={2}
@@ -434,11 +577,37 @@ export function WorkspacePage({
             {activeDoc ? (
               <WritingPreview content={activeDoc.content || ''} editorMode="preview" exported={[]} />
             ) : (
-              <Empty text="暂无文档" hint="在下方对话让 AI 起草，或运行流水线自动成稿" />
+              <Empty illustration="documents" text="还没有文档" hint="在下方对话让 AI 起草，或运行流水线自动成稿" />
             )}
           </div>
         </div>
       </div>
+
+      {/* 窄屏文档预览（lg 以下此前直接消失，768/390 用户看不到产物） */}
+      {showPreview && (
+        <>
+          <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={() => setShowPreview(false)} aria-hidden="true" />
+          <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[520px] max-w-full bg-[var(--card)] border-l border-slate-200 dark:border-slate-800 flex flex-col lg:hidden" role="dialog" aria-modal="true" aria-label="文档预览">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-xs font-semibold truncate">{activeDoc?.title || '文档预览'}</span>
+              <button className="ml-auto text-[11px] text-slate-400 hover:text-rose-500" onClick={() => setShowPreview(false)} aria-label="关闭预览">关闭</button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {activeDoc ? <WritingPreview content={activeDoc.content || ''} editorMode="preview" exported={[]} /> : <Empty text="暂无文档" />}
+            </div>
+          </div>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="清空当前对话？"
+        description="将删除当前对话面板中的全部消息（已保存的历史会话不受影响）。此操作不可撤销。"
+        confirmText="清空"
+        danger
+        onClose={() => setConfirmClear(false)}
+        onConfirm={() => { setMessages([]); setSessionContext(null); setConfirmClear(false); }}
+      />
     </div>
   );
 }
