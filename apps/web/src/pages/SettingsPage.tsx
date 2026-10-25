@@ -11,6 +11,7 @@ import { ProviderManager } from './settings/ProviderManager';
 import { WebSearchSettings } from './settings/WebSearchSettings';
 import { UsageStats } from './settings/UsageStats';
 import { McpToolList } from './settings/McpToolList';
+import { PersonaSettings } from './settings/PersonaSettings';
 
 const ModelIcon = ({ ok }: { ok?: boolean }) =>
   ok === undefined ? null : ok ? <CheckCircle2 size={16} className="text-emerald-500" /> : <XCircle size={16} className="text-rose-500" />;
@@ -313,6 +314,7 @@ function SettingsLayout() {
 
   const sections = [
     { id: 'settings-ai', label: 'AI 服务' },
+    { id: 'settings-persona', label: '角色与技能' },
     { id: 'settings-usage', label: '用量成本' },
     { id: 'settings-providers', label: '模型路由' },
     { id: 'settings-web', label: '联网搜索' },
@@ -376,6 +378,9 @@ function SettingsLayout() {
           </div>
         )}
       </Card>
+
+      {/* 角色与技能（persona + skills） */}
+      <PersonaSettings />
 
       {/* Usage Stats */}
       <div id="settings-usage"><UsageStats /></div>
