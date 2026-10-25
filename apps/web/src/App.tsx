@@ -83,7 +83,7 @@ const VIEW_LABELS: Record<View, string> = {
 };
 
 /** 导航按「核心工作 → 自动化 → 记录与洞察」三段叙事（名称唯一来源 = VIEW_LABELS） */
-const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: typeof LayoutDashboard }[] }[] = [
+const NAV_GROUPS: { label: string; defaultCollapsed?: boolean; items: { key: View; label: string; icon: typeof LayoutDashboard }[] }[] = [
   {
     label: '核心工作',
     items: [
@@ -95,6 +95,7 @@ const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: type
   },
   {
     label: '自动化',
+    defaultCollapsed: true,
     items: [
       { key: 'pipeline', label: VIEW_LABELS.pipeline, icon: Workflow },
       { key: 'quality', label: VIEW_LABELS.quality, icon: Gauge },
@@ -103,6 +104,7 @@ const NAV_GROUPS: { label: string; items: { key: View; label: string; icon: type
   },
   {
     label: '记录与洞察',
+    defaultCollapsed: true,
     items: [
       { key: 'dashboard', label: VIEW_LABELS.dashboard, icon: LayoutGrid },
       { key: 'experiments', label: VIEW_LABELS.experiments, icon: Beaker },
@@ -540,7 +542,7 @@ function SidebarContent({
       {/* 导航 */}
       <nav className="shrink-0" aria-label="功能导航">
         {NAV_GROUPS.map((g) => (
-          <ShellNavGroup key={g.label} label={g.label}>
+          <ShellNavGroup key={g.label} label={g.label} defaultCollapsed={g.defaultCollapsed}>
             {g.items.map((n) => {
               const Icon = n.icon;
               return (

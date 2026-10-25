@@ -668,7 +668,14 @@ kbd {
   padding: 4px 8px;
   font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--muted-foreground);
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  transition: background-color 0.12s ease;
 }
+.shell-nav-group__label:hover { background: color-mix(in srgb, var(--muted-foreground) 8%, transparent); }
 .shell-nav-item {
   display: flex; align-items: center; gap: 10px;
   width: 100%;
