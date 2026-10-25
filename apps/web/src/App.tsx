@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { api } from './api/client';
 import { isNetworkError } from './api/core';
-import type { KnowledgeDoc, Project, Reference } from './types';
+import type { KnowledgeSearchHit, Project, Reference } from './types';
 import { errMsg } from './components/ui';
 import { applyTheme, readStoredTheme, resolveTheme, systemPrefersDark, THEME_OPTIONS, type ThemeMode } from './lib/theme';
 import { AuthGate } from './components/AuthGate';
@@ -672,11 +672,12 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
   const filtered = useMemo(() => filterCommands(commands, q), [commands, q]);
   const [active, setActive] = useState(0);
 
-  /* ---- 差距#18：内容搜索（文献 references.search + 知识库 list 前端过滤） ---- */
-  // 后端未暴露 knowledge.search 单端，知识库退化为 list 后按文档名前端过滤；
-  // 文献走 references.search（服务端检索）。两者并行，250ms 防抖。
+  /* ---- 差距#18：内容搜索（文献 references.search + 知识库 knowledge.search） ---- */
+  // 文献走 references.search（服务端检索）；知识库走 knowledge.search（服务端 BM25+向量，
+  // 按 docId 聚合去重展示）。两者并行，250ms 防抖。
   const [docHits, setDocHits] = useState<Reference[]>([]);
-  const [kbHits, setKbHits] = useState<KnowledgeDoc[]>([]);
+  // 知识库命中文块按文档聚合（hits=聚合命中数）
+  const [kbHits, setKbHits] = useState<(KnowledgeSearchHit & { hits: number })[]>([]);
   const [searching, setSearching] = useState(false);
   const qTrim = q.trim();
   const searchActive = !!projectId && qTrim.length >= 2;
@@ -686,14 +687,28 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
     const timer = setTimeout(async () => {
       if (cancelled) return;
       setSearching(true);
-      const [refRes, docRes] = await Promise.allSettled([
+      const [refRes, kbRes] = await Promise.allSettled([
         api.references.search(qTrim, 6, projectId),
-        api.knowledge.list(projectId),
+        api.knowledge.search(projectId, qTrim),
       ]);
       if (cancelled) return;
       const refs = refRes.status === 'fulfilled' ? refRes.value : [];
-      const allDocs = docRes.status === 'fulfilled' ? docRes.value : [];
-      const kb = allDocs.filter((d) => d.name.toLowerCase().includes(qTrim.toLowerCase())).slice(0, 6);
+      // 命中文块按文档聚合：每文档取最高分块，展示「文档名 + N 处命中」
+      const hits = kbRes.status === 'fulfilled' ? kbRes.value : [];
+      const byDoc = new Map<string, KnowledgeSearchHit & { hits: number }>();
+      for (const h of hits) {
+        const key = h.docId;
+        const prev = byDoc.get(key);
+        if (prev) {
+          prev.hits += 1;
+          if (h.score > prev.score) {
+            byDoc.set(key, { ...h, hits: prev.hits });
+          }
+        } else {
+          byDoc.set(key, { ...h, hits: 1 });
+        }
+      }
+      const kb = [...byDoc.values()].sort((a, b) => b.score - a.score).slice(0, 6);
       setDocHits(refs);
       setKbHits(kb);
       setSearching(false);
@@ -786,8 +801,8 @@ function CommandPalette({ onClose, onNavigate, onNewProject, projectId }: { onCl
                   className="w-full flex items-center justify-between gap-2 px-4 py-1.5 text-left text-[13px] hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors"
                 >
                   <span className="min-w-0">
-                    <span className="text-slate-700 dark:text-slate-200 truncate block">{d.name}</span>
-                    <span className="text-[11px] text-slate-400">{d.type} · {d.chunkCount} 分块</span>
+                    <span className="text-slate-700 dark:text-slate-200 truncate block">{d.docName}</span>
+                    <span className="text-[11px] text-slate-400">{d.hits} 处命中 · 片段「{d.context.slice(0, 26)}…」</span>
                   </span>
                   <span className="text-[11px] text-sky-500 shrink-0">知识库 → 知识库</span>
                 </button>
