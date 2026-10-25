@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HashRouter, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageErrorBoundary } from './components/PageErrorBoundary';
 import {
-  BookOpen, Brain, Beaker, LayoutDashboard, Plus, RefreshCw, Search, Send, Settings, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon, Gauge, Library, LayoutGrid, Menu as MenuIcon,
+  BookOpen, Brain, Beaker, LayoutDashboard, Plus, Pencil, RefreshCw, Search, Send, Settings, Trash2, Workflow, BookMarked, ChevronRight, Command, Sun, Moon, Monitor, XCircle as XCircleIcon, Gauge, Library, LayoutGrid, Menu as MenuIcon,
 } from 'lucide-react';
 import { api } from './api/client';
 import { isNetworkError } from './api/core';
@@ -532,8 +532,8 @@ function SidebarContent({
   const { closeSidebar } = useAppShell();
   return (
     <>
-      {/* 品牌区 */}
-      <div className="px-4 pb-2 pt-4">
+      {/* 品牌区（墨流 2.0 氛围：光晕 + 渐变分隔线） */}
+      <div className="shell-brand-zone px-4 pb-3 pt-4">
         <BrandLockup />
       </div>
 
@@ -558,7 +558,7 @@ function SidebarContent({
         <div className="relative pt-2">
           <Search size={13} className="absolute left-2.5 top-[13px] text-slate-400" aria-hidden="true" />
           <input
-            className="w-full rounded-lg bg-slate-100 py-1.5 pl-8 pr-2 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:bg-white focus:ring-1 focus:ring-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:focus:bg-slate-700"
+            className="w-full rounded-lg bg-slate-100 py-1.5 pl-8 pr-2 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:bg-white focus:ring-1 focus:ring-teal-500/50 dark:bg-slate-800 dark:text-slate-200 dark:focus:bg-slate-700 dark:focus:ring-teal-400/40"
             placeholder="搜索项目…"
             value={projectQuery}
             onChange={(e) => onProjectQuery(e.target.value)}
@@ -596,7 +596,7 @@ function SidebarContent({
               <span className="truncate">{p.name}</span>
               <span className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                 <button
-                  className="flex h-7 w-7 items-center justify-center rounded text-[11px] text-slate-400 hover:bg-slate-200/70 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                  className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-200/70 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
                   title="重命名项目"
                   aria-label={`重命名项目 ${p.name}`}
                   onClick={(e) => {
@@ -604,7 +604,7 @@ function SidebarContent({
                     onRenameProject(p);
                   }}
                 >
-                  改
+                  <Pencil size={12} aria-hidden="true" />
                 </button>
                 <button
                   className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30"
