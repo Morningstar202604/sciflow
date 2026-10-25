@@ -1054,3 +1054,9 @@ kbd {
   transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
 .settings-nav__item:hover { background: var(--muted); color: var(--foreground); }
+.settings-nav__item--active {
+  background: var(--brand-grad);
+  color: #fff;
+  font-weight: 600;
+}
+.settings-nav__item--active:hover { background: var(--brand-grad); color: #fff; }
